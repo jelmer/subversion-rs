@@ -77,6 +77,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ctor"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "37e366bff8cd32dd8754b0991fb66b279dc48f598c3a18914852a6673deef583"
+dependencies = [
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "either"
 version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -334,9 +344,11 @@ checksum = "942b4a808e05215192e39f4ab80813e599068285906cc91aa64f923db842bd5a"
 
 [[package]]
 name = "subversion"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "bindgen",
+ "ctor",
+ "lazy_static",
  "pkg-config",
  "system-deps",
 ]

@@ -1,6 +1,6 @@
 [package]
 name = "subversion"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2021"
 authors = ["Jelmer Vernooĳ <jelmer@apache.org>"]
 repository = "https://github.com/jelmer/subversion-rs.git"
@@ -12,6 +12,8 @@ description = "Rust bindings for Subversion"
 doctest = false
 
 [dependencies]
+ctor = "0.2.5"
+lazy_static = "1.4.0"
 
 [build-dependencies]
 bindgen = "0.68"
@@ -20,3 +22,4 @@ system-deps = "6.2"
 
 [package.metadata.system-deps]
 libsvn_client = "*"
+libsvn_subr = "*"
