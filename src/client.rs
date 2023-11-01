@@ -1,8 +1,9 @@
-use crate::apr::Pool;
 use crate::generated::{
-    svn_client_checkout3, svn_client_create_context2, svn_client_ctx_t, svn_client_version,
+    svn_client_add5, svn_client_checkout3, svn_client_create_context2, svn_client_ctx_t,
+    svn_client_mkdir4, svn_client_switch3, svn_client_update4, svn_client_version,
 };
 use crate::{Depth, Error, Revision, Revnum, Version};
+use apr::Pool;
 
 pub fn version() -> Version {
     unsafe {
@@ -57,6 +58,114 @@ impl Context {
             );
             if err.is_null() {
                 Ok(revnum)
+            } else {
+                Err(Error(err))
+            }
+        }
+    }
+
+    pub fn update(
+        &mut self,
+        paths: &[&str],
+        revision: Revision,
+        depth: Depth,
+        depth_is_sticky: bool,
+        ignore_externals: bool,
+        allow_unver_obstructions: bool,
+        adds_as_modifications: bool,
+        make_parents: bool,
+    ) -> Result<Vec<Revnum>, Error> {
+        let mut pool = Pool::default();
+        let mut result_revs = std::ptr::null_mut();
+        unsafe {
+            let mut ps = apr::tables::ArrayHeader::new::<*const i8>(&mut pool, paths.len());
+            for path in paths {
+                let path = std::ffi::CString::new(*path).unwrap();
+                ps.push(path.as_ptr() as *mut std::ffi::c_void);
+            }
+
+            let err = svn_client_update4(
+                &mut result_revs,
+                ps.into(),
+                &revision.into(),
+                depth.into(),
+                depth_is_sticky.into(),
+                ignore_externals.into(),
+                allow_unver_obstructions.into(),
+                adds_as_modifications.into(),
+                make_parents.into(),
+                self.0,
+                (&mut pool).into(),
+            );
+            let result_revs: apr::tables::ArrayHeader = result_revs.into();
+            if err.is_null() {
+                Ok(result_revs.iter().map(|r| r as Revnum).collect())
+            } else {
+                Err(Error(err))
+            }
+        }
+    }
+
+    pub fn switch(
+        &mut self,
+        path: &std::path::Path,
+        url: &str,
+        peg_revision: Revision,
+        revision: Revision,
+        depth: Depth,
+        depth_is_sticky: bool,
+        ignore_externals: bool,
+        allow_unver_obstructions: bool,
+        make_parents: bool,
+    ) -> Result<Revnum, Error> {
+        let mut pool = Pool::default();
+        let mut result_rev = 0;
+        unsafe {
+            let err = svn_client_switch3(
+                &mut result_rev,
+                path.to_str().unwrap().as_ptr() as *const i8,
+                url.as_ptr() as *const i8,
+                &peg_revision.into(),
+                &revision.into(),
+                depth.into(),
+                depth_is_sticky.into(),
+                ignore_externals.into(),
+                allow_unver_obstructions.into(),
+                make_parents.into(),
+                self.0,
+                (&mut pool).into(),
+            );
+            if err.is_null() {
+                Ok(result_rev)
+            } else {
+                Err(Error(err))
+            }
+        }
+    }
+
+    pub fn add(
+        &mut self,
+        path: &std::path::Path,
+        depth: Depth,
+        force: bool,
+        no_ignore: bool,
+        no_autoprops: bool,
+        add_parents: bool,
+    ) -> Result<(), Error> {
+        let mut pool = Pool::default();
+        unsafe {
+            let err = svn_client_add5(
+                path.to_str().unwrap().as_ptr() as *const i8,
+                depth.into(),
+                force.into(),
+                no_ignore.into(),
+                no_autoprops.into(),
+                add_parents.into(),
+                self.0,
+                (&mut pool).into(),
+            );
+            if err.is_null() {
+                Ok(())
             } else {
                 Err(Error(err))
             }

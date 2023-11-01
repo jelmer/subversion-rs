@@ -1,7 +1,7 @@
 use subversion::{Depth, Revision};
 
 fn main() {
-    let mut pool = subversion::apr::Pool::default();
+    let mut pool = apr::Pool::default();
     let ctx = subversion::client::Context::new(&mut pool);
 
     ctx.checkout(
