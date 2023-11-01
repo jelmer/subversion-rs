@@ -12,36 +12,16 @@ fn create_svn_bindings(out_path: &std::path::Path) {
         .find(|x| x.join("svn_client.h").exists())
         .expect("Failed to find svn_client.h");
 
-    let pc_apr = pkg_config::Config::new()
-        .probe("apr-1")
-        .unwrap_or_else(|e| panic!("Failed to find apr library: {}", e));
-
-    let apr_path = pc_apr
-        .include_paths
-        .iter()
-        .find(|x| x.join("apr.h").exists())
-        .expect("Failed to find apr.h");
-
     // Generate bindings using bindgen
     let svn_bindings = bindgen::Builder::default()
         .header(svn_path.join("svn_client.h").to_str().unwrap())
         .header(svn_path.join("svn_version.h").to_str().unwrap())
         .header(svn_path.join("svn_error.h").to_str().unwrap())
-        .header(apr_path.join("apr.h").to_str().unwrap())
-        .header(apr_path.join("apr_allocator.h").to_str().unwrap())
-        .header(apr_path.join("apr_general.h").to_str().unwrap())
-        .header(apr_path.join("apr_errno.h").to_str().unwrap())
-        .header(apr_path.join("apr_pools.h").to_str().unwrap())
-        .header(apr_path.join("apr_version.h").to_str().unwrap())
         .allowlist_file(".*/svn_client.h")
         .allowlist_file(".*/svn_version.h")
         .allowlist_file(".*/svn_error.h")
-        .allowlist_file(".*/apr.h")
-        .allowlist_file(".*/apr_general.h")
-        .allowlist_file(".*/apr_allocator.h")
-        .allowlist_file(".*/apr_version.h")
-        .allowlist_file(".*/apr_errno.h")
-        .allowlist_file(".*/apr_pools.h")
+        .blocklist_type("apr_.*")
+        .derive_default(true)
         .clang_args(
             pc_svn
                 .include_paths

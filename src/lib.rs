@@ -1,4 +1,3 @@
-pub mod apr;
 pub mod client;
 mod generated;
 use crate::generated::{svn_error_t, svn_opt_revision_t, svn_opt_revision_value_t, svn_version_t};
@@ -132,35 +131,56 @@ impl From<Revision> for svn_opt_revision_t {
         match revision {
             Revision::Unspecified => svn_opt_revision_t {
                 kind: generated::svn_opt_revision_kind_svn_opt_revision_unspecified,
-                value: svn_opt_revision_value_t { number: 0 },
+                value: svn_opt_revision_value_t::default(),
             },
-            Revision::Number(revnum) => svn_opt_revision_t {
-                kind: generated::svn_opt_revision_kind_svn_opt_revision_number,
-                value: svn_opt_revision_value_t { number: revnum },
-            },
-            Revision::Date(date) => svn_opt_revision_t {
-                kind: generated::svn_opt_revision_kind_svn_opt_revision_date,
-                value: svn_opt_revision_value_t { date },
-            },
+            Revision::Number(revnum) => {
+                let mut uf = crate::generated::__BindgenUnionField::<i64>::new();
+                unsafe {
+                    *uf.as_mut() = revnum;
+                }
+
+                svn_opt_revision_t {
+                    kind: generated::svn_opt_revision_kind_svn_opt_revision_number,
+                    value: svn_opt_revision_value_t {
+                        number: uf,
+                        ..Default::default()
+                    },
+                }
+            }
+            Revision::Date(date) => {
+                let mut uf = crate::generated::__BindgenUnionField::<i64>::new();
+
+                unsafe {
+                    *uf.as_mut() = date;
+                }
+
+                svn_opt_revision_t {
+                    kind: generated::svn_opt_revision_kind_svn_opt_revision_date,
+                    value: svn_opt_revision_value_t {
+                        date: uf,
+                        ..Default::default()
+                    },
+                }
+            }
             Revision::Committed => svn_opt_revision_t {
                 kind: generated::svn_opt_revision_kind_svn_opt_revision_committed,
-                value: svn_opt_revision_value_t { number: 0 },
+                value: svn_opt_revision_value_t::default(),
             },
             Revision::Previous => svn_opt_revision_t {
                 kind: generated::svn_opt_revision_kind_svn_opt_revision_previous,
-                value: svn_opt_revision_value_t { number: 0 },
+                value: svn_opt_revision_value_t::default(),
             },
             Revision::Base => svn_opt_revision_t {
                 kind: generated::svn_opt_revision_kind_svn_opt_revision_base,
-                value: svn_opt_revision_value_t { number: 0 },
+                value: svn_opt_revision_value_t::default(),
             },
             Revision::Working => svn_opt_revision_t {
                 kind: generated::svn_opt_revision_kind_svn_opt_revision_working,
-                value: svn_opt_revision_value_t { number: 0 },
+                value: svn_opt_revision_value_t::default(),
             },
             Revision::Head => svn_opt_revision_t {
                 kind: generated::svn_opt_revision_kind_svn_opt_revision_head,
-                value: svn_opt_revision_value_t { number: 0 },
+                value: svn_opt_revision_value_t::default(),
             },
         }
     }
