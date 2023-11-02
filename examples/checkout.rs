@@ -1,8 +1,7 @@
 use subversion::{Depth, Revision};
 
 fn main() {
-    let mut pool = apr::Pool::default();
-    let ctx = subversion::client::Context::new(&mut pool);
+    let mut ctx = subversion::client::Context::new().unwrap();
 
     ctx.checkout(
         "http://svn.apache.org/repos/asf/subversion/trunk/subversion/libsvn_client",
