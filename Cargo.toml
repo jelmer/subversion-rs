@@ -22,5 +22,5 @@ pkg-config = "0.3"
 system-deps = "6.2"
 
 [package.metadata.system-deps]
-libsvn_client = "*"
-libsvn_subr = "*"
+libsvn_client = ""
+libsvn_subr = ""
