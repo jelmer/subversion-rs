@@ -102,14 +102,23 @@ impl<'pool> Context<'pool> {
         // call svn_client_create_context2
         Ok(Context(apr::pool::PooledPtr::initialize(|pool| {
             let mut ctx = std::ptr::null_mut();
-            let ret =
-                unsafe { svn_client_create_context2(&mut ctx, std::ptr::null_mut(), pool.into()) };
+            let ret = unsafe {
+                svn_client_create_context2(&mut ctx, std::ptr::null_mut(), pool.as_mut_ptr())
+            };
             if ret.is_null() {
                 Ok(ctx)
             } else {
                 Err(Error(ret))
             }
         })?))
+    }
+
+    pub fn as_mut_ptr(&mut self) -> *mut svn_client_ctx_t {
+        self.0.as_mut_ptr()
+    }
+
+    pub fn as_ptr(&self) -> *const svn_client_ctx_t {
+        self.0.as_ptr()
     }
 
     /// Checkout a working copy from url to path.
@@ -141,7 +150,7 @@ impl<'pool> Context<'pool> {
                 ignore_externals.into(),
                 allow_unver_obstructions.into(),
                 &mut *self.0,
-                (&mut pool).into(),
+                pool.as_mut_ptr(),
             );
             if err.is_null() {
                 Ok(revnum)
@@ -162,7 +171,7 @@ impl<'pool> Context<'pool> {
         adds_as_modifications: bool,
         make_parents: bool,
     ) -> Result<Vec<Revnum>, Error> {
-        let pool = std::rc::Rc::new(Pool::default());
+        let mut pool = std::rc::Rc::new(Pool::default());
         let mut result_revs = std::ptr::null_mut();
         unsafe {
             let mut ps = apr::tables::ArrayHeader::in_pool(&pool, paths.len());
@@ -173,7 +182,7 @@ impl<'pool> Context<'pool> {
 
             let err = svn_client_update4(
                 &mut result_revs,
-                ps.into(),
+                ps.as_ptr(),
                 &revision.into(),
                 depth.into(),
                 depth_is_sticky.into(),
@@ -182,7 +191,7 @@ impl<'pool> Context<'pool> {
                 adds_as_modifications.into(),
                 make_parents.into(),
                 &mut *self.0,
-                pool.as_ref().into(),
+                std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
             );
             let result_revs: apr::tables::ArrayHeader<Revnum> =
                 apr::tables::ArrayHeader::<Revnum>::from_raw_parts(&pool, result_revs);
@@ -221,7 +230,7 @@ impl<'pool> Context<'pool> {
                 allow_unver_obstructions.into(),
                 make_parents.into(),
                 &mut *self.0,
-                (&mut pool).into(),
+                pool.as_mut_ptr(),
             );
             if err.is_null() {
                 Ok(result_rev)
@@ -250,7 +259,7 @@ impl<'pool> Context<'pool> {
                 no_autoprops.into(),
                 add_parents.into(),
                 &mut *self.0,
-                (&mut pool).into(),
+                pool.as_mut_ptr(),
             );
             if err.is_null() {
                 Ok(())
@@ -267,7 +276,7 @@ impl<'pool> Context<'pool> {
         revprop_table: std::collections::HashMap<&str, &str>,
         commit_callback: &dyn FnMut(&crate::CommitInfo) -> Result<(), Error>,
     ) -> Result<(), Error> {
-        let pool = std::rc::Rc::new(Pool::default());
+        let mut pool = std::rc::Rc::new(Pool::default());
         unsafe {
             let mut rps = apr::hash::Hash::in_pool(&pool);
             for (k, v) in revprop_table {
@@ -280,13 +289,13 @@ impl<'pool> Context<'pool> {
             }
             let commit_callback = Box::into_raw(Box::new(commit_callback));
             let err = svn_client_mkdir4(
-                ps.into(),
+                ps.as_ptr(),
                 make_parents.into(),
-                rps.into(),
+                rps.as_ptr(),
                 Some(wrap_commit_callback2),
                 commit_callback as *mut std::ffi::c_void,
                 &mut *self.0,
-                pool.as_ref().into(),
+                std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
             );
             if err.is_null() {
                 Ok(())
@@ -304,7 +313,7 @@ impl<'pool> Context<'pool> {
         revprop_table: std::collections::HashMap<&str, &str>,
         commit_callback: &dyn FnMut(&crate::CommitInfo) -> Result<(), Error>,
     ) -> Result<(), Error> {
-        let pool = std::rc::Rc::new(Pool::default());
+        let mut pool = std::rc::Rc::new(Pool::default());
         unsafe {
             let mut rps = apr::hash::Hash::in_pool(&pool);
             for (k, v) in revprop_table {
@@ -317,14 +326,14 @@ impl<'pool> Context<'pool> {
             }
             let commit_callback = Box::into_raw(Box::new(commit_callback));
             let err = svn_client_delete4(
-                ps.into(),
+                ps.as_ptr(),
                 force.into(),
                 keep_local.into(),
-                rps.into(),
+                rps.as_ptr(),
                 Some(wrap_commit_callback2),
                 commit_callback as *mut std::ffi::c_void,
                 &mut *self.0,
-                pool.as_ref().into(),
+                std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
             );
             if err.is_null() {
                 Ok(())
@@ -346,7 +355,7 @@ impl<'pool> Context<'pool> {
         filter_callback: &dyn FnMut(&mut bool, &std::path::Path, &Dirent) -> Result<(), Error>,
         commit_callback: &dyn FnMut(&crate::CommitInfo) -> Result<(), Error>,
     ) -> Result<(), Error> {
-        let pool = std::rc::Rc::new(Pool::default());
+        let mut pool = std::rc::Rc::new(Pool::default());
         let mut rps = apr::hash::Hash::in_pool(&pool);
         for (k, v) in revprop_table {
             rps.set(k, &v);
@@ -362,13 +371,13 @@ impl<'pool> Context<'pool> {
                 no_ignore.into(),
                 no_autoprops.into(),
                 ignore_unknown_node_types.into(),
-                rps.into(),
+                rps.as_ptr(),
                 Some(wrap_filter_callback),
                 filter_callback as *mut std::ffi::c_void,
                 Some(wrap_commit_callback2),
                 commit_callback as *mut std::ffi::c_void,
                 &mut *self.0,
-                pool.as_ref().into(),
+                std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
             );
             if err.is_null() {
                 Ok(())
@@ -391,7 +400,7 @@ impl<'pool> Context<'pool> {
         revprop_table: std::collections::HashMap<&str, &str>,
         commit_callback: &dyn FnMut(&crate::CommitInfo) -> Result<(), Error>,
     ) -> Result<(), Error> {
-        let pool = std::rc::Rc::new(Pool::default());
+        let mut pool = std::rc::Rc::new(Pool::default());
         let mut rps = apr::hash::Hash::in_pool(&pool);
         for (k, v) in revprop_table {
             rps.set(k, &v);
@@ -412,19 +421,19 @@ impl<'pool> Context<'pool> {
             }
             let commit_callback = Box::into_raw(Box::new(commit_callback));
             let err = svn_client_commit6(
-                ps.into(),
+                ps.as_ptr(),
                 depth.into(),
                 keep_locks.into(),
                 keep_changelists.into(),
                 commit_as_operations.into(),
                 include_file_externals.into(),
                 include_dir_externals.into(),
-                cl.into(),
-                rps.into(),
+                cl.as_ptr(),
+                rps.as_ptr(),
                 Some(wrap_commit_callback2),
                 commit_callback as *mut std::ffi::c_void,
                 &mut *self.0,
-                pool.as_ref().into(),
+                std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
             );
             if err.is_null() {
                 Ok(())
@@ -448,7 +457,7 @@ impl<'pool> Context<'pool> {
         changelists: Option<&[&str]>,
         status_func: &dyn FnMut(&str, &Status) -> Result<(), Error>,
     ) -> Result<Revnum, Error> {
-        let pool = std::rc::Rc::new(Pool::default());
+        let mut pool = std::rc::Rc::new(Pool::default());
         let mut cl = apr::tables::ArrayHeader::in_pool(&pool, 0);
         if let Some(changelists) = changelists {
             for changelist in changelists {
@@ -472,10 +481,10 @@ impl<'pool> Context<'pool> {
                 no_ignore.into(),
                 ignore_externals.into(),
                 depth_as_sticky.into(),
-                cl.into(),
+                cl.as_ptr(),
                 Some(wrap_status_func),
                 status_func as *mut std::ffi::c_void,
-                pool.as_ref().into(),
+                std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
             );
             if err.is_null() {
                 Ok(revnum as Revnum)
@@ -516,18 +525,18 @@ impl<'pool> Context<'pool> {
             }
             let log_entry_receiver = Box::into_raw(Box::new(log_entry_receiver));
             let err = svn_client_log5(
-                ps.into(),
+                ps.as_ptr(),
                 &peg_revision.into(),
-                rrs.into(),
+                rrs.as_ptr(),
                 limit,
                 discover_changed_paths.into(),
                 strict_node_history.into(),
                 include_merged_revisions.into(),
-                rps.into(),
+                rps.as_ptr(),
                 Some(wrap_log_entry_receiver),
                 log_entry_receiver as *mut std::ffi::c_void,
                 &mut *self.0,
-                pool.as_ref().into(),
+                std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
             );
             if err.is_null() {
                 Ok(())
