@@ -99,6 +99,115 @@ impl<'pool> Repos<'pool> {
             }
         }
     }
+
+    pub fn remember_client_capabilities(
+        &mut self,
+        capabilities: &[&str],
+    ) -> Result<(), crate::Error> {
+        let capabilities = capabilities
+            .iter()
+            .map(|c| std::ffi::CString::new(*c).unwrap())
+            .collect::<Vec<_>>();
+        let capabilities_array = capabilities
+            .iter()
+            .map(|c| c.as_ptr())
+            .collect::<apr::tables::ArrayHeader<_>>();
+        let ret = unsafe {
+            crate::generated::svn_repos_remember_client_capabilities(
+                self.0.as_mut_ptr(),
+                capabilities_array.as_ptr(),
+            )
+        };
+        if ret.is_null() {
+            Ok(())
+        } else {
+            Err(crate::Error(ret))
+        }
+    }
+
+    pub fn fs(&mut self) -> Result<crate::fs::Fs<'pool>, crate::Error> {
+        unsafe {
+            Ok(crate::fs::Fs(PooledPtr::in_pool(
+                self.0.pool(),
+                crate::generated::svn_repos_fs(self.0.as_mut_ptr()),
+            )))
+        }
+    }
+
+    pub fn fs_type(&mut self) -> String {
+        let mut pool = apr::Pool::new();
+        let ret =
+            unsafe { crate::generated::svn_repos_fs_type(self.0.as_mut_ptr(), pool.as_mut_ptr()) };
+        let fs_type = unsafe { std::ffi::CStr::from_ptr(ret) };
+        fs_type.to_str().unwrap().to_string()
+    }
+
+    pub fn path(&mut self) -> std::path::PathBuf {
+        let mut pool = apr::Pool::new();
+        let ret =
+            unsafe { crate::generated::svn_repos_path(self.0.as_mut_ptr(), pool.as_mut_ptr()) };
+        let path = unsafe { std::ffi::CStr::from_ptr(ret) };
+        std::path::PathBuf::from(path.to_str().unwrap())
+    }
+
+    pub fn db_env(&mut self) -> std::path::PathBuf {
+        let mut pool = apr::Pool::new();
+        let ret =
+            unsafe { crate::generated::svn_repos_db_env(self.0.as_mut_ptr(), pool.as_mut_ptr()) };
+        let db_env = unsafe { std::ffi::CStr::from_ptr(ret) };
+        std::path::PathBuf::from(db_env.to_str().unwrap())
+    }
+
+    pub fn conf_dir(&mut self) -> std::path::PathBuf {
+        let mut pool = apr::Pool::new();
+        let ret =
+            unsafe { crate::generated::svn_repos_conf_dir(self.0.as_mut_ptr(), pool.as_mut_ptr()) };
+        let conf_dir = unsafe { std::ffi::CStr::from_ptr(ret) };
+        std::path::PathBuf::from(conf_dir.to_str().unwrap())
+    }
+
+    pub fn svnserve_conf(&mut self) -> std::path::PathBuf {
+        let mut pool = apr::Pool::new();
+        let ret = unsafe {
+            crate::generated::svn_repos_svnserve_conf(self.0.as_mut_ptr(), pool.as_mut_ptr())
+        };
+        let svnserve_conf = unsafe { std::ffi::CStr::from_ptr(ret) };
+        std::path::PathBuf::from(svnserve_conf.to_str().unwrap())
+    }
+
+    pub fn lock_dir(&mut self) -> std::path::PathBuf {
+        let mut pool = apr::Pool::new();
+        let ret =
+            unsafe { crate::generated::svn_repos_lock_dir(self.0.as_mut_ptr(), pool.as_mut_ptr()) };
+        let lock_dir = unsafe { std::ffi::CStr::from_ptr(ret) };
+        std::path::PathBuf::from(lock_dir.to_str().unwrap())
+    }
+
+    pub fn db_lockfile(&mut self) -> std::path::PathBuf {
+        let mut pool = apr::Pool::new();
+        let ret = unsafe {
+            crate::generated::svn_repos_db_lockfile(self.0.as_mut_ptr(), pool.as_mut_ptr())
+        };
+        let db_lockfile = unsafe { std::ffi::CStr::from_ptr(ret) };
+        std::path::PathBuf::from(db_lockfile.to_str().unwrap())
+    }
+
+    pub fn db_logs_lockfile(&mut self) -> std::path::PathBuf {
+        let mut pool = apr::Pool::new();
+        let ret = unsafe {
+            crate::generated::svn_repos_db_logs_lockfile(self.0.as_mut_ptr(), pool.as_mut_ptr())
+        };
+        let logs_lockfile = unsafe { std::ffi::CStr::from_ptr(ret) };
+        std::path::PathBuf::from(logs_lockfile.to_str().unwrap())
+    }
+
+    pub fn hook_dir(&mut self) -> std::path::PathBuf {
+        let mut pool = apr::Pool::new();
+        let ret =
+            unsafe { crate::generated::svn_repos_hook_dir(self.0.as_mut_ptr(), pool.as_mut_ptr()) };
+        let hook_dir = unsafe { std::ffi::CStr::from_ptr(ret) };
+        std::path::PathBuf::from(hook_dir.to_str().unwrap())
+    }
 }
 
 pub struct Notify<'pool>(PooledPtr<'pool, crate::generated::svn_repos_notify_t>);
