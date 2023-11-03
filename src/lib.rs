@@ -1,6 +1,12 @@
 pub mod client;
+pub mod config;
+pub mod fs;
 mod generated;
 pub mod io;
+pub mod mergeinfo;
+pub mod ra;
+pub mod repos;
+pub mod time;
 use crate::generated::{svn_error_t, svn_opt_revision_t, svn_opt_revision_value_t, svn_version_t};
 
 pub struct Version(*const svn_version_t);

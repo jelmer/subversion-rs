@@ -12,7 +12,8 @@ description = "Rust bindings for Subversion"
 doctest = false
 
 [dependencies]
-apr = { version = "0.1.1" }
+apr = { version = "0.1.2" }
+#apr = { path = "../apr-rs" }
 ctor = "0.2.5"
 lazy_static = "1.4.0"
 
@@ -21,6 +22,11 @@ bindgen = "0.68"
 pkg-config = "0.3"
 system-deps = "6.2"
 
+[dev-dependencies]
+tempfile = "3.8.1"
+
 [package.metadata.system-deps]
 libsvn_client = ""
 libsvn_subr = ""
+libsvn_repos = ""
+libsvn_fs = ""

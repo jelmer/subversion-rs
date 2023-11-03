@@ -18,10 +18,9 @@ fn create_svn_bindings(out_path: &std::path::Path) {
         .header(svn_path.join("svn_version.h").to_str().unwrap())
         .header(svn_path.join("svn_error.h").to_str().unwrap())
         .header(svn_path.join("svn_opt.h").to_str().unwrap())
-        .allowlist_file(".*/svn_client.h")
-        .allowlist_file(".*/svn_version.h")
-        .allowlist_file(".*/svn_error.h")
-        .allowlist_file(".*/svn_opt.h")
+        .header(svn_path.join("svn_repos.h").to_str().unwrap())
+        .header(svn_path.join("svn_time.h").to_str().unwrap())
+        .allowlist_file(".*/svn_.*.h")
         .blocklist_type("apr_.*")
         .derive_default(true)
         .clang_args(
