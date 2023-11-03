@@ -95,22 +95,26 @@ extern "C" fn wrap_log_entry_receiver(
 ///
 /// This is the main entry point for the client library. It holds client specific configuration and
 /// callbacks
-pub struct Context(*mut svn_client_ctx_t, Pool);
+pub struct Context<'pool>(apr::pool::PooledPtr<'pool, svn_client_ctx_t>);
 
-impl Context {
-    pub fn new(pool: &mut Pool) -> Self {
+impl<'pool> Context<'pool> {
+    pub fn new() -> Result<Self, Error> {
         // call svn_client_create_context2
-        let mut ctx = std::ptr::null_mut();
-        let mut pool = pool.subpool();
-        unsafe {
-            svn_client_create_context2(&mut ctx, std::ptr::null_mut(), (&mut pool).into());
-        }
-        Context(ctx, pool)
+        Ok(Context(apr::pool::PooledPtr::initialize(|pool| {
+            let mut ctx = std::ptr::null_mut();
+            let ret =
+                unsafe { svn_client_create_context2(&mut ctx, std::ptr::null_mut(), pool.into()) };
+            if ret.is_null() {
+                Ok(ctx)
+            } else {
+                Err(Error(ret))
+            }
+        })?))
     }
 
     /// Checkout a working copy from url to path.
     pub fn checkout(
-        &self,
+        &mut self,
         url: &str,
         path: &std::path::Path,
         peg_revision: Revision,
@@ -136,7 +140,7 @@ impl Context {
                 depth.into(),
                 ignore_externals.into(),
                 allow_unver_obstructions.into(),
-                self.0,
+                &mut *self.0,
                 (&mut pool).into(),
             );
             if err.is_null() {
@@ -177,7 +181,7 @@ impl Context {
                 allow_unver_obstructions.into(),
                 adds_as_modifications.into(),
                 make_parents.into(),
-                self.0,
+                &mut *self.0,
                 pool.as_ref().into(),
             );
             let result_revs: apr::tables::ArrayHeader<Revnum> =
@@ -216,7 +220,7 @@ impl Context {
                 ignore_externals.into(),
                 allow_unver_obstructions.into(),
                 make_parents.into(),
-                self.0,
+                &mut *self.0,
                 (&mut pool).into(),
             );
             if err.is_null() {
@@ -245,7 +249,7 @@ impl Context {
                 no_ignore.into(),
                 no_autoprops.into(),
                 add_parents.into(),
-                self.0,
+                &mut *self.0,
                 (&mut pool).into(),
             );
             if err.is_null() {
@@ -281,7 +285,7 @@ impl Context {
                 rps.into(),
                 Some(wrap_commit_callback2),
                 commit_callback as *mut std::ffi::c_void,
-                self.0,
+                &mut *self.0,
                 pool.as_ref().into(),
             );
             if err.is_null() {
@@ -319,7 +323,7 @@ impl Context {
                 rps.into(),
                 Some(wrap_commit_callback2),
                 commit_callback as *mut std::ffi::c_void,
-                self.0,
+                &mut *self.0,
                 pool.as_ref().into(),
             );
             if err.is_null() {
@@ -363,7 +367,7 @@ impl Context {
                 filter_callback as *mut std::ffi::c_void,
                 Some(wrap_commit_callback2),
                 commit_callback as *mut std::ffi::c_void,
-                self.0,
+                &mut *self.0,
                 pool.as_ref().into(),
             );
             if err.is_null() {
@@ -419,7 +423,7 @@ impl Context {
                 rps.into(),
                 Some(wrap_commit_callback2),
                 commit_callback as *mut std::ffi::c_void,
-                self.0,
+                &mut *self.0,
                 pool.as_ref().into(),
             );
             if err.is_null() {
@@ -431,7 +435,7 @@ impl Context {
     }
 
     pub fn status(
-        &self,
+        &mut self,
         path: &str,
         revision: Revision,
         depth: Depth,
@@ -458,7 +462,7 @@ impl Context {
             let mut revnum = 0;
             let err = svn_client_status6(
                 &mut revnum,
-                self.0,
+                &mut *self.0,
                 path.as_ptr() as *const i8,
                 &revision.into(),
                 depth.into(),
@@ -482,7 +486,7 @@ impl Context {
     }
 
     pub fn log(
-        &self,
+        &mut self,
         targets: &[&str],
         peg_revision: Revision,
         revision_ranges: &[RevisionRange],
@@ -522,7 +526,7 @@ impl Context {
                 rps.into(),
                 Some(wrap_log_entry_receiver),
                 log_entry_receiver as *mut std::ffi::c_void,
-                self.0,
+                &mut *self.0,
                 pool.as_ref().into(),
             );
             if err.is_null() {
@@ -534,9 +538,9 @@ impl Context {
     }
 }
 
-impl Default for Context {
+impl<'pool> Default for Context<'pool> {
     fn default() -> Self {
-        Self::new(&mut Pool::default())
+        Self::new().unwrap()
     }
 }
 
