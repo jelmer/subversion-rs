@@ -6,6 +6,7 @@ pub mod fs;
 mod generated;
 pub mod io;
 pub mod mergeinfo;
+pub mod props;
 pub mod ra;
 pub mod repos;
 pub mod time;
@@ -249,6 +250,22 @@ impl CommitInfo {
     }
 }
 
+impl Clone for CommitInfo {
+    fn clone(&self) -> Self {
+        unsafe {
+            Self(
+                PooledPtr::initialize(|pool| {
+                    Ok::<_, Error>(crate::generated::svn_commit_info_dup(
+                        self.0.as_ptr(),
+                        pool.as_mut_ptr(),
+                    ))
+                })
+                .unwrap(),
+            )
+        }
+    }
+}
+
 pub struct RevisionRange {
     pub start: Revision,
     pub end: Revision,
@@ -310,5 +327,13 @@ impl From<NativeEOL> for Option<&str> {
             NativeEOL::CRLF => Some("CRLF"),
             NativeEOL::CR => Some("CR"),
         }
+    }
+}
+
+pub struct InheritedItem(apr::pool::PooledPtr<generated::svn_prop_inherited_item_t>);
+
+impl InheritedItem {
+    pub fn from_raw(ptr: apr::pool::PooledPtr<generated::svn_prop_inherited_item_t>) -> Self {
+        Self(ptr)
     }
 }
