@@ -2,9 +2,9 @@ use crate::generated::svn_ra_session_t;
 use crate::{Error, Revnum};
 use apr::pool::{Pool, PooledPtr};
 
-pub struct Session<'pool>(PooledPtr<'pool, svn_ra_session_t>);
+pub struct Session(PooledPtr<svn_ra_session_t>);
 
-impl<'pool> Session<'pool> {
+impl Session {
     pub fn reparent(&mut self, url: &str) -> Result<(), Error> {
         let url = std::ffi::CString::new(url).unwrap();
         let mut pool = Pool::new();
@@ -15,7 +15,7 @@ impl<'pool> Session<'pool> {
         Ok(())
     }
 
-    pub fn from_raw(raw: PooledPtr<'pool, svn_ra_session_t>) -> Self {
+    pub fn from_raw(raw: PooledPtr<svn_ra_session_t>) -> Self {
         Self(raw)
     }
 

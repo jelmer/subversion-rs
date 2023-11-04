@@ -1,9 +1,9 @@
 use crate::Error;
 use apr::pool::PooledPtr;
-pub struct Fs<'pool>(pub(crate) PooledPtr<'pool, crate::generated::svn_fs_t>);
+pub struct Fs(pub(crate) PooledPtr<crate::generated::svn_fs_t>);
 
-impl<'pool> Fs<'pool> {
-    pub fn create(path: &'pool std::path::Path) -> Result<Fs, crate::Error> {
+impl Fs {
+    pub fn create(path: &std::path::Path) -> Result<Fs, crate::Error> {
         unsafe {
             Ok(Self(PooledPtr::initialize(|pool| {
                 let mut fs_ptr = std::ptr::null_mut();
@@ -21,7 +21,7 @@ impl<'pool> Fs<'pool> {
         }
     }
 
-    pub fn open(path: &'pool std::path::Path) -> Result<Fs, crate::Error> {
+    pub fn open(path: &std::path::Path) -> Result<Fs, crate::Error> {
         unsafe {
             Ok(Self(PooledPtr::initialize(|pool| {
                 let mut fs_ptr = std::ptr::null_mut();

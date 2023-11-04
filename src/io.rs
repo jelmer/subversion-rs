@@ -9,9 +9,9 @@ impl From<*const svn_io_dirent2_t> for Dirent {
     }
 }
 
-pub struct Stream<'pool>(apr::pool::PooledPtr<'pool, crate::generated::svn_stream_t>);
+pub struct Stream(apr::pool::PooledPtr<crate::generated::svn_stream_t>);
 
-impl<'pool> Stream<'pool> {
+impl Stream {
     pub fn empty() -> Self {
         Self(
             apr::pool::PooledPtr::initialize(|pool| {
@@ -151,7 +151,7 @@ impl<'pool> Stream<'pool> {
     }
 }
 
-impl std::io::Write for Stream<'_> {
+impl std::io::Write for Stream {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         let mut len = 0;
         let err = unsafe {
@@ -170,7 +170,7 @@ impl std::io::Write for Stream<'_> {
     }
 }
 
-impl std::io::Read for Stream<'_> {
+impl std::io::Read for Stream {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         let mut len = 0;
         let err = unsafe {
@@ -185,10 +185,7 @@ impl std::io::Read for Stream<'_> {
     }
 }
 
-pub fn tee<'pool>(
-    out1: &'pool mut Stream,
-    out2: &'pool mut Stream,
-) -> Result<Stream<'pool>, Error> {
+pub fn tee(out1: &mut Stream, out2: &mut Stream) -> Result<Stream, Error> {
     Ok(Stream(apr::pool::PooledPtr::initialize(|pool| {
         let stream = unsafe {
             crate::generated::svn_stream_tee(
@@ -201,7 +198,7 @@ pub fn tee<'pool>(
     })?))
 }
 
-impl From<&[u8]> for Stream<'_> {
+impl From<&[u8]> for Stream {
     fn from(bytes: &[u8]) -> Self {
         Self(
             apr::pool::PooledPtr::initialize(|pool| {
@@ -231,7 +228,7 @@ pub fn remove_file(path: &std::path::Path, ignore_enoent: bool) -> Result<(), Er
     Ok(())
 }
 
-pub fn wrap_write(write: &mut dyn std::io::Write) -> Result<Stream<'_>, Error> {
+pub fn wrap_write(write: &mut dyn std::io::Write) -> Result<Stream, Error> {
     let write = Box::into_raw(Box::new(write));
     let mut stream = apr::pool::PooledPtr::initialize(|pool| {
         let stream = unsafe {

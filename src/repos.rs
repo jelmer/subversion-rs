@@ -14,10 +14,10 @@ pub fn find_root_path(path: &std::path::Path) -> Option<std::path::PathBuf> {
     }
 }
 
-pub struct Repos<'pool>(PooledPtr<'pool, svn_repos_t>);
+pub struct Repos(PooledPtr<svn_repos_t>);
 
-impl<'pool> Repos<'pool> {
-    pub fn create(path: &std::path::Path) -> Result<Repos<'pool>, crate::Error> {
+impl Repos {
+    pub fn create(path: &std::path::Path) -> Result<Repos, crate::Error> {
         // TODO: Support config, fs_config
         let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
         let config = std::ptr::null_mut();
@@ -38,7 +38,7 @@ impl<'pool> Repos<'pool> {
         })?))
     }
 
-    pub fn open(path: &std::path::Path) -> Result<Repos<'pool>, crate::Error> {
+    pub fn open(path: &std::path::Path) -> Result<Repos, crate::Error> {
         let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
         Ok(Self(PooledPtr::initialize(|pool| {
             let mut repos: *mut svn_repos_t = std::ptr::null_mut();
@@ -111,7 +111,7 @@ impl<'pool> Repos<'pool> {
         Ok(())
     }
 
-    pub fn fs(&mut self) -> Result<crate::fs::Fs<'pool>, crate::Error> {
+    pub fn fs(&mut self) -> Result<crate::fs::Fs, crate::Error> {
         unsafe {
             Ok(crate::fs::Fs(PooledPtr::in_pool(
                 self.0.pool(),
@@ -196,7 +196,7 @@ impl<'pool> Repos<'pool> {
     }
 }
 
-pub struct Notify<'pool>(PooledPtr<'pool, crate::generated::svn_repos_notify_t>);
+pub struct Notify(PooledPtr<crate::generated::svn_repos_notify_t>);
 
 extern "C" fn wrap_notify_func(
     baton: *mut std::ffi::c_void,

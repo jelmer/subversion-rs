@@ -2,9 +2,9 @@ use crate::generated::svn_error_t;
 use crate::generated::{
     svn_client_add5, svn_client_checkout3, svn_client_cleanup2, svn_client_commit6,
     svn_client_conflict_get, svn_client_create_context2, svn_client_ctx_t, svn_client_delete4,
-    svn_client_import5, svn_client_log5, svn_client_mkdir4, svn_client_relocate2,
-    svn_client_status6, svn_client_switch3, svn_client_update4, svn_client_vacuum,
-    svn_client_version,
+    svn_client_export5, svn_client_import5, svn_client_log5, svn_client_mkdir4,
+    svn_client_relocate2, svn_client_status6, svn_client_switch3, svn_client_update4,
+    svn_client_vacuum, svn_client_version,
 };
 use crate::io::Dirent;
 use crate::{Depth, Error, LogEntry, Revision, RevisionRange, Revnum, Version};
@@ -173,9 +173,9 @@ extern "C" fn wrap_info_receiver2(
 ///
 /// This is the main entry point for the client library. It holds client specific configuration and
 /// callbacks
-pub struct Context<'pool>(apr::pool::PooledPtr<'pool, svn_client_ctx_t>);
+pub struct Context(apr::pool::PooledPtr<svn_client_ctx_t>);
 
-impl<'pool> Context<'pool> {
+impl Context {
     pub fn new() -> Result<Self, Error> {
         // call svn_client_create_context2
         Ok(Context(apr::pool::PooledPtr::initialize(|pool| {
@@ -438,6 +438,42 @@ impl<'pool> Context<'pool> {
             );
             Error::from_raw(err)?;
             Ok(())
+        }
+    }
+
+    pub fn export(
+        &mut self,
+        from_path_or_url: &str,
+        to_path: &std::path::Path,
+        peg_revision: Revision,
+        revision: Revision,
+        overwrite: bool,
+        ignore_externals: bool,
+        ignore_keywords: bool,
+        depth: Depth,
+        native_eol: crate::NativeEOL,
+    ) -> Result<Revnum, Error> {
+        let mut pool = std::rc::Rc::new(Pool::default());
+        let native_eol: Option<&str> = native_eol.into();
+        let native_eol = native_eol.map(|s| std::ffi::CString::new(s).unwrap());
+        let mut revnum = 0;
+        unsafe {
+            let err = svn_client_export5(
+                &mut revnum,
+                from_path_or_url.as_ptr() as *const i8,
+                to_path.to_str().unwrap().as_ptr() as *const i8,
+                &peg_revision.into(),
+                &revision.into(),
+                overwrite as i32,
+                ignore_externals as i32,
+                ignore_keywords as i32,
+                depth as i32,
+                native_eol.map(|s| s.as_ptr()).unwrap_or(std::ptr::null()),
+                &mut *self.0,
+                std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
+            );
+            Error::from_raw(err)?;
+            Ok(revnum)
         }
     }
 
@@ -960,7 +996,7 @@ impl<'pool> Context<'pool> {
     }
 }
 
-impl<'pool> Default for Context<'pool> {
+impl Default for Context {
     fn default() -> Self {
         Self::new().unwrap()
     }
@@ -984,7 +1020,7 @@ mod tests {
         assert_eq!(repos.path(), td.path().join("repo"));
         let mut ctx = Context::new().unwrap();
         let dirent = crate::dirent::Dirent::from(repo_path.to_str().unwrap());
-        let url: crate::uri::Uri<'_> = dirent.try_into().unwrap();
+        let url: crate::uri::Uri = dirent.try_into().unwrap();
         let revnum = ctx
             .checkout(
                 (&url).into(),
@@ -1002,11 +1038,9 @@ mod tests {
 
 pub struct Status(pub(crate) *const crate::generated::svn_client_status_t);
 
-pub struct Conflict<'pool>(
-    pub(crate) apr::pool::PooledPtr<'pool, crate::generated::svn_client_conflict_t>,
-);
+pub struct Conflict(pub(crate) apr::pool::PooledPtr<crate::generated::svn_client_conflict_t>);
 
-impl<'pool> Conflict<'pool> {
+impl Conflict {
     pub fn prop_get_description(&mut self) -> Result<String, Error> {
         let mut pool = apr::pool::Pool::new();
         let mut description: *const i8 = std::ptr::null_mut();
