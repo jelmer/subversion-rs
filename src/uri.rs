@@ -114,7 +114,7 @@ impl<'pool> Uri<'pool> {
                 pool.as_mut_ptr(),
             );
             Error::from_raw(err)?;
-            Ok(dirent)
+            Ok::<_, Error>(dirent)
         })?))
     }
 }

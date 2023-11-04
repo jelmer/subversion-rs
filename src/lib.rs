@@ -14,6 +14,7 @@ pub mod version;
 pub mod wc;
 use crate::generated::{svn_opt_revision_t, svn_opt_revision_value_t};
 use apr::pool::PooledPtr;
+use std::str::FromStr;
 
 pub use version::Version;
 
@@ -32,6 +33,56 @@ pub enum Revision {
     Base,
     Working,
     Head,
+}
+
+impl FromStr for Revision {
+    type Err = String;
+
+    fn from_str(rev: &str) -> Result<Self, Self::Err> {
+        if rev == "unspecified" {
+            Ok(Revision::Unspecified)
+        } else if rev == "committed" {
+            Ok(Revision::Committed)
+        } else if rev == "previous" {
+            Ok(Revision::Previous)
+        } else if rev == "base" {
+            Ok(Revision::Base)
+        } else if rev == "working" {
+            Ok(Revision::Working)
+        } else if rev == "head" {
+            Ok(Revision::Head)
+        } else if let Some(rest) = rev.strip_prefix("number:") {
+            Ok(Revision::Number(
+                rest.parse::<Revnum>().map_err(|e| e.to_string())?,
+            ))
+        } else if let Some(rest) = rev.strip_prefix("date:") {
+            Ok(Revision::Date(
+                rest.parse::<i64>().map_err(|e| e.to_string())?,
+            ))
+        } else {
+            Err(format!("Invalid revision: {}", rev))
+        }
+    }
+}
+
+#[cfg(feature = "pyo3")]
+impl pyo3::FromPyObject<'_> for Revision {
+    fn extract(ob: &pyo3::PyAny) -> pyo3::PyResult<Self> {
+        if ob.is_instance_of::<pyo3::types::PyString>() {
+            let rev = ob.extract::<String>()?;
+            return Revision::from_str(&rev).map_err(|e| {
+                pyo3::exceptions::PyValueError::new_err(format!("Invalid revision: {}", e))
+            });
+        } else if ob.is_instance_of::<pyo3::types::PyLong>() {
+            let rev = ob.extract::<i64>()?;
+            return Ok(Revision::Number(rev as Revnum));
+        } else {
+            Err(pyo3::exceptions::PyTypeError::new_err(format!(
+                "Invalid revision: {:?}",
+                ob
+            )))
+        }
+    }
 }
 
 impl From<Revnum> for Revision {
@@ -124,6 +175,42 @@ impl From<Depth> for generated::svn_depth_t {
     }
 }
 
+impl std::str::FromStr for Depth {
+    type Err = String;
+
+    fn from_str(depth: &str) -> Result<Self, Self::Err> {
+        match depth {
+            "unknown" => Ok(Depth::Unknown),
+            "exclude" => Ok(Depth::Exclude),
+            "empty" => Ok(Depth::Empty),
+            "files" => Ok(Depth::Files),
+            "immediates" => Ok(Depth::Immediates),
+            "infinity" => Ok(Depth::Infinity),
+            _ => Err(format!("Invalid depth: {}", depth)),
+        }
+    }
+}
+
+#[cfg(feature = "pyo3")]
+impl pyo3::FromPyObject<'_> for Depth {
+    fn extract(ob: &pyo3::PyAny) -> pyo3::PyResult<Self> {
+        if ob.is_instance_of::<pyo3::types::PyString>() {
+            let depth = ob.extract::<String>()?;
+            return Depth::from_str(&depth).map_err(|e| {
+                pyo3::exceptions::PyValueError::new_err(format!("Invalid depth: {}", e))
+            });
+        } else if ob.is_instance_of::<pyo3::types::PyBool>() {
+            let depth = ob.extract::<bool>()?;
+            return Ok(if depth { Depth::Infinity } else { Depth::Empty });
+        } else {
+            Err(pyo3::exceptions::PyTypeError::new_err(format!(
+                "Invalid depth: {:?}",
+                ob
+            )))
+        }
+    }
+}
+
 pub struct CommitInfo<'pool>(PooledPtr<'pool, generated::svn_commit_info_t>);
 
 impl<'pool> CommitInfo<'pool> {
@@ -185,3 +272,5 @@ impl RevisionRange {
 }
 
 pub struct LogEntry<'pool>(apr::pool::PooledPtr<'pool, generated::svn_log_entry_t>);
+
+pub type FileSize = crate::generated::svn_filesize_t;

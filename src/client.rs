@@ -10,6 +10,7 @@ use crate::io::Dirent;
 use crate::{Depth, Error, LogEntry, Revision, RevisionRange, Revnum, Version};
 use apr::pool::PooledPtr;
 use apr::Pool;
+use std::collections::HashMap;
 
 pub fn version() -> Version {
     unsafe { Version(svn_client_version()) }
@@ -98,6 +99,76 @@ extern "C" fn wrap_log_entry_receiver(
     }
 }
 
+pub struct Info(*const crate::generated::svn_client_info2_t);
+
+impl Info {
+    pub fn url(&self) -> &str {
+        unsafe {
+            let url = (*self.0).URL;
+            std::ffi::CStr::from_ptr(url).to_str().unwrap()
+        }
+    }
+
+    pub fn revision(&self) -> Revision {
+        unsafe { Revision::from((*self.0).rev) }
+    }
+
+    pub fn kind(&self) -> crate::generated::svn_node_kind_t {
+        unsafe { (*self.0).kind }
+    }
+
+    pub fn repos_root_url(&self) -> &str {
+        unsafe {
+            let url = (*self.0).repos_root_URL;
+            std::ffi::CStr::from_ptr(url).to_str().unwrap()
+        }
+    }
+
+    pub fn repos_uuid(&self) -> &str {
+        unsafe {
+            let uuid = (*self.0).repos_UUID;
+            std::ffi::CStr::from_ptr(uuid).to_str().unwrap()
+        }
+    }
+
+    pub fn last_changed_rev(&self) -> Revnum {
+        unsafe { (*self.0).last_changed_rev }
+    }
+
+    pub fn last_changed_date(&self) -> apr::time::Time {
+        unsafe { (*self.0).last_changed_date.into() }
+    }
+
+    pub fn last_changed_author(&self) -> &str {
+        unsafe {
+            let author = (*self.0).last_changed_author;
+            std::ffi::CStr::from_ptr(author).to_str().unwrap()
+        }
+    }
+}
+
+extern "C" fn wrap_info_receiver2(
+    baton: *mut std::ffi::c_void,
+    abspath_or_url: *const i8,
+    info: *const crate::generated::svn_client_info2_t,
+    _scatch_pool: *mut apr::apr_pool_t,
+) -> *mut crate::generated::svn_error_t {
+    unsafe {
+        let callback = baton as *mut &mut dyn FnMut(&std::path::Path, &Info) -> Result<(), Error>;
+        let mut callback = Box::from_raw(callback);
+        let abspath_or_url: &std::path::Path = std::ffi::CStr::from_ptr(abspath_or_url)
+            .to_str()
+            .unwrap()
+            .as_ref();
+        let ret = callback(abspath_or_url, &Info(info));
+        if let Err(mut err) = ret {
+            err.as_mut_ptr()
+        } else {
+            std::ptr::null_mut()
+        }
+    }
+}
+
 /// A client context.
 ///
 /// This is the main entry point for the client library. It holds client specific configuration and
@@ -113,7 +184,7 @@ impl<'pool> Context<'pool> {
                 svn_client_create_context2(&mut ctx, std::ptr::null_mut(), pool.as_mut_ptr())
             };
             Error::from_raw(ret)?;
-            Ok(ctx)
+            Ok::<_, Error>(ctx)
         })?))
     }
 
@@ -649,9 +720,243 @@ impl<'pool> Context<'pool> {
                     Pool::new().as_mut_ptr(),
                 );
                 Error::from_raw(err)?;
-                Ok(conflict)
+                Ok::<_, Error>(conflict)
             }
         })?))
+    }
+
+    pub fn cat(
+        &mut self,
+        path_or_url: &str,
+        stream: &mut dyn std::io::Write,
+        peg_revision: Revision,
+        revision: Revision,
+        expand_keywords: bool,
+    ) -> Result<HashMap<String, Vec<u8>>, Error> {
+        let mut pool = std::rc::Rc::new(Pool::default());
+        let path_or_url = std::ffi::CString::new(path_or_url).unwrap();
+        let mut s = crate::io::wrap_write(stream)?;
+        let mut props: *mut apr::hash::apr_hash_t = std::ptr::null_mut();
+        unsafe {
+            let err = crate::generated::svn_client_cat3(
+                &mut props,
+                s.as_mut_ptr(),
+                path_or_url.as_ptr(),
+                &peg_revision.into(),
+                &revision.into(),
+                expand_keywords.into(),
+                self.as_mut_ptr(),
+                std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
+                apr::pool::Pool::new().as_mut_ptr(),
+            );
+            Error::from_raw(err)?;
+            let mut props =
+                apr::hash::Hash::<&str, &[u8]>::from_raw(PooledPtr::in_pool(pool, props));
+            Ok(props
+                .iter()
+                .map(|(k, v)| (String::from_utf8_lossy(k).to_string(), v.to_vec()))
+                .collect())
+        }
+    }
+
+    pub fn lock(&mut self, targets: &[&str], comment: &str, steal_lock: bool) -> Result<(), Error> {
+        let mut pool = std::rc::Rc::new(Pool::default());
+        let targets = targets
+            .iter()
+            .map(|s| std::ffi::CString::new(*s).unwrap())
+            .collect::<Vec<_>>();
+        let targets = targets
+            .iter()
+            .map(|s| s.as_ptr())
+            .collect::<apr::tables::ArrayHeader<_>>();
+        let comment = std::ffi::CString::new(comment).unwrap();
+        unsafe {
+            let err = crate::generated::svn_client_lock(
+                targets.as_ptr(),
+                comment.as_ptr(),
+                steal_lock.into(),
+                self.as_mut_ptr(),
+                std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
+            );
+            Error::from_raw(err)?;
+            Ok(())
+        }
+    }
+
+    pub fn unlock(&mut self, targets: &[&str], break_lock: bool) -> Result<(), Error> {
+        let mut pool = std::rc::Rc::new(Pool::default());
+        let targets = targets
+            .iter()
+            .map(|s| std::ffi::CString::new(*s).unwrap())
+            .collect::<Vec<_>>();
+        let targets = targets
+            .iter()
+            .map(|s| s.as_ptr())
+            .collect::<apr::tables::ArrayHeader<_>>();
+        unsafe {
+            let err = crate::generated::svn_client_unlock(
+                targets.as_ptr(),
+                break_lock.into(),
+                self.as_mut_ptr(),
+                std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
+            );
+            Error::from_raw(err)?;
+            Ok(())
+        }
+    }
+
+    pub fn get_wc_root(&mut self, path: &str) -> Result<std::path::PathBuf, Error> {
+        let mut pool = std::rc::Rc::new(Pool::default());
+        let path = std::ffi::CString::new(path).unwrap();
+        let mut wc_root: *const i8 = std::ptr::null();
+        unsafe {
+            let err = crate::generated::svn_client_get_wc_root(
+                &mut wc_root,
+                path.as_ptr() as *const i8,
+                self.as_mut_ptr(),
+                std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
+                apr::pool::Pool::new().as_mut_ptr(),
+            );
+            Error::from_raw(err)?;
+            Ok(std::ffi::CStr::from_ptr(wc_root).to_str().unwrap().into())
+        }
+    }
+
+    pub fn min_max_revisions(
+        &mut self,
+        local_abspath: &str,
+        committed: bool,
+    ) -> Result<(Revnum, Revnum), Error> {
+        let local_abspath = std::ffi::CString::new(local_abspath).unwrap();
+        let mut min_revision: crate::generated::svn_revnum_t = 0;
+        let mut max_revision: crate::generated::svn_revnum_t = 0;
+        unsafe {
+            let err = crate::generated::svn_client_min_max_revisions(
+                &mut min_revision,
+                &mut max_revision,
+                local_abspath.as_ptr() as *const i8,
+                committed as i32,
+                self.as_mut_ptr(),
+                apr::pool::Pool::new().as_mut_ptr(),
+            );
+            Error::from_raw(err)?;
+            Ok((Revnum::from(min_revision), Revnum::from(max_revision)))
+        }
+    }
+
+    pub fn url_from_path(&mut self, path: &str) -> Result<String, Error> {
+        let mut pool = Pool::default();
+        let path = std::ffi::CString::new(path).unwrap();
+        let mut url: *const i8 = std::ptr::null();
+        unsafe {
+            let err = crate::generated::svn_client_url_from_path2(
+                &mut url,
+                path.as_ptr() as *const i8,
+                self.as_mut_ptr(),
+                pool.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            );
+            Error::from_raw(err)?;
+            Ok(std::ffi::CStr::from_ptr(url).to_str().unwrap().into())
+        }
+    }
+
+    pub fn get_repos_root(&mut self, path_or_url: &str) -> Result<(String, String), Error> {
+        let mut pool = Pool::default();
+        let path_or_url = std::ffi::CString::new(path_or_url).unwrap();
+        let mut repos_root: *const i8 = std::ptr::null();
+        let mut repos_uuid: *const i8 = std::ptr::null();
+        unsafe {
+            let err = crate::generated::svn_client_get_repos_root(
+                &mut repos_root,
+                &mut repos_uuid,
+                path_or_url.as_ptr() as *const i8,
+                self.as_mut_ptr(),
+                pool.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            );
+            Error::from_raw(err)?;
+            Ok((
+                std::ffi::CStr::from_ptr(repos_root)
+                    .to_str()
+                    .unwrap()
+                    .into(),
+                std::ffi::CStr::from_ptr(repos_uuid)
+                    .to_str()
+                    .unwrap()
+                    .into(),
+            ))
+        }
+    }
+
+    pub fn open_raw_session(
+        &mut self,
+        url: &str,
+        wri_path: &std::path::Path,
+    ) -> Result<crate::ra::Session, Error> {
+        let url = std::ffi::CString::new(url).unwrap();
+        let wri_path = std::ffi::CString::new(wri_path.to_str().unwrap()).unwrap();
+        let session = PooledPtr::initialize(|pool| unsafe {
+            let mut scratch_pool = Pool::default();
+            let mut session: *mut crate::generated::svn_ra_session_t = std::ptr::null_mut();
+            let err = crate::generated::svn_client_open_ra_session2(
+                &mut session,
+                url.as_ptr() as *const i8,
+                wri_path.as_ptr() as *const i8,
+                self.as_mut_ptr(),
+                pool.as_mut_ptr(),
+                scratch_pool.as_mut_ptr(),
+            );
+            Error::from_raw(err)?;
+            Ok::<_, Error>(session)
+        })?;
+        Ok(crate::ra::Session::from_raw(session))
+    }
+
+    pub fn info(
+        &mut self,
+        abspath_or_url: &str,
+        peg_revision: Revision,
+        revision: Revision,
+        depth: Depth,
+        fetch_excluded: bool,
+        fetch_actual_only: bool,
+        include_externals: bool,
+        changelists: Option<&[&str]>,
+        receiver: &dyn FnMut(&Info) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        let mut pool = Pool::default();
+        let abspath_or_url = std::ffi::CString::new(abspath_or_url).unwrap();
+        let changelists = changelists.map(|cl| {
+            cl.iter()
+                .map(|cl| std::ffi::CString::new(*cl).unwrap())
+                .collect::<Vec<_>>()
+        });
+        let changelists = changelists.as_ref().map(|cl| {
+            cl.iter()
+                .map(|cl| cl.as_ptr() as *const i8)
+                .collect::<apr::tables::ArrayHeader<_>>()
+        });
+        let mut receiver = receiver;
+        let receiver = &mut receiver as *mut _ as *mut std::ffi::c_void;
+        unsafe {
+            let err = crate::generated::svn_client_info4(
+                abspath_or_url.as_ptr() as *const i8,
+                &peg_revision.into(),
+                &revision.into(),
+                depth.into(),
+                fetch_excluded as i32,
+                fetch_actual_only as i32,
+                include_externals as i32,
+                changelists.map_or(std::ptr::null(), |cl| cl.as_ptr()),
+                Some(wrap_info_receiver2),
+                receiver,
+                self.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            );
+            Error::from_raw(err)?;
+            Ok(())
+        }
     }
 }
 

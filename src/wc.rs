@@ -20,7 +20,7 @@ impl<'pool> Context<'pool> {
                 )
             };
             Error::from_raw(err)?;
-            Ok(ctx)
+            Ok::<_, Error>(ctx)
         })?))
     }
 
