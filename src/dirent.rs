@@ -2,16 +2,16 @@ use crate::uri::Uri;
 use crate::Error;
 use apr::pool::Pooled;
 
-pub struct Dirent<'pool>(pub(crate) Pooled<'pool, *const i8>);
+pub struct Dirent(pub(crate) Pooled<*const i8>);
 
-impl ToString for Dirent<'_> {
+impl ToString for Dirent {
     fn to_string(&self) -> String {
         let c = unsafe { std::ffi::CStr::from_ptr(self.as_ptr()) };
         c.to_string_lossy().into_owned()
     }
 }
 
-impl<'pool> Dirent<'pool> {
+impl Dirent {
     pub fn canonicalize(&self) -> Self {
         Self(
             Pooled::initialize(|pool| unsafe {
@@ -124,7 +124,7 @@ impl<'pool> Dirent<'pool> {
         }
     }
 
-    fn to_file_url<'a>(&self) -> Result<Uri<'a>, crate::Error> {
+    fn to_file_url(&self) -> Result<Uri, crate::Error> {
         Ok(Uri(Pooled::initialize(|pool| unsafe {
             let mut url = std::ptr::null();
             let err = crate::generated::svn_uri_get_file_url_from_dirent(
@@ -158,30 +158,30 @@ impl<'pool> Dirent<'pool> {
     }
 }
 
-impl<'a, 'b> TryFrom<Dirent<'a>> for Uri<'b> {
+impl TryFrom<Dirent> for Uri {
     type Error = crate::Error;
 
-    fn try_from(dirent: Dirent<'a>) -> Result<Self, Self::Error> {
+    fn try_from(dirent: Dirent) -> Result<Self, Self::Error> {
         dirent.to_file_url()
     }
 }
 
-impl<'pool> From<Dirent<'pool>> for String {
-    fn from(dirent: Dirent<'pool>) -> Self {
+impl From<Dirent> for String {
+    fn from(dirent: Dirent) -> Self {
         let c = unsafe { std::ffi::CStr::from_ptr(dirent.as_ptr()) };
         c.to_string_lossy().into_owned()
     }
 }
 
-impl<'pool> From<&'pool Dirent<'pool>> for &'pool str {
-    fn from(dirent: &'pool Dirent<'pool>) -> Self {
+impl From<&Dirent> for &str {
+    fn from(dirent: &Dirent) -> Self {
         let c = unsafe { std::ffi::CStr::from_ptr(dirent.as_ptr()) };
         c.to_str().unwrap()
     }
 }
 
-impl<'pool> From<&'pool str> for Dirent<'pool> {
-    fn from(s: &'pool str) -> Self {
+impl From<&str> for Dirent {
+    fn from(s: &str) -> Self {
         Self(
             Pooled::initialize(|_pool| {
                 Ok::<_, crate::Error>(std::ffi::CString::new(s).unwrap().into_raw() as *const i8)
@@ -191,8 +191,8 @@ impl<'pool> From<&'pool str> for Dirent<'pool> {
     }
 }
 
-impl<'pool> From<&'pool std::path::Path> for Dirent<'pool> {
-    fn from(path: &'pool std::path::Path) -> Self {
+impl From<&std::path::Path> for Dirent {
+    fn from(path: &std::path::Path) -> Self {
         Self(
             Pooled::initialize(|_pool| {
                 Ok::<_, crate::Error>(

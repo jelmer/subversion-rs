@@ -5,9 +5,9 @@ pub fn version() -> crate::Version {
     unsafe { crate::Version(svn_wc_version()) }
 }
 
-pub struct Context<'pool>(apr::pool::PooledPtr<'pool, svn_wc_context_t>);
+pub struct Context(apr::pool::PooledPtr<svn_wc_context_t>);
 
-impl<'pool> Context<'pool> {
+impl Context {
     pub fn new() -> Result<Self, crate::Error> {
         Ok(Self(PooledPtr::initialize(|pool| {
             let mut ctx = std::ptr::null_mut();
@@ -123,7 +123,7 @@ impl<'pool> Context<'pool> {
     }
 }
 
-impl Drop for Context<'_> {
+impl Drop for Context {
     fn drop(&mut self) {
         unsafe {
             crate::generated::svn_wc_context_destroy(self.0.as_mut_ptr());
