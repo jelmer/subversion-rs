@@ -15,6 +15,10 @@ impl<'pool> Session<'pool> {
         Ok(())
     }
 
+    pub fn from_raw(raw: PooledPtr<'pool, svn_ra_session_t>) -> Self {
+        Self(raw)
+    }
+
     pub fn get_session_url(&mut self) -> Result<String, Error> {
         let mut pool = Pool::new();
         let mut url = std::ptr::null();
