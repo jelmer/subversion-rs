@@ -34,7 +34,7 @@ impl<'pool> Repos<'pool> {
                 pool.as_mut_ptr(),
             );
             Error::from_raw(ret)?;
-            Ok(repos)
+            Ok::<_, Error>(repos)
         })?))
     }
 
@@ -46,7 +46,7 @@ impl<'pool> Repos<'pool> {
                 crate::generated::svn_repos_open(&mut repos, path.as_ptr(), pool.as_mut_ptr())
             };
             Error::from_raw(ret)?;
-            Ok(repos)
+            Ok::<_, Error>(repos)
         })?))
     }
 
@@ -64,7 +64,7 @@ impl<'pool> Repos<'pool> {
                     )
                 };
                 Error::from_raw(ret)?;
-                Ok(capabilities)
+                Ok::<_, Error>(capabilities)
             })?);
 
         Ok(capabilities
