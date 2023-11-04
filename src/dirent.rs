@@ -133,7 +133,7 @@ impl<'pool> Dirent<'pool> {
                 pool.as_mut_ptr(),
             );
             Error::from_raw(err)?;
-            Ok(url)
+            Ok::<_, Error>(url)
         })?))
     }
 
@@ -151,7 +151,7 @@ impl<'pool> Dirent<'pool> {
                     pool.as_mut_ptr(),
                 );
                 Error::from_raw(err)?;
-                Ok(result_path)
+                Ok::<_, Error>(result_path)
             })?;
             Ok((under_root != 0, Self(result_path)))
         }

@@ -12,8 +12,8 @@ impl Error {
         Self(err)
     }
 
-    pub fn apr_err(&self) -> i32 {
-        unsafe { (*self.0).apr_err }
+    pub fn apr_err(&self) -> apr::Status {
+        unsafe { (*self.0).apr_err }.into()
     }
 
     pub fn as_mut_ptr(&mut self) -> *mut svn_error_t {
@@ -79,6 +79,12 @@ impl Error {
     pub fn purge_tracing(&self) -> Self {
         unsafe { Self(generated::svn_error_purge_tracing(self.0)) }
     }
+
+    pub unsafe fn detach(&mut self) -> *mut svn_error_t {
+        let err = self.0;
+        self.0 = std::ptr::null_mut();
+        err
+    }
 }
 
 impl Clone for Error {
@@ -125,3 +131,19 @@ impl std::fmt::Display for Error {
 }
 
 impl std::error::Error for Error {}
+
+impl From<std::io::Error> for Error {
+    fn from(err: std::io::Error) -> Self {
+        Self::new(apr::Status::from(err.kind()), None, &err.to_string())
+    }
+}
+
+impl From<Error> for std::io::Error {
+    fn from(err: Error) -> Self {
+        let errno = err.apr_err().raw_os_error();
+        errno.map_or(
+            std::io::Error::new(std::io::ErrorKind::Other, err.message()),
+            std::io::Error::from_raw_os_error,
+        )
+    }
+}

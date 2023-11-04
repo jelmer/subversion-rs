@@ -16,7 +16,7 @@ impl<'pool> Fs<'pool> {
                     apr::pool::Pool::new().as_mut_ptr(),
                 );
                 Error::from_raw(err)?;
-                Ok(fs_ptr)
+                Ok::<_, Error>(fs_ptr)
             })?))
         }
     }
@@ -34,7 +34,7 @@ impl<'pool> Fs<'pool> {
                     apr::pool::Pool::new().as_mut_ptr(),
                 );
                 Error::from_raw(err)?;
-                Ok(fs_ptr)
+                Ok::<_, Error>(fs_ptr)
             })?))
         }
     }
