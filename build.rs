@@ -15,6 +15,7 @@ fn create_svn_bindings(out_path: &std::path::Path) {
     // Generate bindings using bindgen
     let svn_bindings = bindgen::Builder::default()
         .header(svn_path.join("svn_client.h").to_str().unwrap())
+        .header(svn_path.join("svn_dirent_uri.h").to_str().unwrap())
         .header(svn_path.join("svn_version.h").to_str().unwrap())
         .header(svn_path.join("svn_error.h").to_str().unwrap())
         .header(svn_path.join("svn_opt.h").to_str().unwrap())

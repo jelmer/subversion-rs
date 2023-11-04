@@ -1,18 +1,17 @@
 use crate::generated::svn_error_t;
 use crate::generated::{
-    svn_client_add5, svn_client_checkout3, svn_client_commit6, svn_client_create_context2,
-    svn_client_ctx_t, svn_client_delete4, svn_client_import5, svn_client_log5, svn_client_mkdir4,
-    svn_client_status6, svn_client_switch3, svn_client_update4, svn_client_version,
+    svn_client_add5, svn_client_checkout3, svn_client_cleanup2, svn_client_commit6,
+    svn_client_conflict_get, svn_client_create_context2, svn_client_ctx_t, svn_client_delete4,
+    svn_client_import5, svn_client_log5, svn_client_mkdir4, svn_client_relocate2,
+    svn_client_status6, svn_client_switch3, svn_client_update4, svn_client_vacuum,
+    svn_client_version,
 };
 use crate::io::Dirent;
 use crate::{Depth, Error, LogEntry, Revision, RevisionRange, Revnum, Version};
 use apr::Pool;
 
 pub fn version() -> Version {
-    unsafe {
-        let version = svn_client_version();
-        Version(version)
-    }
+    unsafe { Version(svn_client_version()) }
 }
 
 extern "C" fn wrap_commit_callback2(
@@ -77,12 +76,16 @@ extern "C" fn wrap_status_func(
 extern "C" fn wrap_log_entry_receiver(
     baton: *mut std::ffi::c_void,
     log_entry: *mut crate::generated::svn_log_entry_t,
-    _pool: *mut apr::apr_pool_t,
+    pool: *mut apr::apr_pool_t,
 ) -> *mut crate::generated::svn_error_t {
     unsafe {
         let callback = baton as *mut &mut dyn FnMut(&LogEntry) -> Result<(), Error>;
         let mut callback = Box::from_raw(callback);
-        let ret = callback(&LogEntry(log_entry));
+        let pool = apr::pool::Pool::from_raw(pool);
+        let ret = callback(&LogEntry(apr::pool::PooledPtr::in_pool(
+            std::rc::Rc::new(pool),
+            log_entry,
+        )));
         if let Err(err) = ret {
             err.0
         } else {
@@ -138,8 +141,8 @@ impl<'pool> Context<'pool> {
         let mut pool = Pool::default();
         unsafe {
             let mut revnum = 0;
-            let url = std::ffi::CString::new(url).unwrap();
-            let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
+            let url = crate::uri::Uri::from(url).canonicalize();
+            let path = crate::dirent::Dirent::from(path).canonicalize();
             let err = svn_client_checkout3(
                 &mut revnum,
                 url.as_ptr(),
@@ -545,6 +548,158 @@ impl<'pool> Context<'pool> {
             }
         }
     }
+
+    pub fn args_to_target_array(
+        &mut self,
+        mut os: apr::getopt::Getopt,
+        known_targets: &[&str],
+        keep_last_origpath_on_truepath_collision: bool,
+    ) -> Result<Vec<String>, crate::Error> {
+        let mut pool = apr::pool::Pool::new();
+        let known_targets = known_targets
+            .iter()
+            .map(|s| std::ffi::CString::new(*s).unwrap())
+            .collect::<Vec<_>>();
+        let mut targets = std::ptr::null_mut();
+        let err = unsafe {
+            crate::generated::svn_client_args_to_target_array2(
+                &mut targets,
+                os.as_mut_ptr(),
+                known_targets
+                    .into_iter()
+                    .map(|s| s.as_ptr())
+                    .collect::<apr::tables::ArrayHeader<*const i8>>()
+                    .as_ptr(),
+                &mut *self.0,
+                keep_last_origpath_on_truepath_collision.into(),
+                pool.as_mut_ptr(),
+            )
+        };
+        if err.is_null() {
+            let targets = unsafe {
+                apr::tables::ArrayHeader::<*const i8>::from_raw_parts(
+                    &std::rc::Rc::new(pool),
+                    targets,
+                )
+            };
+            Ok(targets
+                .iter()
+                .map(|s| unsafe { std::ffi::CStr::from_ptr(*s as *const i8) })
+                .map(|s| s.to_str().unwrap().to_owned())
+                .collect::<Vec<_>>())
+        } else {
+            Err(crate::Error(err))
+        }
+    }
+
+    pub fn vacuum(
+        &mut self,
+        path: &str,
+        remove_unversioned_items: bool,
+        remove_ignored_items: bool,
+        fix_recorded_timestamps: bool,
+        vacuum_pristines: bool,
+        include_externals: bool,
+    ) -> Result<(), Error> {
+        let mut pool = std::rc::Rc::new(Pool::default());
+        let path = std::ffi::CString::new(path).unwrap();
+        unsafe {
+            let err = svn_client_vacuum(
+                path.as_ptr() as *const i8,
+                remove_unversioned_items.into(),
+                remove_ignored_items.into(),
+                fix_recorded_timestamps.into(),
+                vacuum_pristines.into(),
+                include_externals.into(),
+                &mut *self.0,
+                std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
+            );
+            if err.is_null() {
+                Ok(())
+            } else {
+                Err(Error(err))
+            }
+        }
+    }
+
+    pub fn cleanup(
+        &mut self,
+        path: &str,
+        break_locks: bool,
+        fix_recorded_timestamps: bool,
+        clear_dav_cache: bool,
+        vacuum_pristines: bool,
+        include_externals: bool,
+    ) -> Result<(), Error> {
+        let mut pool = std::rc::Rc::new(Pool::default());
+        let path = std::ffi::CString::new(path).unwrap();
+        unsafe {
+            let err = svn_client_cleanup2(
+                path.as_ptr() as *const i8,
+                break_locks.into(),
+                fix_recorded_timestamps.into(),
+                clear_dav_cache.into(),
+                vacuum_pristines.into(),
+                include_externals.into(),
+                &mut *self.0,
+                std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
+            );
+            if err.is_null() {
+                Ok(())
+            } else {
+                Err(Error(err))
+            }
+        }
+    }
+
+    pub fn relocate(
+        &mut self,
+        path: &str,
+        from: &str,
+        to: &str,
+        ignore_externals: bool,
+    ) -> Result<(), Error> {
+        let mut pool = std::rc::Rc::new(Pool::default());
+        let path = std::ffi::CString::new(path).unwrap();
+        let from = std::ffi::CString::new(from).unwrap();
+        let to = std::ffi::CString::new(to).unwrap();
+        unsafe {
+            let err = svn_client_relocate2(
+                path.as_ptr() as *const i8,
+                from.as_ptr() as *const i8,
+                to.as_ptr() as *const i8,
+                ignore_externals.into(),
+                &mut *self.0,
+                std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
+            );
+            if err.is_null() {
+                Ok(())
+            } else {
+                Err(Error(err))
+            }
+        }
+    }
+
+    pub fn conflict_get(&mut self, local_abspath: &std::path::Path) -> Result<Conflict, Error> {
+        Ok(Conflict(apr::pool::PooledPtr::initialize(|pool| {
+            let local_abspath = std::ffi::CString::new(local_abspath.to_str().unwrap()).unwrap();
+            let mut conflict: *mut crate::generated::svn_client_conflict_t = std::ptr::null_mut();
+            unsafe {
+                let err = svn_client_conflict_get(
+                    &mut conflict,
+                    local_abspath.as_ptr() as *const i8,
+                    &mut *self.0,
+                    pool.as_mut_ptr(),
+                    Pool::new().as_mut_ptr(),
+                );
+                if err.is_null() {
+                    Ok(conflict)
+                } else {
+                    Err(Error(err))
+                }
+            }
+        })?))
+    }
 }
 
 impl<'pool> Default for Context<'pool> {
@@ -562,6 +717,57 @@ mod tests {
         let version = version();
         assert_eq!(version.major(), 1);
     }
+
+    #[test]
+    fn test_open() {
+        let td = tempfile::tempdir().unwrap();
+        let repo_path = td.path().join("repo");
+        let mut repos = crate::repos::Repos::create(&repo_path).unwrap();
+        assert_eq!(repos.path(), td.path().join("repo"));
+        let mut ctx = Context::new().unwrap();
+        let dirent = crate::dirent::Dirent::from(repo_path.to_str().unwrap());
+        let url: crate::uri::Uri<'_> = dirent.try_into().unwrap();
+        let revnum = ctx
+            .checkout(
+                (&url).into(),
+                &td.path().join("wc"),
+                Revision::Head,
+                Revision::Head,
+                Depth::Infinity,
+                false,
+                false,
+            )
+            .unwrap();
+        assert_eq!(revnum, 0);
+    }
 }
 
 pub struct Status(pub(crate) *const crate::generated::svn_client_status_t);
+
+pub struct Conflict<'pool>(
+    pub(crate) apr::pool::PooledPtr<'pool, crate::generated::svn_client_conflict_t>,
+);
+
+impl<'pool> Conflict<'pool> {
+    pub fn prop_get_description(&mut self) -> Result<String, Error> {
+        let mut pool = apr::pool::Pool::new();
+        let mut description: *const i8 = std::ptr::null_mut();
+        let err = unsafe {
+            crate::generated::svn_client_conflict_prop_get_description(
+                &mut description,
+                self.0.as_mut_ptr(),
+                pool.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            )
+        };
+
+        if err.is_null() {
+            Ok(unsafe { std::ffi::CStr::from_ptr(description) }
+                .to_str()
+                .unwrap()
+                .to_owned())
+        } else {
+            Err(Error(err))
+        }
+    }
+}

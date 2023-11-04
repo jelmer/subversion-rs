@@ -285,3 +285,7 @@ mod tests {
         assert!(!repos.has_capability("unknown").unwrap());
     }
 }
+
+pub fn version() -> crate::Version {
+    unsafe { crate::Version(crate::generated::svn_client_version()) }
+}

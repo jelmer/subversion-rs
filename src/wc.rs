@@ -1,0 +1,169 @@
+use crate::generated::{svn_wc_context_t, svn_wc_version};
+use apr::pool::PooledPtr;
+pub fn version() -> crate::Version {
+    unsafe { crate::Version(svn_wc_version()) }
+}
+
+pub struct Context<'pool>(apr::pool::PooledPtr<'pool, svn_wc_context_t>);
+
+impl<'pool> Context<'pool> {
+    pub fn new() -> Result<Self, crate::Error> {
+        Ok(Self(PooledPtr::initialize(|pool| {
+            let mut ctx = std::ptr::null_mut();
+            let err = unsafe {
+                crate::generated::svn_wc_context_create(
+                    &mut ctx,
+                    std::ptr::null_mut(),
+                    pool.as_mut_ptr(),
+                    apr::pool::Pool::new().as_mut_ptr(),
+                )
+            };
+            if err.is_null() {
+                Ok(ctx)
+            } else {
+                Err(crate::Error(err))
+            }
+        })?))
+    }
+
+    pub fn check_wc(&mut self, path: &str) -> Result<i32, crate::Error> {
+        let path = std::ffi::CString::new(path).unwrap();
+        let mut wc_format = 0;
+        let err = unsafe {
+            crate::generated::svn_wc_check_wc2(
+                &mut wc_format,
+                self.0.as_mut_ptr(),
+                path.as_ptr(),
+                apr::pool::Pool::new().as_mut_ptr(),
+            )
+        };
+        if err.is_null() {
+            Ok(wc_format)
+        } else {
+            Err(crate::Error(err))
+        }
+    }
+
+    pub fn text_modified_p(&mut self, path: &str) -> Result<bool, crate::Error> {
+        let path = std::ffi::CString::new(path).unwrap();
+        let mut modified = 0;
+        let err = unsafe {
+            crate::generated::svn_wc_text_modified_p2(
+                &mut modified,
+                self.0.as_mut_ptr(),
+                path.as_ptr(),
+                0,
+                apr::pool::Pool::new().as_mut_ptr(),
+            )
+        };
+        if err.is_null() {
+            Ok(modified != 0)
+        } else {
+            Err(crate::Error(err))
+        }
+    }
+
+    pub fn props_modified_p(&mut self, path: &str) -> Result<bool, crate::Error> {
+        let path = std::ffi::CString::new(path).unwrap();
+        let mut modified = 0;
+        let err = unsafe {
+            crate::generated::svn_wc_props_modified_p2(
+                &mut modified,
+                self.0.as_mut_ptr(),
+                path.as_ptr(),
+                apr::pool::Pool::new().as_mut_ptr(),
+            )
+        };
+        if err.is_null() {
+            Ok(modified != 0)
+        } else {
+            Err(crate::Error(err))
+        }
+    }
+
+    pub fn conflicted_p(&mut self, path: &str) -> Result<(bool, bool, bool), crate::Error> {
+        let path = std::ffi::CString::new(path).unwrap();
+        let mut text_conflicted = 0;
+        let mut prop_conflicted = 0;
+        let mut tree_conflicted = 0;
+        let err = unsafe {
+            crate::generated::svn_wc_conflicted_p3(
+                &mut text_conflicted,
+                &mut prop_conflicted,
+                &mut tree_conflicted,
+                self.0.as_mut_ptr(),
+                path.as_ptr(),
+                apr::pool::Pool::new().as_mut_ptr(),
+            )
+        };
+        if err.is_null() {
+            Ok((
+                text_conflicted != 0,
+                prop_conflicted != 0,
+                tree_conflicted != 0,
+            ))
+        } else {
+            Err(crate::Error(err))
+        }
+    }
+
+    pub fn ensure_adm(
+        &mut self,
+        local_abspath: &str,
+        url: &str,
+        repos_root_url: &str,
+        repos_uuid: &str,
+        revision: crate::Revnum,
+        depth: crate::Depth,
+    ) -> Result<(), crate::Error> {
+        let local_abspath = std::ffi::CString::new(local_abspath).unwrap();
+        let url = std::ffi::CString::new(url).unwrap();
+        let repos_root_url = std::ffi::CString::new(repos_root_url).unwrap();
+        let repos_uuid = std::ffi::CString::new(repos_uuid).unwrap();
+        let err = unsafe {
+            crate::generated::svn_wc_ensure_adm4(
+                self.0.as_mut_ptr(),
+                local_abspath.as_ptr(),
+                url.as_ptr(),
+                repos_root_url.as_ptr(),
+                repos_uuid.as_ptr(),
+                revision,
+                depth.into(),
+                apr::pool::Pool::new().as_mut_ptr(),
+            )
+        };
+        if err.is_null() {
+            Ok(())
+        } else {
+            Err(crate::Error(err))
+        }
+    }
+}
+
+impl Drop for Context<'_> {
+    fn drop(&mut self) {
+        unsafe {
+            crate::generated::svn_wc_context_destroy(self.0.as_mut_ptr());
+        }
+    }
+}
+
+pub fn set_adm_dir(name: &str) -> Result<(), crate::Error> {
+    let name = std::ffi::CString::new(name).unwrap();
+    let err = unsafe {
+        crate::generated::svn_wc_set_adm_dir(name.as_ptr(), apr::pool::Pool::new().as_mut_ptr())
+    };
+    if err.is_null() {
+        Ok(())
+    } else {
+        Err(crate::Error(err))
+    }
+}
+
+pub fn get_adm_dir() -> String {
+    let mut pool = apr::pool::Pool::new();
+    let name = unsafe { crate::generated::svn_wc_get_adm_dir(pool.as_mut_ptr()) };
+    unsafe { std::ffi::CStr::from_ptr(name) }
+        .to_string_lossy()
+        .into_owned()
+}
