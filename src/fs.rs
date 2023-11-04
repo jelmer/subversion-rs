@@ -54,6 +54,65 @@ impl<'pool> Fs<'pool> {
                 .into()
         }
     }
+
+    pub fn get_uuid(&mut self) -> Result<String, crate::Error> {
+        unsafe {
+            let mut pool = apr::pool::Pool::new();
+            let mut uuid = std::ptr::null();
+            let err = crate::generated::svn_fs_get_uuid(
+                self.0.as_mut_ptr(),
+                &mut uuid,
+                pool.as_mut_ptr(),
+            );
+            if err.is_null() {
+                Ok(std::ffi::CStr::from_ptr(uuid)
+                    .to_string_lossy()
+                    .into_owned())
+            } else {
+                Err(crate::Error(err))
+            }
+        }
+    }
+
+    pub fn set_uuid(&mut self, uuid: &str) -> Result<(), crate::Error> {
+        unsafe {
+            let uuid = std::ffi::CString::new(uuid).unwrap();
+            let err = crate::generated::svn_fs_set_uuid(
+                self.0.as_mut_ptr(),
+                uuid.as_ptr(),
+                apr::pool::Pool::new().as_mut_ptr(),
+            );
+            if err.is_null() {
+                Ok(())
+            } else {
+                Err(crate::Error(err))
+            }
+        }
+    }
+
+    pub fn unlock(
+        &mut self,
+        path: &std::path::Path,
+        token: &str,
+        break_lock: bool,
+    ) -> Result<(), crate::Error> {
+        unsafe {
+            let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
+            let token = std::ffi::CString::new(token).unwrap();
+            let err = crate::generated::svn_fs_unlock(
+                self.0.as_mut_ptr(),
+                path.as_ptr(),
+                token.as_ptr(),
+                break_lock as i32,
+                apr::pool::Pool::new().as_mut_ptr(),
+            );
+            if err.is_null() {
+                Ok(())
+            } else {
+                Err(crate::Error(err))
+            }
+        }
+    }
 }
 
 pub fn fs_type(path: &std::path::Path) -> Result<String, crate::Error> {
