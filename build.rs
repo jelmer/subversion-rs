@@ -23,6 +23,8 @@ fn create_svn_bindings(out_path: &std::path::Path) {
         .header(svn_path.join("svn_time.h").to_str().unwrap())
         .header(svn_path.join("svn_types.h").to_str().unwrap())
         .header(svn_path.join("svn_types_impl.h").to_str().unwrap())
+        .header(svn_path.join("svn_wc.h").to_str().unwrap())
+        .header(svn_path.join("svn_props.h").to_str().unwrap())
         .allowlist_file(".*/svn_.*.h")
         .blocklist_type("apr_.*")
         .derive_default(true)

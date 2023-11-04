@@ -3,8 +3,8 @@ use crate::generated::{
     svn_client_add5, svn_client_checkout3, svn_client_cleanup2, svn_client_commit6,
     svn_client_conflict_get, svn_client_create_context2, svn_client_ctx_t, svn_client_delete4,
     svn_client_export5, svn_client_import5, svn_client_log5, svn_client_mkdir4,
-    svn_client_relocate2, svn_client_status6, svn_client_switch3, svn_client_update4,
-    svn_client_vacuum, svn_client_version,
+    svn_client_proplist4, svn_client_relocate2, svn_client_status6, svn_client_switch3,
+    svn_client_update4, svn_client_vacuum, svn_client_version,
 };
 use crate::io::Dirent;
 use crate::{Depth, Error, LogEntry, Revision, RevisionRange, Revnum, Version};
@@ -91,6 +91,63 @@ extern "C" fn wrap_log_entry_receiver(
             std::rc::Rc::new(pool),
             log_entry,
         )));
+        if let Err(mut err) = ret {
+            err.as_mut_ptr()
+        } else {
+            std::ptr::null_mut()
+        }
+    }
+}
+
+extern "C" fn wrap_proplist_receiver2(
+    baton: *mut std::ffi::c_void,
+    path: *const i8,
+    props: *mut apr::hash::apr_hash_t,
+    inherited_props: *mut apr::tables::apr_array_header_t,
+    scratch_pool: *mut apr::apr_pool_t,
+) -> *mut crate::generated::svn_error_t {
+    unsafe {
+        let scratch_pool = std::rc::Rc::new(apr::pool::Pool::from_raw(scratch_pool));
+        let callback = baton
+            as *mut &mut dyn FnMut(
+                &str,
+                &HashMap<String, Vec<u8>>,
+                Option<&[crate::InheritedItem]>,
+            ) -> Result<(), Error>;
+        let mut callback = Box::from_raw(callback);
+        let path: &str = std::ffi::CStr::from_ptr(path).to_str().unwrap().as_ref();
+        let mut props = apr::hash::Hash::<&str, *mut crate::generated::svn_string_t>::from_raw(
+            PooledPtr::in_pool(scratch_pool.clone(), props),
+        );
+        let props = props
+            .iter()
+            .map(|(k, v)| {
+                (
+                    String::from_utf8_lossy(k).to_string(),
+                    Vec::from_raw_parts(
+                        (**v).data as *mut u8,
+                        (**v).len as usize,
+                        (**v).len as usize,
+                    ),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        let inherited_props = if inherited_props.is_null() {
+            None
+        } else {
+            let inherited_props = apr::tables::ArrayHeader::<
+                *mut crate::generated::svn_prop_inherited_item_t,
+            >::from_raw_parts(&scratch_pool, inherited_props);
+            Some(
+                inherited_props
+                    .iter()
+                    .map(|x| {
+                        crate::InheritedItem::from_raw(PooledPtr::in_pool(scratch_pool.clone(), x))
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        };
+        let ret = callback(path, &props, inherited_props.as_ref().map(|x| x.as_slice()));
         if let Err(mut err) = ret {
             err.as_mut_ptr()
         } else {
@@ -334,9 +391,9 @@ impl Context {
 
     pub fn mkdir(
         &mut self,
-        paths: &[&std::path::Path],
+        paths: &[&str],
         make_parents: bool,
-        revprop_table: std::collections::HashMap<&str, &str>,
+        revprop_table: std::collections::HashMap<&str, &[u8]>,
         commit_callback: &dyn FnMut(&crate::CommitInfo) -> Result<(), Error>,
     ) -> Result<(), Error> {
         let mut pool = std::rc::Rc::new(Pool::default());
@@ -347,7 +404,7 @@ impl Context {
             }
             let mut ps = apr::tables::ArrayHeader::in_pool(&pool, paths.len());
             for path in paths {
-                let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
+                let path = std::ffi::CString::new(*path).unwrap();
                 ps.push(path.as_ptr() as *mut std::ffi::c_void);
             }
             let commit_callback = Box::into_raw(Box::new(commit_callback));
@@ -394,6 +451,54 @@ impl Context {
                 commit_callback as *mut std::ffi::c_void,
                 &mut *self.0,
                 std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
+            );
+            Error::from_raw(err)?;
+            Ok(())
+        }
+    }
+
+    pub fn proplist(
+        &mut self,
+        target: &str,
+        peg_revision: Revision,
+        revision: Revision,
+        depth: Depth,
+        changelists: Option<&[&str]>,
+        get_target_inherited_props: bool,
+        receiver: &mut dyn FnMut(
+            &str,
+            &std::collections::HashMap<String, Vec<u8>>,
+            Option<&[crate::InheritedItem]>,
+        ) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        let mut pool = Pool::default();
+
+        let changelists = changelists.map(|cl| {
+            cl.iter()
+                .map(|cl| std::ffi::CString::new(*cl).unwrap())
+                .collect::<Vec<_>>()
+        });
+        let changelists = changelists.as_ref().map(|cl| {
+            cl.iter()
+                .map(|cl| cl.as_ptr() as *const i8)
+                .collect::<apr::tables::ArrayHeader<_>>()
+        });
+
+        unsafe {
+            let receiver = Box::into_raw(Box::new(receiver));
+            let err = svn_client_proplist4(
+                target.as_ptr() as *const i8,
+                &peg_revision.into(),
+                &revision.into(),
+                depth.into(),
+                changelists
+                    .map(|cl| cl.as_ptr())
+                    .unwrap_or(std::ptr::null()),
+                get_target_inherited_props.into(),
+                Some(wrap_proplist_receiver2),
+                receiver as *mut std::ffi::c_void,
+                &mut *self.0,
+                pool.as_mut_ptr(),
             );
             Error::from_raw(err)?;
             Ok(())
