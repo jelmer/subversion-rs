@@ -8,6 +8,7 @@ use crate::generated::{
 };
 use crate::io::Dirent;
 use crate::{Depth, Error, LogEntry, Revision, RevisionRange, Revnum, Version};
+use apr::pool::PooledPtr;
 use apr::Pool;
 
 pub fn version() -> Version {
@@ -17,14 +18,17 @@ pub fn version() -> Version {
 extern "C" fn wrap_commit_callback2(
     commit_info: *const crate::generated::svn_commit_info_t,
     baton: *mut std::ffi::c_void,
-    _pool: *mut apr::apr_pool_t,
+    pool: *mut apr::apr_pool_t,
 ) -> *mut crate::generated::svn_error_t {
     unsafe {
         let callback = baton as *mut &mut dyn FnMut(&crate::CommitInfo) -> Result<(), Error>;
         let mut callback = Box::from_raw(callback);
-        match callback(&crate::CommitInfo(commit_info)) {
+        match callback(&crate::CommitInfo(PooledPtr::in_pool(
+            std::rc::Rc::new(Pool::from_raw(pool)),
+            commit_info as *mut crate::generated::svn_commit_info_t,
+        ))) {
             Ok(()) => std::ptr::null_mut(),
-            Err(err) => err.0,
+            Err(mut err) => err.as_mut_ptr(),
         }
     }
 }
@@ -49,7 +53,7 @@ extern "C" fn wrap_filter_callback(
             *filtered = ret as crate::generated::svn_boolean_t;
             std::ptr::null_mut()
         } else {
-            ret.unwrap_err().0
+            ret.unwrap_err().as_mut_ptr()
         }
     }
 }
@@ -65,8 +69,8 @@ extern "C" fn wrap_status_func(
         let mut callback = Box::from_raw(callback);
         let path: &std::path::Path = std::ffi::CStr::from_ptr(path).to_str().unwrap().as_ref();
         let ret = callback(path, &Status(status));
-        if let Err(err) = ret {
-            err.0
+        if let Err(mut err) = ret {
+            err.as_mut_ptr()
         } else {
             std::ptr::null_mut()
         }
@@ -86,8 +90,8 @@ extern "C" fn wrap_log_entry_receiver(
             std::rc::Rc::new(pool),
             log_entry,
         )));
-        if let Err(err) = ret {
-            err.0
+        if let Err(mut err) = ret {
+            err.as_mut_ptr()
         } else {
             std::ptr::null_mut()
         }
@@ -108,11 +112,8 @@ impl<'pool> Context<'pool> {
             let ret = unsafe {
                 svn_client_create_context2(&mut ctx, std::ptr::null_mut(), pool.as_mut_ptr())
             };
-            if ret.is_null() {
-                Ok(ctx)
-            } else {
-                Err(Error(ret))
-            }
+            Error::from_raw(ret)?;
+            Ok(ctx)
         })?))
     }
 
@@ -155,11 +156,8 @@ impl<'pool> Context<'pool> {
                 &mut *self.0,
                 pool.as_mut_ptr(),
             );
-            if err.is_null() {
-                Ok(revnum)
-            } else {
-                Err(Error(err))
-            }
+            Error::from_raw(err)?;
+            Ok(revnum)
         }
     }
 
@@ -198,11 +196,8 @@ impl<'pool> Context<'pool> {
             );
             let result_revs: apr::tables::ArrayHeader<Revnum> =
                 apr::tables::ArrayHeader::<Revnum>::from_raw_parts(&pool, result_revs);
-            if err.is_null() {
-                Ok(result_revs.iter().collect())
-            } else {
-                Err(Error(err))
-            }
+            Error::from_raw(err)?;
+            Ok(result_revs.iter().collect())
         }
     }
 
@@ -235,11 +230,8 @@ impl<'pool> Context<'pool> {
                 &mut *self.0,
                 pool.as_mut_ptr(),
             );
-            if err.is_null() {
-                Ok(result_rev)
-            } else {
-                Err(Error(err))
-            }
+            Error::from_raw(err)?;
+            Ok(result_rev)
         }
     }
 
@@ -264,11 +256,8 @@ impl<'pool> Context<'pool> {
                 &mut *self.0,
                 pool.as_mut_ptr(),
             );
-            if err.is_null() {
-                Ok(())
-            } else {
-                Err(Error(err))
-            }
+            Error::from_raw(err)?;
+            Ok(())
         }
     }
 
@@ -300,17 +289,14 @@ impl<'pool> Context<'pool> {
                 &mut *self.0,
                 std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
             );
-            if err.is_null() {
-                Ok(())
-            } else {
-                Err(Error(err))
-            }
+            Error::from_raw(err)?;
+            Ok(())
         }
     }
 
     pub fn delete(
         &mut self,
-        paths: &[&std::path::Path],
+        paths: &[&str],
         force: bool,
         keep_local: bool,
         revprop_table: std::collections::HashMap<&str, &str>,
@@ -324,7 +310,7 @@ impl<'pool> Context<'pool> {
             }
             let mut ps = apr::tables::ArrayHeader::in_pool(&pool, paths.len());
             for path in paths {
-                let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
+                let path = std::ffi::CString::new(*path).unwrap();
                 ps.push(path.as_ptr() as *mut std::ffi::c_void);
             }
             let commit_callback = Box::into_raw(Box::new(commit_callback));
@@ -338,11 +324,8 @@ impl<'pool> Context<'pool> {
                 &mut *self.0,
                 std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
             );
-            if err.is_null() {
-                Ok(())
-            } else {
-                Err(Error(err))
-            }
+            Error::from_raw(err)?;
+            Ok(())
         }
     }
 
@@ -382,11 +365,8 @@ impl<'pool> Context<'pool> {
                 &mut *self.0,
                 std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
             );
-            if err.is_null() {
-                Ok(())
-            } else {
-                Err(Error(err))
-            }
+            Error::from_raw(err)?;
+            Ok(())
         }
     }
 
@@ -438,11 +418,8 @@ impl<'pool> Context<'pool> {
                 &mut *self.0,
                 std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
             );
-            if err.is_null() {
-                Ok(())
-            } else {
-                Err(Error(err))
-            }
+            Error::from_raw(err)?;
+            Ok(())
         }
     }
 
@@ -458,7 +435,7 @@ impl<'pool> Context<'pool> {
         ignore_externals: bool,
         depth_as_sticky: bool,
         changelists: Option<&[&str]>,
-        status_func: &dyn FnMut(&str, &Status) -> Result<(), Error>,
+        status_func: &dyn FnMut(&'_ str, &'_ Status) -> Result<(), Error>,
     ) -> Result<Revnum, Error> {
         let mut pool = std::rc::Rc::new(Pool::default());
         let mut cl = apr::tables::ArrayHeader::in_pool(&pool, 0);
@@ -489,11 +466,8 @@ impl<'pool> Context<'pool> {
                 status_func as *mut std::ffi::c_void,
                 std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
             );
-            if err.is_null() {
-                Ok(revnum as Revnum)
-            } else {
-                Err(Error(err))
-            }
+            Error::from_raw(err)?;
+            Ok(revnum as Revnum)
         }
     }
 
@@ -541,11 +515,8 @@ impl<'pool> Context<'pool> {
                 &mut *self.0,
                 std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
             );
-            if err.is_null() {
-                Ok(())
-            } else {
-                Err(Error(err))
-            }
+            Error::from_raw(err)?;
+            Ok(())
         }
     }
 
@@ -575,21 +546,15 @@ impl<'pool> Context<'pool> {
                 pool.as_mut_ptr(),
             )
         };
-        if err.is_null() {
-            let targets = unsafe {
-                apr::tables::ArrayHeader::<*const i8>::from_raw_parts(
-                    &std::rc::Rc::new(pool),
-                    targets,
-                )
-            };
-            Ok(targets
-                .iter()
-                .map(|s| unsafe { std::ffi::CStr::from_ptr(*s as *const i8) })
-                .map(|s| s.to_str().unwrap().to_owned())
-                .collect::<Vec<_>>())
-        } else {
-            Err(crate::Error(err))
-        }
+        Error::from_raw(err)?;
+        let targets = unsafe {
+            apr::tables::ArrayHeader::<*const i8>::from_raw_parts(&std::rc::Rc::new(pool), targets)
+        };
+        Ok(targets
+            .iter()
+            .map(|s| unsafe { std::ffi::CStr::from_ptr(*s as *const i8) })
+            .map(|s| s.to_str().unwrap().to_owned())
+            .collect::<Vec<_>>())
     }
 
     pub fn vacuum(
@@ -614,11 +579,8 @@ impl<'pool> Context<'pool> {
                 &mut *self.0,
                 std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
             );
-            if err.is_null() {
-                Ok(())
-            } else {
-                Err(Error(err))
-            }
+            Error::from_raw(err)?;
+            Ok(())
         }
     }
 
@@ -644,11 +606,8 @@ impl<'pool> Context<'pool> {
                 &mut *self.0,
                 std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
             );
-            if err.is_null() {
-                Ok(())
-            } else {
-                Err(Error(err))
-            }
+            Error::from_raw(err)?;
+            Ok(())
         }
     }
 
@@ -672,11 +631,8 @@ impl<'pool> Context<'pool> {
                 &mut *self.0,
                 std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
             );
-            if err.is_null() {
-                Ok(())
-            } else {
-                Err(Error(err))
-            }
+            Error::from_raw(err)?;
+            Ok(())
         }
     }
 
@@ -692,11 +648,8 @@ impl<'pool> Context<'pool> {
                     pool.as_mut_ptr(),
                     Pool::new().as_mut_ptr(),
                 );
-                if err.is_null() {
-                    Ok(conflict)
-                } else {
-                    Err(Error(err))
-                }
+                Error::from_raw(err)?;
+                Ok(conflict)
             }
         })?))
     }
@@ -761,13 +714,10 @@ impl<'pool> Conflict<'pool> {
             )
         };
 
-        if err.is_null() {
-            Ok(unsafe { std::ffi::CStr::from_ptr(description) }
-                .to_str()
-                .unwrap()
-                .to_owned())
-        } else {
-            Err(Error(err))
-        }
+        Error::from_raw(err)?;
+        Ok(unsafe { std::ffi::CStr::from_ptr(description) }
+            .to_str()
+            .unwrap()
+            .to_owned())
     }
 }

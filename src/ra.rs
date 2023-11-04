@@ -11,11 +11,8 @@ impl<'pool> Session<'pool> {
         let err = unsafe {
             crate::generated::svn_ra_reparent(self.0.as_mut_ptr(), url.as_ptr(), pool.as_mut_ptr())
         };
-        if err.is_null() {
-            Ok(())
-        } else {
-            Err(Error(err))
-        }
+        Error::from_raw(err)?;
+        Ok(())
     }
 
     pub fn get_session_url(&mut self) -> Result<String, Error> {
@@ -28,12 +25,9 @@ impl<'pool> Session<'pool> {
                 pool.as_mut_ptr(),
             )
         };
-        if err.is_null() {
-            let url = unsafe { std::ffi::CStr::from_ptr(url) };
-            Ok(url.to_string_lossy().into_owned())
-        } else {
-            Err(Error(err))
-        }
+        Error::from_raw(err)?;
+        let url = unsafe { std::ffi::CStr::from_ptr(url) };
+        Ok(url.to_string_lossy().into_owned())
     }
 
     pub fn get_path_relative_to_session(&mut self, url: &str) -> Result<String, Error> {
@@ -48,12 +42,9 @@ impl<'pool> Session<'pool> {
                 pool.as_mut_ptr(),
             )
         };
-        if err.is_null() {
-            let path = unsafe { std::ffi::CStr::from_ptr(path) };
-            Ok(path.to_string_lossy().into_owned())
-        } else {
-            Err(Error(err))
-        }
+        Error::from_raw(err)?;
+        let path = unsafe { std::ffi::CStr::from_ptr(path) };
+        Ok(path.to_string_lossy().into_owned())
     }
 
     pub fn get_latest_revnum(&mut self) -> Result<Revnum, Error> {
@@ -66,11 +57,8 @@ impl<'pool> Session<'pool> {
                 pool.as_mut_ptr(),
             )
         };
-        if err.is_null() {
-            Ok(revnum)
-        } else {
-            Err(Error(err))
-        }
+        Error::from_raw(err)?;
+        Ok(revnum)
     }
 
     pub fn get_dated_revision(&mut self, tm: impl apr::time::IntoTime) -> Result<Revnum, Error> {
@@ -84,11 +72,8 @@ impl<'pool> Session<'pool> {
                 pool.as_mut_ptr(),
             )
         };
-        if err.is_null() {
-            Ok(revnum)
-        } else {
-            Err(Error(err))
-        }
+        Error::from_raw(err)?;
+        Ok(revnum)
     }
 
     pub fn change_revprop(
@@ -118,11 +103,8 @@ impl<'pool> Session<'pool> {
                 pool.as_mut_ptr(),
             )
         };
-        if err.is_null() {
-            Ok(())
-        } else {
-            Err(Error(err))
-        }
+        Error::from_raw(err)?;
+        Ok(())
     }
 
     pub fn rev_proplist(
@@ -143,21 +125,18 @@ impl<'pool> Session<'pool> {
             apr::hash::Hash::<&str, *const crate::generated::svn_string_t>::from_raw(unsafe {
                 PooledPtr::in_pool(std::rc::Rc::new(pool), props)
             });
-        if err.is_null() {
-            Ok(hash
-                .iter()
-                .map(|(k, v)| {
-                    (
-                        String::from_utf8_lossy(k).into_owned(),
-                        Vec::from(unsafe {
-                            std::slice::from_raw_parts((**v).data as *const u8, (**v).len)
-                        }),
-                    )
-                })
-                .collect())
-        } else {
-            Err(Error(err))
-        }
+        Error::from_raw(err)?;
+        Ok(hash
+            .iter()
+            .map(|(k, v)| {
+                (
+                    String::from_utf8_lossy(k).into_owned(),
+                    Vec::from(unsafe {
+                        std::slice::from_raw_parts((**v).data as *const u8, (**v).len)
+                    }),
+                )
+            })
+            .collect())
     }
 
     pub fn rev_prop(&mut self, rev: Revnum, name: &str) -> Result<Option<Vec<u8>>, Error> {
@@ -173,16 +152,13 @@ impl<'pool> Session<'pool> {
                 pool.as_mut_ptr(),
             )
         };
-        if err.is_null() {
-            if value.is_null() {
-                Ok(None)
-            } else {
-                Ok(Some(Vec::from(unsafe {
-                    std::slice::from_raw_parts((*value).data as *const u8, (*value).len)
-                })))
-            }
+        Error::from_raw(err)?;
+        if value.is_null() {
+            Ok(None)
         } else {
-            Err(Error(err))
+            Ok(Some(Vec::from(unsafe {
+                std::slice::from_raw_parts((*value).data as *const u8, (*value).len)
+            })))
         }
     }
 }

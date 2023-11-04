@@ -1,4 +1,5 @@
 use crate::generated::{svn_repos_create, svn_repos_find_root_path, svn_repos_t};
+use crate::Error;
 use apr::pool::PooledPtr;
 
 pub fn find_root_path(path: &std::path::Path) -> Option<std::path::PathBuf> {
@@ -32,11 +33,8 @@ impl<'pool> Repos<'pool> {
                 fs_config,
                 pool.as_mut_ptr(),
             );
-            if ret.is_null() {
-                Ok(repos)
-            } else {
-                Err(crate::Error(ret))
-            }
+            Error::from_raw(ret)?;
+            Ok(repos)
         })?))
     }
 
@@ -47,11 +45,8 @@ impl<'pool> Repos<'pool> {
             let ret = unsafe {
                 crate::generated::svn_repos_open(&mut repos, path.as_ptr(), pool.as_mut_ptr())
             };
-            if ret.is_null() {
-                Ok(repos)
-            } else {
-                Err(crate::Error(ret))
-            }
+            Error::from_raw(ret)?;
+            Ok(repos)
         })?))
     }
 
@@ -68,11 +63,8 @@ impl<'pool> Repos<'pool> {
                         scratch_pool.as_mut_ptr(),
                     )
                 };
-                if ret.is_null() {
-                    Ok(capabilities)
-                } else {
-                    Err(crate::Error(ret))
-                }
+                Error::from_raw(ret)?;
+                Ok(capabilities)
             })?);
 
         Ok(capabilities
@@ -92,11 +84,8 @@ impl<'pool> Repos<'pool> {
                 capability.as_ptr(),
                 pool.as_mut_ptr(),
             );
-            if ret.is_null() {
-                Ok(has != 0)
-            } else {
-                Err(crate::Error(ret))
-            }
+            Error::from_raw(ret)?;
+            Ok(has != 0)
         }
     }
 
@@ -118,11 +107,8 @@ impl<'pool> Repos<'pool> {
                 capabilities_array.as_ptr(),
             )
         };
-        if ret.is_null() {
-            Ok(())
-        } else {
-            Err(crate::Error(ret))
-        }
+        Error::from_raw(ret)?;
+        Ok(())
     }
 
     pub fn fs(&mut self) -> Result<crate::fs::Fs<'pool>, crate::Error> {
@@ -246,22 +232,16 @@ pub fn upgrade(
             pool.as_mut_ptr(),
         )
     };
-    if ret.is_null() {
-        Ok(())
-    } else {
-        Err(crate::Error(ret))
-    }
+    Error::from_raw(ret)?;
+    Ok(())
 }
 
 pub fn delete(path: &std::path::Path) -> Result<(), crate::Error> {
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     let mut pool = apr::Pool::new();
     let ret = unsafe { crate::generated::svn_repos_delete(path.as_ptr(), pool.as_mut_ptr()) };
-    if ret.is_null() {
-        Ok(())
-    } else {
-        Err(crate::Error(ret))
-    }
+    Error::from_raw(ret)?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -274,7 +254,6 @@ mod tests {
         super::delete(td.path()).unwrap();
     }
 
-    #[ignore = "needs error fixes"]
     #[test]
     fn test_capabilities() {
         let td = tempfile::tempdir().unwrap();
@@ -282,7 +261,7 @@ mod tests {
         assert!(repos.capabilities().unwrap().contains("mergeinfo"));
         assert!(!repos.capabilities().unwrap().contains("mergeinfo2"));
         assert!(repos.has_capability("mergeinfo").unwrap());
-        assert!(!repos.has_capability("unknown").unwrap());
+        assert!(repos.has_capability("unknown").is_err());
     }
 }
 
