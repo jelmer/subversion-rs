@@ -211,9 +211,9 @@ impl pyo3::FromPyObject<'_> for Depth {
     }
 }
 
-pub struct CommitInfo<'pool>(PooledPtr<'pool, generated::svn_commit_info_t>);
+pub struct CommitInfo(PooledPtr<generated::svn_commit_info_t>);
 
-impl<'pool> CommitInfo<'pool> {
+impl CommitInfo {
     pub fn revision(&self) -> Revnum {
         self.0.revision
     }
@@ -271,6 +271,44 @@ impl RevisionRange {
     }
 }
 
-pub struct LogEntry<'pool>(apr::pool::PooledPtr<'pool, generated::svn_log_entry_t>);
+pub struct LogEntry(apr::pool::PooledPtr<generated::svn_log_entry_t>);
 
 pub type FileSize = crate::generated::svn_filesize_t;
+
+#[derive(Debug, Clone, Copy, Default)]
+pub enum NativeEOL {
+    #[default]
+    Standard,
+    LF,
+    CRLF,
+    CR,
+}
+
+impl TryFrom<Option<&str>> for NativeEOL {
+    type Error = crate::Error;
+
+    fn try_from(eol: Option<&str>) -> Result<Self, Self::Error> {
+        match eol {
+            None => Ok(NativeEOL::Standard),
+            Some("LF") => Ok(NativeEOL::LF),
+            Some("CRLF") => Ok(NativeEOL::CRLF),
+            Some("CR") => Ok(NativeEOL::CR),
+            _ => Err(crate::Error::new(
+                crate::generated::svn_errno_t_SVN_ERR_IO_UNKNOWN_EOL.into(),
+                None,
+                "Unknown eol marker",
+            )),
+        }
+    }
+}
+
+impl From<NativeEOL> for Option<&str> {
+    fn from(eol: NativeEOL) -> Self {
+        match eol {
+            NativeEOL::Standard => None,
+            NativeEOL::LF => Some("LF"),
+            NativeEOL::CRLF => Some("CRLF"),
+            NativeEOL::CR => Some("CR"),
+        }
+    }
+}
