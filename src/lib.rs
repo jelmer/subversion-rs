@@ -1,5 +1,6 @@
 pub mod client;
 pub mod config;
+pub mod dirent;
 pub mod fs;
 mod generated;
 pub mod io;
@@ -7,46 +8,12 @@ pub mod mergeinfo;
 pub mod ra;
 pub mod repos;
 pub mod time;
-use crate::generated::{svn_error_t, svn_opt_revision_t, svn_opt_revision_value_t, svn_version_t};
+pub mod uri;
+pub mod version;
+pub mod wc;
+use crate::generated::{svn_error_t, svn_opt_revision_t, svn_opt_revision_value_t};
 
-pub struct Version(*const svn_version_t);
-
-impl Version {
-    fn equal(&self, other: &Version) -> bool {
-        !matches!(unsafe { generated::svn_ver_equal(self.0, other.0) }, 0)
-    }
-
-    pub fn compatible(&self, other: &Version) -> bool {
-        !matches!(unsafe { generated::svn_ver_compatible(self.0, other.0) }, 0)
-    }
-
-    pub fn major(&self) -> i32 {
-        unsafe { self.0.as_ref().unwrap().major }
-    }
-
-    pub fn minor(&self) -> i32 {
-        unsafe { self.0.as_ref().unwrap().minor }
-    }
-
-    pub fn patch(&self) -> i32 {
-        unsafe { self.0.as_ref().unwrap().patch }
-    }
-
-    pub fn tag(&self) -> &str {
-        unsafe {
-            let tag = self.0.as_ref().unwrap().tag;
-            std::ffi::CStr::from_ptr(tag).to_str().unwrap()
-        }
-    }
-}
-
-impl PartialEq for Version {
-    fn eq(&self, other: &Version) -> bool {
-        self.equal(other)
-    }
-}
-
-impl Eq for Version {}
+pub use version::Version;
 
 type Revnum = generated::svn_revnum_t;
 
@@ -269,4 +236,4 @@ impl RevisionRange {
     }
 }
 
-pub struct LogEntry(*mut generated::svn_log_entry_t);
+pub struct LogEntry<'pool>(apr::pool::PooledPtr<'pool, generated::svn_log_entry_t>);
