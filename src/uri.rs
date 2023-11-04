@@ -2,16 +2,16 @@ use crate::dirent::Dirent;
 use crate::Error;
 use apr::pool::Pooled;
 
-pub struct Uri<'pool>(pub(crate) Pooled<'pool, *const i8>);
+pub struct Uri(pub(crate) Pooled<*const i8>);
 
-impl ToString for Uri<'_> {
+impl ToString for Uri {
     fn to_string(&self) -> String {
         let t = unsafe { std::ffi::CStr::from_ptr(self.as_ptr()) };
         t.to_str().unwrap().to_string()
     }
 }
 
-impl<'pool> Uri<'pool> {
+impl Uri {
     pub fn is_root(&self, length: usize) -> bool {
         unsafe { crate::generated::svn_uri_is_root(self.as_ptr(), length) != 0 }
     }
@@ -105,7 +105,7 @@ impl<'pool> Uri<'pool> {
         }
     }
 
-    fn to_dirent<'a>(&self) -> Result<Dirent<'a>, crate::Error> {
+    fn to_dirent(&self) -> Result<Dirent, crate::Error> {
         Ok(Dirent(Pooled::initialize(|pool| unsafe {
             let mut dirent = std::ptr::null();
             let err = crate::generated::svn_uri_get_dirent_from_file_url(
@@ -119,16 +119,16 @@ impl<'pool> Uri<'pool> {
     }
 }
 
-impl<'a, 'b> TryFrom<Uri<'a>> for Dirent<'b> {
+impl TryFrom<Uri> for Dirent {
     type Error = crate::Error;
 
-    fn try_from(uri: Uri<'a>) -> Result<Self, Self::Error> {
+    fn try_from(uri: Uri) -> Result<Self, Self::Error> {
         uri.to_dirent()
     }
 }
 
-impl<'pool> From<&'pool str> for Uri<'pool> {
-    fn from(s: &'pool str) -> Self {
+impl From<&str> for Uri {
+    fn from(s: &str) -> Self {
         Self(
             Pooled::initialize(|_pool| {
                 Ok::<_, crate::Error>(std::ffi::CString::new(s).unwrap().into_raw() as *const i8)
@@ -138,18 +138,18 @@ impl<'pool> From<&'pool str> for Uri<'pool> {
     }
 }
 
-impl<'pool> From<&Uri<'pool>> for &'pool str {
-    fn from(uri: &Uri<'pool>) -> Self {
+impl From<&Uri> for &str {
+    fn from(uri: &Uri) -> Self {
         let t = unsafe { std::ffi::CStr::from_ptr(uri.as_ptr()) };
         t.to_str().unwrap()
     }
 }
 
 #[cfg(feature = "url")]
-impl<'pool> TryFrom<Uri<'pool>> for url::Url {
+impl TryFrom<Uri> for url::Url {
     type Error = crate::Error;
 
-    fn try_from(uri: Uri<'pool>) -> Result<Self, Self::Error> {
+    fn try_from(uri: Uri) -> Result<Self, Self::Error> {
         let uri = uri.to_str()?;
         Ok(url::Url::parse(uri)?)
     }
