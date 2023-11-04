@@ -24,11 +24,8 @@ impl<'pool> Stream<'pool> {
                     apr::pool::Pool::new().as_mut_ptr(),
                 )
             };
-            if err.is_null() {
-                Ok(stream)
-            } else {
-                Err(Error(err))
-            }
+            Error::from_raw(err)?;
+            Ok(stream)
         })?))
     }
 
@@ -44,11 +41,8 @@ impl<'pool> Stream<'pool> {
                     apr::pool::Pool::new().as_mut_ptr(),
                 )
             };
-            if err.is_null() {
-                Ok(stream)
-            } else {
-                Err(Error(err))
-            }
+            Error::from_raw(err)?;
+            Ok(stream)
         })?))
     }
 
@@ -62,11 +56,8 @@ impl<'pool> Stream<'pool> {
                     pool.as_mut_ptr(),
                 )
             };
-            if err.is_null() {
-                Ok(stream)
-            } else {
-                Err(Error(err))
-            }
+            Error::from_raw(err)?;
+            Ok(stream)
         })?))
     }
 
@@ -75,11 +66,8 @@ impl<'pool> Stream<'pool> {
             let mut stream = std::ptr::null_mut();
             let err =
                 unsafe { crate::generated::svn_stream_for_stderr(&mut stream, pool.as_mut_ptr()) };
-            if err.is_null() {
-                Ok(stream)
-            } else {
-                Err(Error(err))
-            }
+            Error::from_raw(err)?;
+            Ok(stream)
         })?))
     }
 
@@ -88,11 +76,8 @@ impl<'pool> Stream<'pool> {
             let mut stream = std::ptr::null_mut();
             let err =
                 unsafe { crate::generated::svn_stream_for_stdout(&mut stream, pool.as_mut_ptr()) };
-            if err.is_null() {
-                Ok(stream)
-            } else {
-                Err(Error(err))
-            }
+            Error::from_raw(err)?;
+            Ok(stream)
         })?))
     }
 
@@ -135,21 +120,16 @@ impl<'pool> Stream<'pool> {
         let err = unsafe {
             crate::generated::svn_stream_data_available(self.0.as_mut_ptr(), &mut data_available)
         };
-        if err.is_null() {
-            Ok(data_available != 0)
-        } else {
-            Err(Error(err))
-        }
+        Error::from_raw(err)?;
+        Ok(data_available != 0)
     }
 
     pub fn puts(&mut self, s: &str) -> Result<(), Error> {
         let s = std::ffi::CString::new(s).unwrap();
         let err = unsafe { crate::generated::svn_stream_puts(self.0.as_mut_ptr(), s.as_ptr()) };
-        if err.is_null() {
-            Ok(())
-        } else {
-            Err(Error(err))
-        }
+
+        Error::from_raw(err)?;
+        Ok(())
     }
 }
 
@@ -196,9 +176,6 @@ pub fn remove_file(path: &std::path::Path, ignore_enoent: bool) -> Result<(), Er
             apr::pool::Pool::new().as_mut_ptr(),
         )
     };
-    if err.is_null() {
-        Ok(())
-    } else {
-        Err(Error(err))
-    }
+    Error::from_raw(err)?;
+    Ok(())
 }

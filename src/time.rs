@@ -1,4 +1,5 @@
 use crate::generated::{svn_time_from_cstring, svn_time_to_cstring, svn_time_to_human_cstring};
+use crate::Error;
 use apr::time::Time;
 
 pub fn to_cstring(time: Time) -> String {
@@ -12,11 +13,8 @@ pub fn from_cstring(s: &str) -> Result<Time, crate::Error> {
     let s = std::ffi::CString::new(s).unwrap();
     let err =
         unsafe { svn_time_from_cstring(&mut t, s.as_ptr(), apr::pool::Pool::new().as_mut_ptr()) };
-    if err.is_null() {
-        Ok(Time::from(t))
-    } else {
-        Err(crate::Error(err))
-    }
+    Error::from_raw(err)?;
+    Ok(Time::from(t))
 }
 
 pub fn to_human_cstring(time: Time) -> String {
@@ -38,9 +36,6 @@ pub fn parse_date(now: Time, date: &str) -> Result<(bool, Time), crate::Error> {
             apr::pool::Pool::new().as_mut_ptr(),
         )
     };
-    if err.is_null() {
-        Ok((matched != 0, Time::from(t)))
-    } else {
-        Err(crate::Error(err))
-    }
+    Error::from_raw(err)?;
+    Ok((matched != 0, Time::from(t)))
 }
