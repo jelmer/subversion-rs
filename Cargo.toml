@@ -12,7 +12,7 @@ description = "Rust bindings for Subversion"
 doctest = false
 
 [dependencies]
-apr = { version = "0.1.2" }
+apr = { version = "0.1.3" }
 #apr = { path = "../apr-rs" }
 ctor = "0.2.5"
 lazy_static = "1.4.0"
@@ -30,3 +30,4 @@ libsvn_client = ""
 libsvn_subr = ""
 libsvn_repos = ""
 libsvn_fs = ""
+libsvn_wc = ""
