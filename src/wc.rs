@@ -1,4 +1,5 @@
 use crate::generated::{svn_wc_context_t, svn_wc_version};
+use crate::Error;
 use apr::pool::PooledPtr;
 pub fn version() -> crate::Version {
     unsafe { crate::Version(svn_wc_version()) }
@@ -18,11 +19,8 @@ impl<'pool> Context<'pool> {
                     apr::pool::Pool::new().as_mut_ptr(),
                 )
             };
-            if err.is_null() {
-                Ok(ctx)
-            } else {
-                Err(crate::Error(err))
-            }
+            Error::from_raw(err)?;
+            Ok(ctx)
         })?))
     }
 
@@ -37,11 +35,8 @@ impl<'pool> Context<'pool> {
                 apr::pool::Pool::new().as_mut_ptr(),
             )
         };
-        if err.is_null() {
-            Ok(wc_format)
-        } else {
-            Err(crate::Error(err))
-        }
+        Error::from_raw(err)?;
+        Ok(wc_format)
     }
 
     pub fn text_modified_p(&mut self, path: &str) -> Result<bool, crate::Error> {
@@ -56,11 +51,8 @@ impl<'pool> Context<'pool> {
                 apr::pool::Pool::new().as_mut_ptr(),
             )
         };
-        if err.is_null() {
-            Ok(modified != 0)
-        } else {
-            Err(crate::Error(err))
-        }
+        Error::from_raw(err)?;
+        Ok(modified != 0)
     }
 
     pub fn props_modified_p(&mut self, path: &str) -> Result<bool, crate::Error> {
@@ -74,11 +66,8 @@ impl<'pool> Context<'pool> {
                 apr::pool::Pool::new().as_mut_ptr(),
             )
         };
-        if err.is_null() {
-            Ok(modified != 0)
-        } else {
-            Err(crate::Error(err))
-        }
+        Error::from_raw(err)?;
+        Ok(modified != 0)
     }
 
     pub fn conflicted_p(&mut self, path: &str) -> Result<(bool, bool, bool), crate::Error> {
@@ -96,15 +85,12 @@ impl<'pool> Context<'pool> {
                 apr::pool::Pool::new().as_mut_ptr(),
             )
         };
-        if err.is_null() {
-            Ok((
-                text_conflicted != 0,
-                prop_conflicted != 0,
-                tree_conflicted != 0,
-            ))
-        } else {
-            Err(crate::Error(err))
-        }
+        Error::from_raw(err)?;
+        Ok((
+            text_conflicted != 0,
+            prop_conflicted != 0,
+            tree_conflicted != 0,
+        ))
     }
 
     pub fn ensure_adm(
@@ -132,11 +118,8 @@ impl<'pool> Context<'pool> {
                 apr::pool::Pool::new().as_mut_ptr(),
             )
         };
-        if err.is_null() {
-            Ok(())
-        } else {
-            Err(crate::Error(err))
-        }
+        Error::from_raw(err)?;
+        Ok(())
     }
 }
 
@@ -153,11 +136,8 @@ pub fn set_adm_dir(name: &str) -> Result<(), crate::Error> {
     let err = unsafe {
         crate::generated::svn_wc_set_adm_dir(name.as_ptr(), apr::pool::Pool::new().as_mut_ptr())
     };
-    if err.is_null() {
-        Ok(())
-    } else {
-        Err(crate::Error(err))
-    }
+    Error::from_raw(err)?;
+    Ok(())
 }
 
 pub fn get_adm_dir() -> String {

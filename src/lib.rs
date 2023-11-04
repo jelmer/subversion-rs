@@ -1,6 +1,7 @@
 pub mod client;
 pub mod config;
 pub mod dirent;
+pub mod error;
 pub mod fs;
 mod generated;
 pub mod io;
@@ -11,75 +12,14 @@ pub mod time;
 pub mod uri;
 pub mod version;
 pub mod wc;
-use crate::generated::{svn_error_t, svn_opt_revision_t, svn_opt_revision_value_t};
+use crate::generated::{svn_opt_revision_t, svn_opt_revision_value_t};
+use apr::pool::PooledPtr;
 
 pub use version::Version;
 
-type Revnum = generated::svn_revnum_t;
+pub type Revnum = generated::svn_revnum_t;
 
-pub struct Error(*mut svn_error_t);
-
-impl Error {
-    pub fn apr_err(&self) -> i32 {
-        unsafe { self.0.as_ref().unwrap().apr_err }
-    }
-
-    pub fn line(&self) -> i64 {
-        unsafe { self.0.as_ref().unwrap().line }
-    }
-
-    pub fn file(&self) -> &str {
-        unsafe {
-            let file = self.0.as_ref().unwrap().file;
-            std::ffi::CStr::from_ptr(file).to_str().unwrap()
-        }
-    }
-
-    pub fn child(&self) -> Option<Error> {
-        unsafe {
-            let child = self.0.as_ref().unwrap().child;
-            if child.is_null() {
-                None
-            } else {
-                Some(Error(child))
-            }
-        }
-    }
-
-    pub fn message(&self) -> &str {
-        unsafe {
-            let message = self.0.as_ref().unwrap().message;
-            std::ffi::CStr::from_ptr(message).to_str().unwrap()
-        }
-    }
-}
-
-impl Drop for Error {
-    fn drop(&mut self) {
-        unsafe { generated::svn_error_clear(self.0) }
-    }
-}
-
-impl std::fmt::Debug for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        writeln!(f, "{}:{}: {}", self.file(), self.line(), self.message())?;
-        let mut n = self.child();
-        while let Some(err) = n {
-            writeln!(f, "{}:{}: {}", err.file(), err.line(), err.message())?;
-            n = err.child();
-        }
-        Ok(())
-    }
-}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        writeln!(f, "{}", self.message())?;
-        Ok(())
-    }
-}
-
-impl std::error::Error for Error {}
+pub use error::Error;
 
 #[derive(Debug, Default, Clone, Copy)]
 pub enum Revision {
@@ -184,29 +124,29 @@ impl From<Depth> for generated::svn_depth_t {
     }
 }
 
-pub struct CommitInfo(*const generated::svn_commit_info_t);
+pub struct CommitInfo<'pool>(PooledPtr<'pool, generated::svn_commit_info_t>);
 
-impl CommitInfo {
+impl<'pool> CommitInfo<'pool> {
     pub fn revision(&self) -> Revnum {
-        unsafe { (*self.0).revision }
+        self.0.revision
     }
 
     pub fn date(&self) -> &str {
         unsafe {
-            let date = (*self.0).date;
+            let date = self.0.date;
             std::ffi::CStr::from_ptr(date).to_str().unwrap()
         }
     }
 
     pub fn author(&self) -> &str {
         unsafe {
-            let author = (*self.0).author;
+            let author = self.0.author;
             std::ffi::CStr::from_ptr(author).to_str().unwrap()
         }
     }
     pub fn post_commit_err(&self) -> Option<&str> {
         unsafe {
-            let err = (*self.0).post_commit_err;
+            let err = self.0.post_commit_err;
             if err.is_null() {
                 None
             } else {
@@ -216,7 +156,7 @@ impl CommitInfo {
     }
     pub fn repos_root(&self) -> &str {
         unsafe {
-            let repos_root = (*self.0).repos_root;
+            let repos_root = self.0.repos_root;
             std::ffi::CStr::from_ptr(repos_root).to_str().unwrap()
         }
     }
@@ -227,11 +167,19 @@ pub struct RevisionRange {
     pub end: Revision,
 }
 
+impl From<&RevisionRange> for generated::svn_opt_revision_range_t {
+    fn from(range: &RevisionRange) -> Self {
+        Self {
+            start: range.start.into(),
+            end: range.end.into(),
+        }
+    }
+}
+
 impl RevisionRange {
     pub unsafe fn to_c(&self, pool: &mut apr::Pool) -> *mut generated::svn_opt_revision_range_t {
-        let range: *mut generated::svn_opt_revision_range_t = pool.calloc();
-        (*range).start = self.start.into();
-        (*range).end = self.end.into();
+        let range = pool.calloc::<generated::svn_opt_revision_range_t>();
+        *range = self.into();
         range
     }
 }

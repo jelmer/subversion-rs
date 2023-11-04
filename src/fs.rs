@@ -1,3 +1,4 @@
+use crate::Error;
 use apr::pool::PooledPtr;
 pub struct Fs<'pool>(pub(crate) PooledPtr<'pool, crate::generated::svn_fs_t>);
 
@@ -14,11 +15,8 @@ impl<'pool> Fs<'pool> {
                     pool.as_mut_ptr(),
                     apr::pool::Pool::new().as_mut_ptr(),
                 );
-                if err.is_null() {
-                    Ok(fs_ptr)
-                } else {
-                    Err(crate::Error(err))
-                }
+                Error::from_raw(err)?;
+                Ok(fs_ptr)
             })?))
         }
     }
@@ -35,11 +33,8 @@ impl<'pool> Fs<'pool> {
                     pool.as_mut_ptr(),
                     apr::pool::Pool::new().as_mut_ptr(),
                 );
-                if err.is_null() {
-                    Ok(fs_ptr)
-                } else {
-                    Err(crate::Error(err))
-                }
+                Error::from_raw(err)?;
+                Ok(fs_ptr)
             })?))
         }
     }
@@ -64,13 +59,10 @@ impl<'pool> Fs<'pool> {
                 &mut uuid,
                 pool.as_mut_ptr(),
             );
-            if err.is_null() {
-                Ok(std::ffi::CStr::from_ptr(uuid)
-                    .to_string_lossy()
-                    .into_owned())
-            } else {
-                Err(crate::Error(err))
-            }
+            Error::from_raw(err)?;
+            Ok(std::ffi::CStr::from_ptr(uuid)
+                .to_string_lossy()
+                .into_owned())
         }
     }
 
@@ -82,11 +74,8 @@ impl<'pool> Fs<'pool> {
                 uuid.as_ptr(),
                 apr::pool::Pool::new().as_mut_ptr(),
             );
-            if err.is_null() {
-                Ok(())
-            } else {
-                Err(crate::Error(err))
-            }
+            Error::from_raw(err)?;
+            Ok(())
         }
     }
 
@@ -106,11 +95,8 @@ impl<'pool> Fs<'pool> {
                 break_lock as i32,
                 apr::pool::Pool::new().as_mut_ptr(),
             );
-            if err.is_null() {
-                Ok(())
-            } else {
-                Err(crate::Error(err))
-            }
+            Error::from_raw(err)?;
+            Ok(())
         }
     }
 }
@@ -121,13 +107,10 @@ pub fn fs_type(path: &std::path::Path) -> Result<String, crate::Error> {
         let mut pool = apr::pool::Pool::new();
         let mut fs_type = std::ptr::null();
         let err = crate::generated::svn_fs_type(&mut fs_type, path.as_ptr(), pool.as_mut_ptr());
-        if err.is_null() {
-            Ok(std::ffi::CStr::from_ptr(fs_type)
-                .to_string_lossy()
-                .into_owned())
-        } else {
-            Err(crate::Error(err))
-        }
+        Error::from_raw(err)?;
+        Ok(std::ffi::CStr::from_ptr(fs_type)
+            .to_string_lossy()
+            .into_owned())
     }
 }
 
@@ -136,10 +119,7 @@ pub fn delete_fs(path: &std::path::Path) -> Result<(), crate::Error> {
     unsafe {
         let err =
             crate::generated::svn_fs_delete_fs(path.as_ptr(), apr::pool::Pool::new().as_mut_ptr());
-        if err.is_null() {
-            Ok(())
-        } else {
-            Err(crate::Error(err))
-        }
+        Error::from_raw(err)?;
+        Ok(())
     }
 }

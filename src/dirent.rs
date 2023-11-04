@@ -1,4 +1,5 @@
 use crate::uri::Uri;
+use crate::Error;
 use apr::pool::Pooled;
 
 pub struct Dirent<'pool>(pub(crate) Pooled<'pool, *const i8>);
@@ -36,14 +37,11 @@ impl<'pool> Dirent<'pool> {
                 apr::pool::Pool::new().as_mut_ptr(),
             );
             let pool = std::rc::Rc::new(pool);
-            if err.is_null() {
-                Ok((
-                    Self(Pooled::in_pool(pool.clone(), canonical)),
-                    Self(Pooled::in_pool(pool, non_canonical)),
-                ))
-            } else {
-                Err(crate::Error(err))
-            }
+            Error::from_raw(err)?;
+            Ok((
+                Self(Pooled::in_pool(pool.clone(), canonical)),
+                Self(Pooled::in_pool(pool, non_canonical)),
+            ))
         }
     }
 
@@ -134,11 +132,8 @@ impl<'pool> Dirent<'pool> {
                 self.as_ptr(),
                 pool.as_mut_ptr(),
             );
-            if err.is_null() {
-                Ok(url)
-            } else {
-                Err(crate::Error(err))
-            }
+            Error::from_raw(err)?;
+            Ok(url)
         })?))
     }
 
@@ -155,11 +150,8 @@ impl<'pool> Dirent<'pool> {
                     root.as_ptr(),
                     pool.as_mut_ptr(),
                 );
-                if err.is_null() {
-                    Ok(result_path)
-                } else {
-                    Err(crate::Error(err))
-                }
+                Error::from_raw(err)?;
+                Ok(result_path)
             })?;
             Ok((under_root != 0, Self(result_path)))
         }
