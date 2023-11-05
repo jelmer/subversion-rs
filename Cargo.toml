@@ -25,7 +25,6 @@ url = ["dep:url"]
 
 [build-dependencies]
 bindgen = "0.68"
-pkg-config = "0.3"
 system-deps = "6.2"
 
 [dev-dependencies]
