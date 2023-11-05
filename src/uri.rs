@@ -102,18 +102,14 @@ impl<'a> Uri<'a> {
         .unwrap()
     }
 
-    pub fn canonicalize_in(
-        &'_ self,
-        mut pool: std::rc::Rc<apr::pool::Pool>,
-    ) -> Pooled<Canonical<Self>> {
-        unsafe {
-            let canonical = crate::generated::svn_uri_canonicalize(
-                self.as_ptr(),
-                std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
-            );
-
-            Pooled::in_pool(pool, Canonical(Self(canonical, std::marker::PhantomData)))
-        }
+    pub fn canonicalize_in<'b>(&'_ self, pool: &'b mut apr::pool::Pool) -> Canonical<Self>
+    where
+        'a: 'b,
+    {
+        Canonical(Self(
+            unsafe { crate::generated::svn_uri_canonicalize(self.as_ptr(), pool.as_mut_ptr()) },
+            std::marker::PhantomData,
+        ))
     }
 
     pub fn canonicalize_safe(
@@ -211,5 +207,53 @@ impl TryFrom<Uri> for url::Url {
 impl From<url::Url> for Uri<'_> {
     fn from(url: url::Url) -> Self {
         Self::new(url.as_str())
+    }
+}
+
+pub trait AsCanonicalUri<'a> {
+    fn as_canonical_uri(self, scratch_pool: &mut apr::pool::Pool) -> Canonical<Uri<'a>>;
+}
+
+impl<'a> AsCanonicalUri<'a> for Uri<'a> {
+    fn as_canonical_uri(self, scratch_pool: &mut apr::pool::Pool) -> Canonical<Uri<'a>> {
+        self.canonicalize_in(scratch_pool)
+    }
+}
+
+impl<'a> AsCanonicalUri<'a> for Canonical<Uri<'a>> {
+    fn as_canonical_uri(self, _scratch_pool: &mut apr::pool::Pool) -> Canonical<Uri<'a>> {
+        self
+    }
+}
+
+#[cfg(feature = "url")]
+impl<'a> AsCanonicalUri<'a> for url::Url {
+    fn as_canonical_uri(self, scratch_pool: &mut apr::pool::Pool) -> Canonical<Uri<'a>> {
+        Uri::pooled(self.as_str()).canonicalize_in(scratch_pool)
+    }
+}
+
+#[cfg(feature = "url")]
+impl<'a> AsCanonicalUri<'a> for &'a url::Url {
+    fn as_canonical_uri(self, scratch_pool: &mut apr::pool::Pool) -> Canonical<Uri<'a>> {
+        Uri::pooled(self.as_str()).canonicalize_in(scratch_pool)
+    }
+}
+
+impl<'a> AsCanonicalUri<'a> for &'a str {
+    fn as_canonical_uri(self, scratch_pool: &mut apr::pool::Pool) -> Canonical<Uri<'a>> {
+        Uri::pooled(self).canonicalize_in(scratch_pool)
+    }
+}
+
+impl<'a> AsCanonicalUri<'a> for Pooled<Uri<'a>> {
+    fn as_canonical_uri(self, scratch_pool: &mut apr::pool::Pool) -> Canonical<Uri<'a>> {
+        self.canonicalize_in(scratch_pool)
+    }
+}
+
+impl<'a> AsCanonicalUri<'a> for Pooled<Canonical<Uri<'a>>> {
+    fn as_canonical_uri(self, _scratch_pool: &mut apr::pool::Pool) -> Canonical<Uri<'a>> {
+        Canonical(Uri(self.0 .0, std::marker::PhantomData))
     }
 }
