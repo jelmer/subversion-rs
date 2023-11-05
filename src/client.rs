@@ -12,6 +12,7 @@ use apr::pool::PooledPtr;
 use apr::Pool;
 use std::collections::HashMap;
 
+
 pub fn version() -> Version {
     unsafe { Version(svn_client_version()) }
 }
@@ -977,7 +978,7 @@ impl Context {
                 apr::pool::Pool::new().as_mut_ptr(),
             );
             Error::from_raw(err)?;
-            Ok((Revnum::from(min_revision), Revnum::from(max_revision)))
+            Ok((min_revision, max_revision))
         }
     }
 
@@ -1121,10 +1122,11 @@ mod tests {
         assert_eq!(repos.path(), td.path().join("repo"));
         let mut ctx = Context::new().unwrap();
         let dirent = crate::dirent::Dirent::from(repo_path.to_str().unwrap());
-        let url: crate::uri::Uri = dirent.try_into().unwrap();
+        let dirent = dirent.canonicalize();
+        let url = dirent.to_file_url().unwrap();
         let revnum = ctx
             .checkout(
-                (&url).into(),
+                (&*url).into(),
                 &td.path().join("wc"),
                 Revision::Head,
                 Revision::Head,
