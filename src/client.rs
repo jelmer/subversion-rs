@@ -115,7 +115,7 @@ extern "C" fn wrap_proplist_receiver2(
                 Option<&[crate::InheritedItem]>,
             ) -> Result<(), Error>;
         let mut callback = Box::from_raw(callback);
-        let path: &str = std::ffi::CStr::from_ptr(path).to_str().unwrap().as_ref();
+        let path: &str = std::ffi::CStr::from_ptr(path).to_str().unwrap();
         let mut props = apr::hash::Hash::<&str, *mut crate::generated::svn_string_t>::from_raw(
             PooledPtr::in_pool(scratch_pool.clone(), props),
         );
@@ -124,11 +124,7 @@ extern "C" fn wrap_proplist_receiver2(
             .map(|(k, v)| {
                 (
                     String::from_utf8_lossy(k).to_string(),
-                    Vec::from_raw_parts(
-                        (**v).data as *mut u8,
-                        (**v).len as usize,
-                        (**v).len as usize,
-                    ),
+                    Vec::from_raw_parts((**v).data as *mut u8, (**v).len, (**v).len),
                 )
             })
             .collect::<HashMap<_, _>>();
@@ -147,7 +143,7 @@ extern "C" fn wrap_proplist_receiver2(
                     .collect::<Vec<_>>(),
             )
         };
-        let ret = callback(path, &props, inherited_props.as_ref().map(|x| x.as_slice()));
+        let ret = callback(path, &props, inherited_props.as_deref());
         if let Err(mut err) = ret {
             err.as_mut_ptr()
         } else {

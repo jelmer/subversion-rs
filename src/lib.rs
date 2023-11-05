@@ -336,4 +336,11 @@ impl InheritedItem {
     pub fn from_raw(ptr: apr::pool::PooledPtr<generated::svn_prop_inherited_item_t>) -> Self {
         Self(ptr)
     }
+
+    pub fn path_or_url(&self) -> &str {
+        unsafe {
+            let path_or_url = self.0.path_or_url;
+            std::ffi::CStr::from_ptr(path_or_url).to_str().unwrap()
+        }
+    }
 }
