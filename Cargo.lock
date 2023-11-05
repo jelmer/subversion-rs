@@ -552,7 +552,6 @@ dependencies = [
  "bindgen 0.68.1",
  "ctor",
  "lazy_static",
- "pkg-config",
  "pyo3",
  "system-deps",
  "tempfile",

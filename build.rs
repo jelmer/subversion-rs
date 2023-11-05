@@ -1,17 +1,10 @@
 extern crate bindgen;
-extern crate pkg_config;
 
-fn create_svn_bindings(out_path: &std::path::Path) {
-    let pc_svn = pkg_config::Config::new()
-        .probe("libsvn_client")
-        .unwrap_or_else(|e| panic!("Failed to find svn library: {}", e));
-
-    let svn_path = pc_svn
-        .include_paths
-        .iter()
-        .find(|x| x.join("svn_client.h").exists())
-        .expect("Failed to find svn_client.h");
-
+fn create_svn_bindings(
+    svn_path: &std::path::Path,
+    out_path: &std::path::Path,
+    include_paths: &[&std::path::Path],
+) {
     // Generate bindings using bindgen
     let svn_bindings = bindgen::Builder::default()
         .header(svn_path.join("svn_client.h").to_str().unwrap())
@@ -29,8 +22,7 @@ fn create_svn_bindings(out_path: &std::path::Path) {
         .blocklist_type("apr_.*")
         .derive_default(true)
         .clang_args(
-            pc_svn
-                .include_paths
+            include_paths
                 .iter()
                 .map(|path| format!("-I{}", path.display())),
         )
@@ -43,8 +35,24 @@ fn create_svn_bindings(out_path: &std::path::Path) {
 }
 
 fn main() {
-    system_deps::Config::new().probe().unwrap();
+    let deps = system_deps::Config::new().probe().unwrap();
+
+    let svn = deps.get_by_name("libsvn_client").unwrap();
+
+    let svn_path = svn
+        .include_paths
+        .iter()
+        .find(|x| x.join("svn_client.h").exists())
+        .expect("Failed to find svn_client.h");
 
     let out_path = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap());
-    create_svn_bindings(out_path.as_path());
+    create_svn_bindings(
+        svn_path.as_path(),
+        out_path.as_path(),
+        svn.include_paths
+            .iter()
+            .map(|x| x.as_path())
+            .collect::<Vec<_>>()
+            .as_slice(),
+    );
 }
