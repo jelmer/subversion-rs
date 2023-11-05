@@ -1,4 +1,5 @@
 use crate::dirent::Dirent;
+use crate::Canonical;
 use crate::Error;
 use apr::pool::Pooled;
 
@@ -91,17 +92,33 @@ impl<'a> Uri<'a> {
         }
     }
 
-    pub fn canonicalize(&self) -> Pooled<Self> {
+    pub fn canonicalize(&self) -> Pooled<Canonical<Self>> {
         Pooled::initialize(|pool| unsafe {
-            Ok::<_, crate::Error>(Self(
+            Ok::<_, crate::Error>(Canonical(Self(
                 crate::generated::svn_uri_canonicalize(self.as_ptr(), pool.as_mut_ptr()),
                 std::marker::PhantomData,
-            ))
+            )))
         })
         .unwrap()
     }
 
-    pub fn canonicalize_safe(&self) -> Result<(Pooled<Self>, Pooled<Self>), crate::Error> {
+    pub fn canonicalize_in(
+        &'_ self,
+        mut pool: std::rc::Rc<apr::pool::Pool>,
+    ) -> Pooled<Canonical<Self>> {
+        unsafe {
+            let canonical = crate::generated::svn_uri_canonicalize(
+                self.as_ptr(),
+                std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
+            );
+
+            Pooled::in_pool(pool, Canonical(Self(canonical, std::marker::PhantomData)))
+        }
+    }
+
+    pub fn canonicalize_safe(
+        &self,
+    ) -> Result<(Pooled<Canonical<Self>>, Pooled<Self>), crate::Error> {
         let mut pool = apr::pool::Pool::new();
         unsafe {
             let mut canonical = std::ptr::null();
@@ -116,7 +133,10 @@ impl<'a> Uri<'a> {
             Error::from_raw(err)?;
             let pool = std::rc::Rc::new(pool);
             Ok((
-                Pooled::in_pool(pool.clone(), Self(canonical, std::marker::PhantomData)),
+                Pooled::in_pool(
+                    pool.clone(),
+                    Canonical(Self(canonical, std::marker::PhantomData)),
+                ),
                 Pooled::in_pool(pool, Self(non_canonical, std::marker::PhantomData)),
             ))
         }
@@ -128,6 +148,14 @@ impl<'a> Uri<'a> {
                 self.as_ptr(),
                 apr::pool::Pool::new().as_mut_ptr(),
             ) != 0
+        }
+    }
+
+    pub fn check_canonical(self) -> Option<Canonical<Self>> {
+        if self.is_canonical() {
+            Some(Canonical(self))
+        } else {
+            None
         }
     }
 
@@ -145,10 +173,10 @@ impl<'a> Uri<'a> {
     }
 }
 
-impl<'a, 'b> TryFrom<Uri<'a>> for Pooled<Dirent<'b>> {
+impl<'a, 'b> TryFrom<Canonical<Uri<'a>>> for Pooled<Dirent<'b>> {
     type Error = crate::Error;
 
-    fn try_from(uri: Uri<'a>) -> Result<Pooled<Dirent<'b>>, Self::Error> {
+    fn try_from(uri: Canonical<Uri<'a>>) -> Result<Pooled<Dirent<'b>>, Self::Error> {
         uri.to_dirent()
     }
 }

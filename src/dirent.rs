@@ -1,35 +1,9 @@
 use crate::uri::Uri;
+use crate::Canonical;
 use crate::Error;
 use apr::pool::Pooled;
 
 pub struct Dirent<'a>(*const i8, std::marker::PhantomData<&'a ()>);
-
-pub struct Canonical<T>(T);
-
-impl<T> std::ops::Deref for Canonical<T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl std::fmt::Debug for Canonical<Dirent<'_>> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("Canonical").field(&self.to_string()).finish()
-    }
-}
-
-impl<T> PartialEq for Canonical<T>
-where
-    T: PartialEq,
-{
-    fn eq(&self, other: &Self) -> bool {
-        self.0.eq(&other.0)
-    }
-}
-
-impl<T> Eq for Canonical<T> where T: Eq {}
 
 impl ToString for Dirent<'_> {
     fn to_string(&self) -> String {
@@ -86,7 +60,22 @@ impl<'a> Dirent<'a> {
         .unwrap()
     }
 
-    pub fn canonicalize_safe(&self) -> Result<(Pooled<Self>, Pooled<Self>), crate::Error> {
+    pub fn canonicalize_in(
+        &'_ self,
+        mut pool: std::rc::Rc<apr::pool::Pool>,
+    ) -> Pooled<Canonical<Self>> {
+        unsafe {
+            let canonical = crate::generated::svn_dirent_canonicalize(
+                self.as_ptr(),
+                std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
+            );
+            Pooled::in_pool(pool, Canonical(Self(canonical, std::marker::PhantomData)))
+        }
+    }
+
+    pub fn canonicalize_safe(
+        &self,
+    ) -> Result<(Pooled<Canonical<Self>>, Pooled<Self>), crate::Error> {
         let mut pool = apr::pool::Pool::new();
         unsafe {
             let mut canonical = std::ptr::null();
@@ -101,7 +90,10 @@ impl<'a> Dirent<'a> {
             let pool = std::rc::Rc::new(pool);
             Error::from_raw(err)?;
             Ok((
-                Pooled::in_pool(pool.clone(), Self(canonical, std::marker::PhantomData)),
+                Pooled::in_pool(
+                    pool.clone(),
+                    Canonical(Self(canonical, std::marker::PhantomData)),
+                ),
                 Pooled::in_pool(pool, Self(non_canonical, std::marker::PhantomData)),
             ))
         }
