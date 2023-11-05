@@ -100,7 +100,7 @@ impl Session {
         let err = unsafe {
             crate::generated::svn_ra_change_rev_prop2(
                 self.0.as_mut_ptr(),
-                rev.into(),
+                rev,
                 name.as_ptr(),
                 &old_value.map_or(std::ptr::null(), |v| &v),
                 &new_value,
@@ -120,7 +120,7 @@ impl Session {
         let err = unsafe {
             crate::generated::svn_ra_rev_proplist(
                 self.0.as_mut_ptr(),
-                rev.into(),
+                rev,
                 &mut props,
                 pool.as_mut_ptr(),
             )
@@ -150,7 +150,7 @@ impl Session {
         let err = unsafe {
             crate::generated::svn_ra_rev_prop(
                 self.0.as_mut_ptr(),
-                rev.into(),
+                rev,
                 name.as_ptr(),
                 &mut value,
                 pool.as_mut_ptr(),

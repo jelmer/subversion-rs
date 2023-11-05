@@ -1,3 +1,4 @@
+use crate::dirent::AsCanonicalDirent;
 use crate::generated::svn_error_t;
 use crate::generated::{
     svn_client_add5, svn_client_checkout3, svn_client_cleanup2, svn_client_commit6,
@@ -7,6 +8,7 @@ use crate::generated::{
     svn_client_update4, svn_client_vacuum, svn_client_version,
 };
 use crate::io::Dirent;
+use crate::uri::AsCanonicalUri;
 use crate::{Depth, Error, LogEntry, Revision, RevisionRange, Revnum, Version};
 use apr::pool::PooledPtr;
 use apr::Pool;
@@ -115,7 +117,7 @@ extern "C" fn wrap_proplist_receiver2(
                 Option<&[crate::InheritedItem]>,
             ) -> Result<(), Error>;
         let mut callback = Box::from_raw(callback);
-        let path: &str = std::ffi::CStr::from_ptr(path).to_str().unwrap().as_ref();
+        let path: &str = std::ffi::CStr::from_ptr(path).to_str().unwrap();
         let mut props = apr::hash::Hash::<&str, *mut crate::generated::svn_string_t>::from_raw(
             PooledPtr::in_pool(scratch_pool.clone(), props),
         );
@@ -124,11 +126,7 @@ extern "C" fn wrap_proplist_receiver2(
             .map(|(k, v)| {
                 (
                     String::from_utf8_lossy(k).to_string(),
-                    Vec::from_raw_parts(
-                        (**v).data as *mut u8,
-                        (**v).len as usize,
-                        (**v).len as usize,
-                    ),
+                    Vec::from_raw_parts((**v).data as *mut u8, (**v).len, (**v).len),
                 )
             })
             .collect::<HashMap<_, _>>();
@@ -147,7 +145,7 @@ extern "C" fn wrap_proplist_receiver2(
                     .collect::<Vec<_>>(),
             )
         };
-        let ret = callback(path, &props, inherited_props.as_ref().map(|x| x.as_slice()));
+        let ret = callback(path, &props, inherited_props.as_deref());
         if let Err(mut err) = ret {
             err.as_mut_ptr()
         } else {
@@ -254,10 +252,10 @@ impl Context {
     }
 
     /// Checkout a working copy from url to path.
-    pub fn checkout(
+    pub fn checkout<'a>(
         &mut self,
-        url: &str,
-        path: &std::path::Path,
+        url: impl AsCanonicalUri<'a>,
+        path: impl AsCanonicalDirent<'a>,
         peg_revision: Revision,
         revision: Revision,
         depth: Depth,
@@ -270,8 +268,8 @@ impl Context {
         let mut pool = Pool::default();
         unsafe {
             let mut revnum = 0;
-            let url = crate::uri::Uri::from(url).canonicalize();
-            let path = crate::dirent::Dirent::from(path).canonicalize();
+            let url = url.as_canonical_uri(&mut pool);
+            let path = path.as_canonical_dirent(&mut pool);
             let err = svn_client_checkout3(
                 &mut revnum,
                 url.as_ptr(),
@@ -329,10 +327,10 @@ impl Context {
         }
     }
 
-    pub fn switch(
+    pub fn switch<'a>(
         &mut self,
-        path: &std::path::Path,
-        url: &str,
+        path: impl AsCanonicalDirent<'a>,
+        url: impl AsCanonicalUri<'a>,
         peg_revision: Revision,
         revision: Revision,
         depth: Depth,
@@ -343,11 +341,13 @@ impl Context {
     ) -> Result<Revnum, Error> {
         let mut pool = Pool::default();
         let mut result_rev = 0;
+        let path = path.as_canonical_dirent(&mut pool);
+        let url = url.as_canonical_uri(&mut pool);
         unsafe {
             let err = svn_client_switch3(
                 &mut result_rev,
-                path.to_str().unwrap().as_ptr() as *const i8,
-                url.as_ptr() as *const i8,
+                path.as_ptr(),
+                url.as_ptr(),
                 &peg_revision.into(),
                 &revision.into(),
                 depth.into(),
@@ -363,9 +363,9 @@ impl Context {
         }
     }
 
-    pub fn add(
+    pub fn add<'a>(
         &mut self,
-        path: &std::path::Path,
+        path: impl AsCanonicalDirent<'a>,
         depth: Depth,
         force: bool,
         no_ignore: bool,
@@ -373,9 +373,10 @@ impl Context {
         add_parents: bool,
     ) -> Result<(), Error> {
         let mut pool = Pool::default();
+        let path = path.as_canonical_dirent(&mut pool);
         unsafe {
             let err = svn_client_add5(
-                path.to_str().unwrap().as_ptr() as *const i8,
+                path.as_ptr(),
                 depth.into(),
                 force.into(),
                 no_ignore.into(),
@@ -505,9 +506,9 @@ impl Context {
         }
     }
 
-    pub fn import(
+    pub fn import<'a>(
         &mut self,
-        path: &std::path::Path,
+        path: impl AsCanonicalDirent<'a>,
         url: &str,
         depth: Depth,
         no_ignore: bool,
@@ -523,11 +524,12 @@ impl Context {
             rps.set(k, &v);
         }
 
+        let path = path.as_canonical_dirent(std::rc::Rc::get_mut(&mut pool).unwrap());
         unsafe {
             let filter_callback = Box::into_raw(Box::new(filter_callback));
             let commit_callback = Box::into_raw(Box::new(commit_callback));
             let err = svn_client_import5(
-                path.to_str().unwrap().as_ptr() as *const i8,
+                path.as_ptr(),
                 url.as_ptr() as *const i8,
                 depth.into(),
                 no_ignore.into(),
@@ -546,10 +548,10 @@ impl Context {
         }
     }
 
-    pub fn export(
+    pub fn export<'a>(
         &mut self,
         from_path_or_url: &str,
-        to_path: &std::path::Path,
+        to_path: impl AsCanonicalDirent<'a>,
         peg_revision: Revision,
         revision: Revision,
         overwrite: bool,
@@ -562,11 +564,12 @@ impl Context {
         let native_eol: Option<&str> = native_eol.into();
         let native_eol = native_eol.map(|s| std::ffi::CString::new(s).unwrap());
         let mut revnum = 0;
+        let to_path = to_path.as_canonical_dirent(std::rc::Rc::get_mut(&mut pool).unwrap());
         unsafe {
             let err = svn_client_export5(
                 &mut revnum,
                 from_path_or_url.as_ptr() as *const i8,
-                to_path.to_str().unwrap().as_ptr() as *const i8,
+                to_path.as_ptr(),
                 &peg_revision.into(),
                 &revision.into(),
                 overwrite as i32,
@@ -823,20 +826,20 @@ impl Context {
         }
     }
 
-    pub fn relocate(
+    pub fn relocate<'a>(
         &mut self,
-        path: &str,
+        path: impl AsCanonicalDirent<'a>,
         from: &str,
         to: &str,
         ignore_externals: bool,
     ) -> Result<(), Error> {
         let mut pool = std::rc::Rc::new(Pool::default());
-        let path = std::ffi::CString::new(path).unwrap();
         let from = std::ffi::CString::new(from).unwrap();
         let to = std::ffi::CString::new(to).unwrap();
+        let path = path.as_canonical_dirent(std::rc::Rc::get_mut(&mut pool).unwrap());
         unsafe {
             let err = svn_client_relocate2(
-                path.as_ptr() as *const i8,
+                path.as_ptr(),
                 from.as_ptr() as *const i8,
                 to.as_ptr() as *const i8,
                 ignore_externals.into(),
@@ -848,14 +851,17 @@ impl Context {
         }
     }
 
-    pub fn conflict_get(&mut self, local_abspath: &std::path::Path) -> Result<Conflict, Error> {
+    pub fn conflict_get<'a>(
+        &mut self,
+        local_abspath: impl AsCanonicalDirent<'a>,
+    ) -> Result<Conflict, Error> {
         Ok(Conflict(apr::pool::PooledPtr::initialize(|pool| {
-            let local_abspath = std::ffi::CString::new(local_abspath.to_str().unwrap()).unwrap();
+            let local_abspath = local_abspath.as_canonical_dirent(pool);
             let mut conflict: *mut crate::generated::svn_client_conflict_t = std::ptr::null_mut();
             unsafe {
                 let err = svn_client_conflict_get(
                     &mut conflict,
-                    local_abspath.as_ptr() as *const i8,
+                    local_abspath.as_ptr(),
                     &mut *self.0,
                     pool.as_mut_ptr(),
                     Pool::new().as_mut_ptr(),
@@ -946,14 +952,17 @@ impl Context {
         }
     }
 
-    pub fn get_wc_root(&mut self, path: &str) -> Result<std::path::PathBuf, Error> {
+    pub fn get_wc_root<'a>(
+        &mut self,
+        path: impl AsCanonicalDirent<'a>,
+    ) -> Result<std::path::PathBuf, Error> {
         let mut pool = std::rc::Rc::new(Pool::default());
-        let path = std::ffi::CString::new(path).unwrap();
+        let path = path.as_canonical_dirent(std::rc::Rc::get_mut(&mut pool).unwrap());
         let mut wc_root: *const i8 = std::ptr::null();
         unsafe {
             let err = crate::generated::svn_client_get_wc_root(
                 &mut wc_root,
-                path.as_ptr() as *const i8,
+                path.as_ptr(),
                 self.as_mut_ptr(),
                 std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
                 apr::pool::Pool::new().as_mut_ptr(),
@@ -963,36 +972,37 @@ impl Context {
         }
     }
 
-    pub fn min_max_revisions(
+    pub fn min_max_revisions<'a>(
         &mut self,
-        local_abspath: &str,
+        local_abspath: impl AsCanonicalDirent<'a>,
         committed: bool,
     ) -> Result<(Revnum, Revnum), Error> {
-        let local_abspath = std::ffi::CString::new(local_abspath).unwrap();
+        let mut scratch_pool = apr::pool::Pool::new();
+        let local_abspath = local_abspath.as_canonical_dirent(&mut scratch_pool);
         let mut min_revision: crate::generated::svn_revnum_t = 0;
         let mut max_revision: crate::generated::svn_revnum_t = 0;
         unsafe {
             let err = crate::generated::svn_client_min_max_revisions(
                 &mut min_revision,
                 &mut max_revision,
-                local_abspath.as_ptr() as *const i8,
+                local_abspath.as_ptr(),
                 committed as i32,
                 self.as_mut_ptr(),
-                apr::pool::Pool::new().as_mut_ptr(),
+                scratch_pool.as_mut_ptr(),
             );
             Error::from_raw(err)?;
-            Ok((Revnum::from(min_revision), Revnum::from(max_revision)))
+            Ok((min_revision, max_revision))
         }
     }
 
-    pub fn url_from_path(&mut self, path: &str) -> Result<String, Error> {
+    pub fn url_from_path<'a>(&mut self, path: impl AsCanonicalUri<'a>) -> Result<String, Error> {
         let mut pool = Pool::default();
-        let path = std::ffi::CString::new(path).unwrap();
+        let path = path.as_canonical_uri(&mut pool);
         let mut url: *const i8 = std::ptr::null();
         unsafe {
             let err = crate::generated::svn_client_url_from_path2(
                 &mut url,
-                path.as_ptr() as *const i8,
+                path.as_ptr(),
                 self.as_mut_ptr(),
                 pool.as_mut_ptr(),
                 pool.as_mut_ptr(),
@@ -1125,10 +1135,10 @@ mod tests {
         assert_eq!(repos.path(), td.path().join("repo"));
         let mut ctx = Context::new().unwrap();
         let dirent = crate::dirent::Dirent::from(repo_path.to_str().unwrap());
-        let url: crate::uri::Uri = dirent.try_into().unwrap();
+        let url = dirent.canonicalize().to_file_url().unwrap();
         let revnum = ctx
             .checkout(
-                (&url).into(),
+                url,
                 &td.path().join("wc"),
                 Revision::Head,
                 Revision::Head,

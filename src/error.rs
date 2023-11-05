@@ -47,7 +47,7 @@ impl Error {
         }
     }
 
-    pub fn child<'a>(&'a self) -> Option<Self> {
+    pub fn child(&self) -> Option<Self> {
         unsafe {
             let child = (*self.0).child;
             if child.is_null() {
@@ -58,7 +58,7 @@ impl Error {
         }
     }
 
-    pub fn message<'a>(&'a self) -> &'a str {
+    pub fn message(&self) -> &str {
         unsafe {
             let message = (*self.0).message;
             std::ffi::CStr::from_ptr(message).to_str().unwrap()
