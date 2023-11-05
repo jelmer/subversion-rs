@@ -251,6 +251,13 @@ impl Context {
         self.0.as_ptr()
     }
 
+    pub fn set_auth<'a, 'b>(&'a mut self, auth_baton: &'b mut crate::auth::AuthBaton)
+    where
+        'b: 'a,
+    {
+        self.0.auth_baton = auth_baton.as_mut_ptr();
+    }
+
     /// Checkout a working copy from url to path.
     pub fn checkout<'a>(
         &mut self,
