@@ -2,29 +2,91 @@ use crate::uri::Uri;
 use crate::Error;
 use apr::pool::Pooled;
 
-pub struct Dirent(pub(crate) Pooled<*const i8>);
+pub struct Dirent<'a>(*const i8, std::marker::PhantomData<&'a ()>);
 
-impl ToString for Dirent {
-    fn to_string(&self) -> String {
-        let c = unsafe { std::ffi::CStr::from_ptr(self.as_ptr()) };
-        c.to_string_lossy().into_owned()
+pub struct Canonical<T>(T);
+
+impl<T> std::ops::Deref for Canonical<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
-impl Dirent {
-    pub fn canonicalize(&self) -> Self {
-        Self(
-            Pooled::initialize(|pool| unsafe {
-                Ok::<_, crate::Error>(crate::generated::svn_dirent_canonicalize(
-                    self.as_ptr(),
-                    pool.as_mut_ptr(),
-                ))
-            })
-            .unwrap(),
-        )
+impl std::fmt::Debug for Canonical<Dirent<'_>> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("Canonical").field(&self.to_string()).finish()
+    }
+}
+
+impl<T> PartialEq for Canonical<T>
+where
+    T: PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.0.eq(&other.0)
+    }
+}
+
+impl<T> Eq for Canonical<T> where T: Eq {}
+
+impl ToString for Dirent<'_> {
+    fn to_string(&self) -> String {
+        self.as_str().to_string()
+    }
+}
+
+impl std::fmt::Debug for Dirent<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("Dirent").field(&self.to_string()).finish()
+    }
+}
+
+impl std::cmp::PartialEq for Dirent<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+impl std::cmp::Eq for Dirent<'_> {}
+
+impl<'a> Dirent<'a> {
+    pub fn pooled(s: &str) -> Pooled<Self> {
+        Pooled::initialize(|pool| {
+            Ok::<_, crate::Error>(Self(
+                apr::strings::pstrdup(s, pool),
+                std::marker::PhantomData,
+            ))
+        })
+        .unwrap()
     }
 
-    pub fn canonicalize_safe(&self) -> Result<(Self, Self), crate::Error> {
+    pub fn from_raw(raw: *const i8) -> Self {
+        Self(raw, std::marker::PhantomData)
+    }
+
+    pub fn from_cstr(cstr: &std::ffi::CStr) -> Self {
+        Self(cstr.as_ptr(), std::marker::PhantomData)
+    }
+
+    pub fn as_str(&self) -> &str {
+        unsafe { std::ffi::CStr::from_ptr(self.0) }
+            .to_str()
+            .expect("invalid utf8")
+    }
+
+    pub fn canonicalize(&'_ self) -> Pooled<Canonical<Self>> {
+        Pooled::initialize(|pool| unsafe {
+            Ok::<_, crate::Error>(Canonical(Self(
+                crate::generated::svn_dirent_canonicalize(self.as_ptr(), pool.as_mut_ptr()),
+                std::marker::PhantomData,
+            )))
+        })
+        .unwrap()
+    }
+
+    pub fn canonicalize_safe(&self) -> Result<(Pooled<Self>, Pooled<Self>), crate::Error> {
         let mut pool = apr::pool::Pool::new();
         unsafe {
             let mut canonical = std::ptr::null();
@@ -39,14 +101,14 @@ impl Dirent {
             let pool = std::rc::Rc::new(pool);
             Error::from_raw(err)?;
             Ok((
-                Self(Pooled::in_pool(pool.clone(), canonical)),
-                Self(Pooled::in_pool(pool, non_canonical)),
+                Pooled::in_pool(pool.clone(), Self(canonical, std::marker::PhantomData)),
+                Pooled::in_pool(pool, Self(non_canonical, std::marker::PhantomData)),
             ))
         }
     }
 
     pub fn as_ptr(&self) -> *const i8 {
-        self.0.data
+        self.0
     }
 
     pub fn is_canonical(&self) -> bool {
@@ -58,6 +120,14 @@ impl Dirent {
         }
     }
 
+    pub fn check_canonical(self) -> Option<Canonical<Self>> {
+        if self.is_canonical() {
+            Some(Canonical(self))
+        } else {
+            None
+        }
+    }
+
     pub fn is_root(&self, length: usize) -> bool {
         unsafe { crate::generated::svn_dirent_is_root(self.as_ptr(), length) != 0 }
     }
@@ -66,31 +136,27 @@ impl Dirent {
         unsafe { crate::generated::svn_dirent_is_absolute(self.as_ptr()) != 0 }
     }
 
-    pub fn dirname(&self) -> Self {
-        Self(
-            Pooled::initialize(|pool| unsafe {
-                Ok::<_, crate::Error>(crate::generated::svn_dirent_dirname(
-                    self.as_ptr(),
-                    pool.as_mut_ptr(),
-                ) as *const i8)
-            })
-            .unwrap(),
-        )
+    pub fn dirname(&self) -> Pooled<Self> {
+        Pooled::initialize(|pool| unsafe {
+            Ok::<_, crate::Error>(Self(
+                crate::generated::svn_dirent_dirname(self.as_ptr(), pool.as_mut_ptr()) as *const i8,
+                std::marker::PhantomData,
+            ))
+        })
+        .unwrap()
     }
 
-    pub fn basename(&self) -> Self {
-        Self(
-            Pooled::initialize(|pool| unsafe {
-                Ok::<_, crate::Error>(crate::generated::svn_dirent_basename(
-                    self.as_ptr(),
-                    pool.as_mut_ptr(),
-                ))
-            })
-            .unwrap(),
-        )
+    pub fn basename(&self) -> Pooled<Self> {
+        Pooled::initialize(|pool| unsafe {
+            Ok::<_, crate::Error>(Self(
+                crate::generated::svn_dirent_basename(self.as_ptr(), pool.as_mut_ptr()),
+                std::marker::PhantomData,
+            ))
+        })
+        .unwrap()
     }
 
-    pub fn split(&self) -> (Self, Self) {
+    pub fn split(&self) -> (Pooled<Self>, Pooled<Self>) {
         let mut pool = apr::pool::Pool::new();
         unsafe {
             let mut dirname = std::ptr::null();
@@ -103,8 +169,8 @@ impl Dirent {
             );
             let pool = std::rc::Rc::new(pool);
             (
-                Self(Pooled::in_pool(pool.clone(), dirname)),
-                Self(Pooled::in_pool(pool, basename)),
+                Pooled::in_pool(pool.clone(), Self(dirname, std::marker::PhantomData)),
+                Pooled::in_pool(pool, Self(basename, std::marker::PhantomData)),
             )
         }
     }
@@ -113,31 +179,24 @@ impl Dirent {
         unsafe { crate::generated::svn_dirent_is_ancestor(self.as_ptr(), other.as_ptr()) != 0 }
     }
 
-    pub fn skip_ancestor(&self, child: &Self) -> Option<Self> {
+    pub fn skip_ancestor(&self, child: &Pooled<Self>) -> Option<Pooled<Self>> {
         unsafe {
             let result = crate::generated::svn_dirent_skip_ancestor(self.as_ptr(), child.as_ptr());
             if result.is_null() {
-                Some(Self(Pooled::in_pool(child.0.pool(), result)))
+                Some(Pooled::in_pool(
+                    child.pool(),
+                    Self(result, std::marker::PhantomData),
+                ))
             } else {
                 None
             }
         }
     }
 
-    fn to_file_url(&self) -> Result<Uri, crate::Error> {
-        Ok(Uri(Pooled::initialize(|pool| unsafe {
-            let mut url = std::ptr::null();
-            let err = crate::generated::svn_uri_get_file_url_from_dirent(
-                &mut url,
-                self.as_ptr(),
-                pool.as_mut_ptr(),
-            );
-            Error::from_raw(err)?;
-            Ok::<_, Error>(url)
-        })?))
-    }
-
-    pub fn is_under_root(&self, root: &'_ Self) -> Result<(bool, Self), crate::Error> {
+    pub fn is_under_root(
+        &self,
+        root: &'_ Canonical<Self>,
+    ) -> Result<Option<Pooled<Canonical<Self>>>, crate::Error> {
         let mut under_root = 0;
         let mut result_path = std::ptr::null();
 
@@ -146,62 +205,123 @@ impl Dirent {
                 let err = crate::generated::svn_dirent_is_under_root(
                     &mut under_root,
                     &mut result_path,
-                    self.as_ptr(),
                     root.as_ptr(),
+                    self.as_ptr(),
                     pool.as_mut_ptr(),
                 );
                 Error::from_raw(err)?;
-                Ok::<_, Error>(result_path)
+                Ok::<_, Error>(Canonical(Self(result_path, std::marker::PhantomData)))
             })?;
-            Ok((under_root != 0, Self(result_path)))
+            if under_root == 0 {
+                return Ok(None);
+            }
+            assert!(!result_path.0 .0.is_null());
+            Ok(Some(result_path))
         }
+    }
+
+    pub fn absolute(&self) -> Result<Pooled<Self>, crate::Error> {
+        Pooled::initialize(|pool| unsafe {
+            let mut result = std::ptr::null();
+            let err = crate::generated::svn_dirent_get_absolute(
+                &mut result,
+                self.as_ptr(),
+                pool.as_mut_ptr(),
+            );
+            Error::from_raw(err)?;
+            Ok::<_, Error>(Self(result, std::marker::PhantomData))
+        })
     }
 }
 
-impl TryFrom<Dirent> for Uri {
+impl<'a> Canonical<Dirent<'a>> {
+    pub fn to_file_url<'b>(&self) -> Result<Pooled<Uri<'b>>, crate::Error> {
+        assert!(self.is_canonical());
+        Pooled::initialize(|pool| unsafe {
+            let mut url = std::ptr::null();
+            let err = crate::generated::svn_uri_get_file_url_from_dirent(
+                &mut url,
+                self.as_ptr(),
+                pool.as_mut_ptr(),
+            );
+            Error::from_raw(err)?;
+            Ok::<_, Error>(Uri::from_raw(url))
+        })
+    }
+}
+
+impl<'a, 'b> TryFrom<Canonical<Dirent<'a>>> for Pooled<Uri<'b>> {
     type Error = crate::Error;
 
-    fn try_from(dirent: Dirent) -> Result<Self, Self::Error> {
+    fn try_from(dirent: Canonical<Dirent<'a>>) -> Result<Self, Self::Error> {
         dirent.to_file_url()
     }
 }
 
-impl From<Dirent> for String {
+impl From<Dirent<'_>> for String {
     fn from(dirent: Dirent) -> Self {
         let c = unsafe { std::ffi::CStr::from_ptr(dirent.as_ptr()) };
         c.to_string_lossy().into_owned()
     }
 }
 
-impl From<&Dirent> for &str {
-    fn from(dirent: &Dirent) -> Self {
+impl From<Dirent<'_>> for &str {
+    fn from(dirent: Dirent) -> Self {
         let c = unsafe { std::ffi::CStr::from_ptr(dirent.as_ptr()) };
         c.to_str().unwrap()
     }
 }
 
-impl From<&str> for Dirent {
-    fn from(s: &str) -> Self {
-        Self(
-            Pooled::initialize(|_pool| {
-                Ok::<_, crate::Error>(std::ffi::CString::new(s).unwrap().into_raw() as *const i8)
-            })
-            .unwrap(),
-        )
+impl<'a> From<&'a str> for Dirent<'a> {
+    fn from(s: &'a str) -> Self {
+        Self(s.as_ptr() as *const i8, std::marker::PhantomData)
     }
 }
 
-impl From<&std::path::Path> for Dirent {
-    fn from(path: &std::path::Path) -> Self {
-        Self(
-            Pooled::initialize(|_pool| {
-                Ok::<_, crate::Error>(
-                    std::ffi::CString::new(path.to_str().unwrap())
-                        .unwrap()
-                        .into_raw() as *const i8,
-                )
-            })
-            .unwrap(),
-        )
+impl<'a> From<&'a std::path::Path> for Dirent<'a> {
+    fn from(path: &'a std::path::Path) -> Self {
+        Self::from(path.to_str().unwrap())
+    }
+}
+
+impl<'a> From<Dirent<'a>> for std::path::PathBuf {
+    fn from(dirent: Dirent<'a>) -> Self {
+        let c = unsafe { std::ffi::CStr::from_ptr(dirent.as_ptr()) };
+        std::path::PathBuf::from(c.to_string_lossy().into_owned())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_as_str() {
+        let dirent = super::Dirent::pooled("/foo/bar");
+        assert_eq!("/foo/bar", dirent.as_str());
+    }
+
+    #[test]
+    fn test_canonicalize() {
+        let dirent = super::Dirent::pooled("/foo/bar");
+        assert!(dirent.is_canonical());
+        assert_eq!(*super::Dirent::pooled("/foo/bar"), *dirent);
+        assert_eq!(*super::Dirent::pooled("/foo/bar"), **dirent.canonicalize());
+    }
+
+    #[test]
+    fn test_to_uri() {
+        let dirent = super::Dirent::pooled("/foo/bar");
+        assert_eq!(
+            *super::Uri::pooled("file:///foo/bar"),
+            *dirent.canonicalize().to_file_url().unwrap()
+        );
+    }
+
+    #[test]
+    fn test_is_under_root() {
+        let root = super::Dirent::pooled("/foo").canonicalize();
+        let child = super::Dirent::pooled("bar");
+        let result_path = child.is_under_root(&root).unwrap();
+        assert!(result_path.is_some());
+        assert_eq!(*super::Dirent::pooled("/foo/bar"), **result_path.unwrap());
     }
 }

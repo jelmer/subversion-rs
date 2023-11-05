@@ -1,5 +1,5 @@
-use std::io::Write;
-use subversion::{Depth, Revision};
+
+use subversion::{Revision};
 
 fn main() {
     let mut ctx = subversion::client::Context::new().unwrap();
