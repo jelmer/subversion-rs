@@ -28,7 +28,7 @@ bindgen = "0.69"
 system-deps = "6.2"
 
 [dev-dependencies]
-tempfile = "3.8.1"
+tempfile = "3.10.1"
 
 [package.metadata.system-deps]
 libsvn_client = ">=1.14"
