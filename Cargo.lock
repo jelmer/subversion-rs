@@ -17,7 +17,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8dc6d7c0cd828ef52a25eae13854be602013896e42475d07d0c96644288210ea"
 dependencies = [
- "bindgen 0.69.1",
+ "bindgen",
  "ctor",
  "pkg-config",
  "system-deps",
@@ -28,29 +28,6 @@ name = "autocfg"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d468802bab17cbc0cc575e9b053f41e72aa36bfa6b7f55e3529ffa43161b97fa"
-
-[[package]]
-name = "bindgen"
-version = "0.68.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "726e4313eb6ec35d2730258ad4e15b547ee75d6afaa1361a922e78e59b7d8078"
-dependencies = [
- "bitflags 2.4.1",
- "cexpr",
- "clang-sys",
- "lazy_static",
- "lazycell",
- "log",
- "peeking_take_while",
- "prettyplease",
- "proc-macro2",
- "quote",
- "regex",
- "rustc-hash",
- "shlex",
- "syn",
- "which",
-]
 
 [[package]]
 name = "bindgen"
@@ -557,7 +534,7 @@ name = "subversion"
 version = "0.0.4"
 dependencies = [
  "apr",
- "bindgen 0.68.1",
+ "bindgen",
  "ctor",
  "lazy_static",
  "pyo3",
