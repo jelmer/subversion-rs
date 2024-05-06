@@ -13,13 +13,12 @@ dependencies = [
 
 [[package]]
 name = "apr"
-version = "0.1.9"
+version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8dc6d7c0cd828ef52a25eae13854be602013896e42475d07d0c96644288210ea"
+checksum = "21860bca744744f1bc76200b3392a9f951bb880e5258ab40e41ed3cf677a32e3"
 dependencies = [
  "bindgen",
  "ctor",
- "pkg-config",
  "system-deps",
 ]
 
