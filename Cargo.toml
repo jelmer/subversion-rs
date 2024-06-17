@@ -26,7 +26,7 @@ url = ["dep:url"]
 
 [build-dependencies]
 bindgen = "0.69"
-system-deps = "6.2"
+system-deps = "7.0"
 
 [dev-dependencies]
 tempfile = "3.10.1"
