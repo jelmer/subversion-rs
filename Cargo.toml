@@ -25,7 +25,7 @@ pyo3 = ["dep:pyo3"]
 url = ["dep:url"]
 
 [build-dependencies]
-bindgen = "0.69"
+bindgen = "0.70"
 system-deps = "7.0"
 
 [dev-dependencies]
