@@ -177,6 +177,20 @@ impl From<Depth> for generated::svn_depth_t {
     }
 }
 
+impl From<generated::svn_depth_t> for Depth {
+    fn from(depth: generated::svn_depth_t) -> Self {
+        match depth {
+            generated::svn_depth_t_svn_depth_unknown => Depth::Unknown,
+            generated::svn_depth_t_svn_depth_exclude => Depth::Exclude,
+            generated::svn_depth_t_svn_depth_empty => Depth::Empty,
+            generated::svn_depth_t_svn_depth_files => Depth::Files,
+            generated::svn_depth_t_svn_depth_immediates => Depth::Immediates,
+            generated::svn_depth_t_svn_depth_infinity => Depth::Infinity,
+            n => panic!("Unknown depth: {:?}", n),
+        }
+    }
+}
+
 impl std::str::FromStr for Depth {
     type Err = String;
 
@@ -372,3 +386,142 @@ where
 }
 
 impl<T> Eq for Canonical<T> where T: Eq {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NodeKind {
+    None,
+    File,
+    Dir,
+    Unknown,
+    Symlink,
+}
+
+impl From<generated::svn_node_kind_t> for NodeKind {
+    fn from(kind: generated::svn_node_kind_t) -> Self {
+        match kind {
+            generated::svn_node_kind_t_svn_node_none => NodeKind::None,
+            generated::svn_node_kind_t_svn_node_file => NodeKind::File,
+            generated::svn_node_kind_t_svn_node_dir => NodeKind::Dir,
+            generated::svn_node_kind_t_svn_node_unknown => NodeKind::Unknown,
+            generated::svn_node_kind_t_svn_node_symlink => NodeKind::Symlink,
+            n => panic!("Unknown node kind: {:?}", n),
+        }
+    }
+}
+
+impl From<NodeKind> for generated::svn_node_kind_t {
+    fn from(kind: NodeKind) -> Self {
+        match kind {
+            NodeKind::None => generated::svn_node_kind_t_svn_node_none,
+            NodeKind::File => generated::svn_node_kind_t_svn_node_file,
+            NodeKind::Dir => generated::svn_node_kind_t_svn_node_dir,
+            NodeKind::Unknown => generated::svn_node_kind_t_svn_node_unknown,
+            NodeKind::Symlink => generated::svn_node_kind_t_svn_node_symlink,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatusKind {
+    None,
+    Unversioned,
+    Normal,
+    Added,
+    Missing,
+    Deleted,
+    Replaced,
+    Modified,
+    Merged,
+    Conflicted,
+    Ignored,
+    Obstructed,
+    External,
+    Incomplete,
+}
+
+impl From<generated::svn_wc_status_kind> for StatusKind {
+    fn from(kind: generated::svn_wc_status_kind) -> Self {
+        match kind {
+            generated::svn_wc_status_kind_svn_wc_status_none => StatusKind::None,
+            generated::svn_wc_status_kind_svn_wc_status_unversioned => StatusKind::Unversioned,
+            generated::svn_wc_status_kind_svn_wc_status_normal => StatusKind::Normal,
+            generated::svn_wc_status_kind_svn_wc_status_added => StatusKind::Added,
+            generated::svn_wc_status_kind_svn_wc_status_missing => StatusKind::Missing,
+            generated::svn_wc_status_kind_svn_wc_status_deleted => StatusKind::Deleted,
+            generated::svn_wc_status_kind_svn_wc_status_replaced => StatusKind::Replaced,
+            generated::svn_wc_status_kind_svn_wc_status_modified => StatusKind::Modified,
+            generated::svn_wc_status_kind_svn_wc_status_merged => StatusKind::Merged,
+            generated::svn_wc_status_kind_svn_wc_status_conflicted => StatusKind::Conflicted,
+            generated::svn_wc_status_kind_svn_wc_status_ignored => StatusKind::Ignored,
+            generated::svn_wc_status_kind_svn_wc_status_obstructed => StatusKind::Obstructed,
+            generated::svn_wc_status_kind_svn_wc_status_external => StatusKind::External,
+            generated::svn_wc_status_kind_svn_wc_status_incomplete => StatusKind::Incomplete,
+            n => panic!("Unknown status kind: {:?}", n),
+        }
+    }
+}
+
+impl From<StatusKind> for generated::svn_wc_status_kind {
+    fn from(kind: StatusKind) -> Self {
+        match kind {
+            StatusKind::None => generated::svn_wc_status_kind_svn_wc_status_none,
+            StatusKind::Unversioned => generated::svn_wc_status_kind_svn_wc_status_unversioned,
+            StatusKind::Normal => generated::svn_wc_status_kind_svn_wc_status_normal,
+            StatusKind::Added => generated::svn_wc_status_kind_svn_wc_status_added,
+            StatusKind::Missing => generated::svn_wc_status_kind_svn_wc_status_missing,
+            StatusKind::Deleted => generated::svn_wc_status_kind_svn_wc_status_deleted,
+            StatusKind::Replaced => generated::svn_wc_status_kind_svn_wc_status_replaced,
+            StatusKind::Modified => generated::svn_wc_status_kind_svn_wc_status_modified,
+            StatusKind::Merged => generated::svn_wc_status_kind_svn_wc_status_merged,
+            StatusKind::Conflicted => generated::svn_wc_status_kind_svn_wc_status_conflicted,
+            StatusKind::Ignored => generated::svn_wc_status_kind_svn_wc_status_ignored,
+            StatusKind::Obstructed => generated::svn_wc_status_kind_svn_wc_status_obstructed,
+            StatusKind::External => generated::svn_wc_status_kind_svn_wc_status_external,
+            StatusKind::Incomplete => generated::svn_wc_status_kind_svn_wc_status_incomplete,
+        }
+    }
+}
+
+pub struct Lock(apr::pool::PooledPtr<generated::svn_lock_t>);
+
+impl Lock {
+    pub fn path(&self) -> &str {
+        unsafe {
+            let path = self.0.path;
+            std::ffi::CStr::from_ptr(path).to_str().unwrap()
+        }
+    }
+
+    pub fn token(&self) -> &str {
+        unsafe {
+            let token = self.0.token;
+            std::ffi::CStr::from_ptr(token).to_str().unwrap()
+        }
+    }
+
+    pub fn owner(&self) -> &str {
+        unsafe {
+            let owner = self.0.owner;
+            std::ffi::CStr::from_ptr(owner).to_str().unwrap()
+        }
+    }
+
+    pub fn comment(&self) -> &str {
+        unsafe {
+            let comment = self.0.comment;
+            std::ffi::CStr::from_ptr(comment).to_str().unwrap()
+        }
+    }
+
+    pub fn is_dav_comment(&self) -> bool {
+        self.0.is_dav_comment == 1
+    }
+
+    pub fn creation_date(&self) -> i64 {
+        self.0.creation_date
+    }
+
+    pub fn expiration_date(&self) -> apr::time::Time {
+        apr::time::Time::from(self.0.expiration_date)
+    }
+}

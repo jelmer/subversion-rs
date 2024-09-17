@@ -792,7 +792,7 @@ impl Context {
         let path = std::ffi::CString::new(path).unwrap();
         unsafe {
             let err = svn_client_vacuum(
-                path.as_ptr() as *const i8,
+                path.as_ptr(),
                 remove_unversioned_items.into(),
                 remove_ignored_items.into(),
                 fix_recorded_timestamps.into(),
@@ -819,7 +819,7 @@ impl Context {
         let path = std::ffi::CString::new(path).unwrap();
         unsafe {
             let err = svn_client_cleanup2(
-                path.as_ptr() as *const i8,
+                path.as_ptr(),
                 break_locks.into(),
                 fix_recorded_timestamps.into(),
                 clear_dav_cache.into(),
@@ -847,8 +847,8 @@ impl Context {
         unsafe {
             let err = svn_client_relocate2(
                 path.as_ptr(),
-                from.as_ptr() as *const i8,
-                to.as_ptr() as *const i8,
+                from.as_ptr(),
+                to.as_ptr(),
                 ignore_externals.into(),
                 &mut *self.0,
                 std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
@@ -1028,7 +1028,7 @@ impl Context {
             let err = crate::generated::svn_client_get_repos_root(
                 &mut repos_root,
                 &mut repos_uuid,
-                path_or_url.as_ptr() as *const i8,
+                path_or_url.as_ptr(),
                 self.as_mut_ptr(),
                 pool.as_mut_ptr(),
                 pool.as_mut_ptr(),
@@ -1059,8 +1059,8 @@ impl Context {
             let mut session: *mut crate::generated::svn_ra_session_t = std::ptr::null_mut();
             let err = crate::generated::svn_client_open_ra_session2(
                 &mut session,
-                url.as_ptr() as *const i8,
-                wri_path.as_ptr() as *const i8,
+                url.as_ptr(),
+                wri_path.as_ptr(),
                 self.as_mut_ptr(),
                 pool.as_mut_ptr(),
                 scratch_pool.as_mut_ptr(),
@@ -1092,14 +1092,14 @@ impl Context {
         });
         let changelists = changelists.as_ref().map(|cl| {
             cl.iter()
-                .map(|cl| cl.as_ptr() as *const i8)
+                .map(|cl| cl.as_ptr())
                 .collect::<apr::tables::ArrayHeader<_>>()
         });
         let mut receiver = receiver;
         let receiver = &mut receiver as *mut _ as *mut std::ffi::c_void;
         unsafe {
             let err = crate::generated::svn_client_info4(
-                abspath_or_url.as_ptr() as *const i8,
+                abspath_or_url.as_ptr(),
                 &peg_revision.into(),
                 &revision.into(),
                 depth.into(),
@@ -1121,6 +1121,223 @@ impl Context {
 impl Default for Context {
     fn default() -> Self {
         Self::new().unwrap()
+    }
+}
+
+pub struct Status(pub(crate) *const crate::generated::svn_client_status_t);
+
+impl Status {
+    pub fn kind(&self) -> crate::NodeKind {
+        unsafe { (*self.0).kind.into() }
+    }
+
+    pub fn local_abspath(&self) -> &str {
+        unsafe {
+            std::ffi::CStr::from_ptr((*self.0).local_abspath)
+                .to_str()
+                .unwrap()
+        }
+    }
+
+    pub fn filesize(&self) -> i64 {
+        unsafe { (*self.0).filesize }
+    }
+
+    pub fn versioned(&self) -> bool {
+        unsafe { (*self.0).versioned != 0 }
+    }
+
+    pub fn conflicted(&self) -> bool {
+        unsafe { (*self.0).conflicted != 0 }
+    }
+
+    pub fn node_status(&self) -> crate::StatusKind {
+        unsafe { (*self.0).node_status.into() }
+    }
+
+    pub fn text_status(&self) -> crate::StatusKind {
+        unsafe { (*self.0).text_status.into() }
+    }
+
+    pub fn prop_status(&self) -> crate::StatusKind {
+        unsafe { (*self.0).prop_status.into() }
+    }
+
+    pub fn wc_is_locked(&self) -> bool {
+        unsafe { (*self.0).wc_is_locked != 0 }
+    }
+
+    pub fn copied(&self) -> bool {
+        unsafe { (*self.0).copied != 0 }
+    }
+
+    pub fn repos_root_url(&self) -> &str {
+        unsafe {
+            std::ffi::CStr::from_ptr((*self.0).repos_root_url)
+                .to_str()
+                .unwrap()
+        }
+    }
+
+    pub fn repos_uuid(&self) -> &str {
+        unsafe {
+            std::ffi::CStr::from_ptr((*self.0).repos_uuid)
+                .to_str()
+                .unwrap()
+        }
+    }
+
+    pub fn repos_relpath(&self) -> &str {
+        unsafe {
+            std::ffi::CStr::from_ptr((*self.0).repos_relpath)
+                .to_str()
+                .unwrap()
+        }
+    }
+
+    pub fn revision(&self) -> Revnum {
+        unsafe { (*self.0).revision }
+    }
+
+    pub fn changed_rev(&self) -> Revnum {
+        unsafe { (*self.0).changed_rev }
+    }
+
+    pub fn changed_date(&self) -> apr::time::Time {
+        unsafe { apr::time::Time::from((*self.0).changed_date) }
+    }
+
+    pub fn changed_author(&self) -> &str {
+        unsafe {
+            std::ffi::CStr::from_ptr((*self.0).changed_author)
+                .to_str()
+                .unwrap()
+        }
+    }
+
+    pub fn switched(&self) -> bool {
+        unsafe { (*self.0).switched != 0 }
+    }
+
+    pub fn file_external(&self) -> bool {
+        unsafe { (*self.0).file_external != 0 }
+    }
+
+    pub fn lock(&self) -> Option<&crate::Lock> {
+        todo!()
+    }
+
+    pub fn changelist(&self) -> Option<&str> {
+        unsafe {
+            if (*self.0).changelist.is_null() {
+                None
+            } else {
+                Some(
+                    std::ffi::CStr::from_ptr((*self.0).changelist)
+                        .to_str()
+                        .unwrap(),
+                )
+            }
+        }
+    }
+
+    pub fn depth(&self) -> crate::Depth {
+        unsafe { (*self.0).depth.into() }
+    }
+
+    pub fn ood_kind(&self) -> crate::NodeKind {
+        unsafe { (*self.0).ood_kind.into() }
+    }
+
+    pub fn repos_node_status(&self) -> crate::StatusKind {
+        unsafe { (*self.0).repos_node_status.into() }
+    }
+
+    pub fn repos_text_status(&self) -> crate::StatusKind {
+        unsafe { (*self.0).repos_text_status.into() }
+    }
+
+    pub fn repos_prop_status(&self) -> crate::StatusKind {
+        unsafe { (*self.0).repos_prop_status.into() }
+    }
+
+    pub fn repos_lock(&self) -> Option<crate::Lock> {
+        todo!()
+    }
+
+    pub fn ood_changed_rev(&self) -> Option<Revnum> {
+        unsafe {
+            if (*self.0).ood_changed_rev == -1 {
+                None
+            } else {
+                Some((*self.0).ood_changed_rev)
+            }
+        }
+    }
+
+    pub fn ood_changed_author(&self) -> Option<&str> {
+        unsafe {
+            if (*self.0).ood_changed_author.is_null() {
+                None
+            } else {
+                Some(
+                    std::ffi::CStr::from_ptr((*self.0).ood_changed_author)
+                        .to_str()
+                        .unwrap(),
+                )
+            }
+        }
+    }
+
+    pub fn moved_from_abspath(&self) -> Option<&str> {
+        unsafe {
+            if (*self.0).moved_from_abspath.is_null() {
+                None
+            } else {
+                Some(
+                    std::ffi::CStr::from_ptr((*self.0).moved_from_abspath)
+                        .to_str()
+                        .unwrap(),
+                )
+            }
+        }
+    }
+
+    pub fn moved_to_abspath(&self) -> Option<&str> {
+        unsafe {
+            if (*self.0).moved_to_abspath.is_null() {
+                None
+            } else {
+                Some(
+                    std::ffi::CStr::from_ptr((*self.0).moved_to_abspath)
+                        .to_str()
+                        .unwrap(),
+                )
+            }
+        }
+    }
+}
+
+pub struct Conflict(pub(crate) apr::pool::PooledPtr<crate::generated::svn_client_conflict_t>);
+
+impl Conflict {
+    pub fn prop_get_description(&mut self) -> Result<String, Error> {
+        let mut pool = apr::pool::Pool::new();
+        let mut description: *const i8 = std::ptr::null_mut();
+        let err = unsafe {
+            crate::generated::svn_client_conflict_prop_get_description(
+                &mut description,
+                self.0.as_mut_ptr(),
+                pool.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            )
+        };
+
+        Error::from_raw(err)?;
+        Ok(unsafe { std::ffi::CStr::from_ptr(description) }
+            .to_str()
+            .unwrap()
+            .to_owned())
     }
 }
 
@@ -1155,30 +1372,5 @@ mod tests {
             )
             .unwrap();
         assert_eq!(revnum, 0);
-    }
-}
-
-pub struct Status(pub(crate) *const crate::generated::svn_client_status_t);
-
-pub struct Conflict(pub(crate) apr::pool::PooledPtr<crate::generated::svn_client_conflict_t>);
-
-impl Conflict {
-    pub fn prop_get_description(&mut self) -> Result<String, Error> {
-        let mut pool = apr::pool::Pool::new();
-        let mut description: *const i8 = std::ptr::null_mut();
-        let err = unsafe {
-            crate::generated::svn_client_conflict_prop_get_description(
-                &mut description,
-                self.0.as_mut_ptr(),
-                pool.as_mut_ptr(),
-                pool.as_mut_ptr(),
-            )
-        };
-
-        Error::from_raw(err)?;
-        Ok(unsafe { std::ffi::CStr::from_ptr(description) }
-            .to_str()
-            .unwrap()
-            .to_owned())
     }
 }
