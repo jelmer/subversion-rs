@@ -3,6 +3,7 @@ use generated::svn_error_t;
 
 // Errors are a bit special; they own their own pool, so don't need to use PooledPtr
 pub struct Error(*mut svn_error_t);
+unsafe impl Send for Error {}
 
 impl Error {
     pub fn new(status: apr::Status, child: Option<Error>, msg: &str) -> Self {
