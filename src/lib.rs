@@ -281,6 +281,7 @@ impl Clone for CommitInfo {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default)]
 pub struct RevisionRange {
     pub start: Revision,
     pub end: Revision,
@@ -304,6 +305,20 @@ impl RevisionRange {
 }
 
 pub struct LogEntry(apr::pool::PooledPtr<generated::svn_log_entry_t>);
+unsafe impl Send for LogEntry {}
+
+impl Clone for LogEntry {
+    fn clone(&self) -> Self {
+        Self(
+            apr::pool::PooledPtr::initialize(|pool| {
+                Ok::<_, Error>(unsafe {
+                    crate::generated::svn_log_entry_dup(self.0.as_ptr(), pool.as_mut_ptr())
+                })
+            })
+            .unwrap(),
+        )
+    }
+}
 
 pub type FileSize = crate::generated::svn_filesize_t;
 

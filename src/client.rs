@@ -229,6 +229,26 @@ extern "C" fn wrap_info_receiver2(
 /// This is the main entry point for the client library. It holds client specific configuration and
 /// callbacks
 pub struct Context(apr::pool::PooledPtr<svn_client_ctx_t>);
+unsafe impl Send for Context {}
+
+impl Clone for Context {
+    fn clone(&self) -> Self {
+        let new = Context::new().unwrap();
+
+        // TODO: Copy auth_baton
+        // TODO: Copy notify func
+        // TODO: copy log_msg_func
+        // TODO: copy config
+        // TODO: copy cancel_func
+        // TODO: copy progress_func
+        // TODO: copy wc_ctx
+        // TODO: copy conflict_func
+        // TODO: copy mimetypes map
+        // TODO: copy check_tunnel_func
+        // TODO: copy open_tunnel_func
+        new
+    }
+}
 
 impl Context {
     pub fn new() -> Result<Self, Error> {
@@ -243,11 +263,11 @@ impl Context {
         })?))
     }
 
-    pub fn as_mut_ptr(&mut self) -> *mut svn_client_ctx_t {
+    pub(crate) unsafe fn as_mut_ptr(&mut self) -> *mut svn_client_ctx_t {
         self.0.as_mut_ptr()
     }
 
-    pub fn as_ptr(&self) -> *const svn_client_ctx_t {
+    pub(crate) unsafe fn as_ptr(&self) -> *const svn_client_ctx_t {
         self.0.as_ptr()
     }
 
@@ -740,6 +760,60 @@ impl Context {
             Error::from_raw(err)?;
             Ok(())
         }
+    }
+
+    pub fn iter_logs(
+        &mut self,
+        targets: &[&str],
+        peg_revision: Revision,
+        revision_ranges: &[RevisionRange],
+        limit: i32,
+        discover_changed_paths: bool,
+        strict_node_history: bool,
+        include_merged_revisions: bool,
+        revprops: &[&str],
+    ) -> impl Iterator<Item = Result<LogEntry, Error>> {
+        // Create a channel between the worker and this thread
+        let (tx, rx) = std::sync::mpsc::channel();
+
+        let targets = targets.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let revision_ranges = revision_ranges.to_vec();
+        let revprops = revprops.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let mut client = self.clone();
+
+        std::thread::spawn(move || {
+            let r = client.log(
+                targets
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .as_slice(),
+                peg_revision,
+                &revision_ranges,
+                limit,
+                discover_changed_paths,
+                strict_node_history,
+                include_merged_revisions,
+                revprops
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .as_slice(),
+                &mut |log_entry| {
+                    tx.send(Ok(Some(log_entry.clone()))).unwrap();
+                    Ok(())
+                },
+            );
+            if let Err(e) = r {
+                tx.send(Err(e)).unwrap();
+            }
+            tx.send(Ok(None)).unwrap();
+        });
+
+        // Return an iterator that reads from the channel
+        rx.into_iter()
+            .take_while(|x| x.is_ok() && x.as_ref().unwrap().is_some())
+            .map(|x| x.transpose().unwrap())
     }
 
     pub fn args_to_target_array(
