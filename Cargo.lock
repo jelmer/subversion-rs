@@ -13,13 +13,13 @@ dependencies = [
 
 [[package]]
 name = "apr"
-version = "0.1.10"
+version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21860bca744744f1bc76200b3392a9f951bb880e5258ab40e41ed3cf677a32e3"
+checksum = "e5d6a58684359b0f79b1717e17a05b3d4415ea020e666d051ce77a8b22506ec9"
 dependencies = [
  "bindgen",
  "ctor",
- "system-deps 6.2.2",
+ "system-deps",
 ]
 
 [[package]]
@@ -61,16 +61,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6fac387a98bb7c37292057cffc56d62ecb629900026402633ae9160df93a8766"
 dependencies = [
  "nom",
-]
-
-[[package]]
-name = "cfg-expr"
-version = "0.15.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d067ad48b8650848b989a59a86c6c36a995d02d2bf778d45c3c5d57bc2718f02"
-dependencies = [
- "smallvec",
- "target-lexicon",
 ]
 
 [[package]]
@@ -478,7 +468,7 @@ dependencies = [
  "ctor",
  "lazy_static",
  "pyo3",
- "system-deps 7.0.2",
+ "system-deps",
  "tempfile",
  "url",
 ]
@@ -496,24 +486,11 @@ dependencies = [
 
 [[package]]
 name = "system-deps"
-version = "6.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3e535eb8dded36d55ec13eddacd30dec501792ff23a0b1682c38601b8cf2349"
-dependencies = [
- "cfg-expr 0.15.8",
- "heck",
- "pkg-config",
- "toml",
- "version-compare",
-]
-
-[[package]]
-name = "system-deps"
 version = "7.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "070a0a5e7da2d24be457809c4b3baa57a835fd2829ad8b86f9a049052fe71031"
 dependencies = [
- "cfg-expr 0.16.0",
+ "cfg-expr",
  "heck",
  "pkg-config",
  "toml",
