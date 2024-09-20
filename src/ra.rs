@@ -1,10 +1,60 @@
 use crate::generated::svn_ra_session_t;
-use crate::{Error, Revnum};
+use crate::{Depth, Error, Revnum};
 use apr::pool::{Pool, PooledPtr};
+use crate::config::Config;
 
 pub struct Session(PooledPtr<svn_ra_session_t>);
 
 impl Session {
+    pub fn open(url: &str, uuid: Option<&str>, mut callbacks: Option<&mut Callbacks>, mut config: Option<&mut Config>) -> Result<(Self, Option<String>, Option<String>), Error> {
+        let url = std::ffi::CString::new(url).unwrap();
+        let mut corrected_url = std::ptr::null();
+        let mut redirect_url = std::ptr::null();
+        let mut pool = Pool::new();
+        let mut session = std::ptr::null_mut();
+        let uuid = if let Some(uuid) = uuid {
+            Some(std::ffi::CString::new(uuid).unwrap())
+        } else {
+            None
+        };
+        let err = unsafe {
+            crate::generated::svn_ra_open5(
+                &mut session,
+                &mut corrected_url,
+                &mut redirect_url,
+                url.as_ptr(),
+                if let Some(uuid) = uuid {
+                    uuid.as_ptr()
+                } else {
+                    std::ptr::null()
+                },
+                if let Some(callbacks) = callbacks.as_mut() {
+                    callbacks.as_mut_ptr()
+                } else {
+                    Callbacks::default().as_mut_ptr()
+                },
+                std::ptr::null_mut(),
+                if let Some(config) = config.as_mut() {
+                    config.as_mut_ptr()
+                } else {
+                    std::ptr::null_mut()
+                },
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        Ok((Self::from_raw(unsafe { PooledPtr::in_pool(std::rc::Rc::new(pool), session) }), if corrected_url.is_null() {
+            None
+        } else {
+            Some(unsafe { std::ffi::CStr::from_ptr(corrected_url) }.to_str().unwrap().to_string())
+        },
+        if redirect_url.is_null() {
+            None
+        } else {
+            Some(unsafe { std::ffi::CStr::from_ptr(redirect_url) }.to_str().unwrap().to_string())
+        }))
+    }
+
     pub fn reparent(&mut self, url: &str) -> Result<(), Error> {
         let url = std::ffi::CString::new(url).unwrap();
         let mut pool = Pool::new();
@@ -49,6 +99,22 @@ impl Session {
         Error::from_raw(err)?;
         let path = unsafe { std::ffi::CStr::from_ptr(path) };
         Ok(path.to_string_lossy().into_owned())
+    }
+
+    pub fn get_path_relative_to_root(&mut self, url: &str) -> String {
+        let url = std::ffi::CString::new(url).unwrap();
+        let mut pool = Pool::new();
+        let mut path = std::ptr::null();
+        unsafe {
+            crate::generated::svn_ra_get_path_relative_to_root(
+                self.0.as_mut_ptr(),
+                &mut path,
+                url.as_ptr(),
+                pool.as_mut_ptr(),
+            );
+        }
+        let path = unsafe { std::ffi::CStr::from_ptr(path) };
+        path.to_string_lossy().into_owned()
     }
 
     pub fn get_latest_revnum(&mut self) -> Result<Revnum, Error> {
@@ -164,5 +230,44 @@ impl Session {
                 std::slice::from_raw_parts((*value).data as *const u8, (*value).len)
             })))
         }
+    }
+}
+
+pub fn version() -> crate::Version {
+    unsafe { crate::Version(crate::generated::svn_ra_version()) }
+}
+
+pub trait Reporter {
+    fn set_path(&mut self, path: &str, rev: Revnum, depth: Depth, start_empty: bool, lock_token: &str) -> Result<(), Error>;
+
+    fn delete_path(&mut self, path: &str) -> Result<(), Error>;
+
+    fn link_path(&mut self, path: &str, url: &str, rev: Revnum, depth: Depth, start_empty: bool, lock_token: &str) -> Result<(), Error>;
+
+    fn finish_report(&mut self) -> Result<(), Error>;
+
+    fn abort_report(&mut self) -> Result<(), Error>;
+}
+
+pub struct Callbacks(PooledPtr<crate::generated::svn_ra_callbacks2_t>);
+
+impl Default for Callbacks {
+    fn default() -> Self {
+        Self::new().unwrap()
+    }
+}
+
+impl Callbacks {
+    pub fn new() -> Result<Callbacks, crate::Error> {
+        Ok(Callbacks(PooledPtr::initialize(|pool| unsafe {
+            let mut callbacks = std::ptr::null_mut();
+            let err = crate::generated::svn_ra_create_callbacks(&mut callbacks, pool.as_mut_ptr());
+            Error::from_raw(err)?;
+            Ok::<_, crate::Error>(callbacks)
+        })?))
+    }
+
+    fn as_mut_ptr(&mut self) -> *mut crate::generated::svn_ra_callbacks2_t {
+        self.0.as_mut_ptr()
     }
 }
