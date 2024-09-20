@@ -2,6 +2,8 @@ use crate::generated::svn_ra_session_t;
 use crate::{Depth, Error, Revnum};
 use apr::pool::{Pool, PooledPtr};
 use crate::config::Config;
+use std::collections::HashMap;
+use crate::delta::{Editor, WrapEditor};
 
 pub struct Session(PooledPtr<svn_ra_session_t>);
 
@@ -180,7 +182,7 @@ impl Session {
     pub fn rev_proplist(
         &mut self,
         rev: Revnum,
-    ) -> Result<std::collections::HashMap<String, Vec<u8>>, Error> {
+    ) -> Result<HashMap<String, Vec<u8>>, Error> {
         let mut pool = Pool::new();
         let mut props = std::ptr::null_mut();
         let err = unsafe {
@@ -231,7 +233,98 @@ impl Session {
             })))
         }
     }
+
+    pub fn get_commit_editor(&mut self, revprop_table: HashMap<String, Vec<u8>>, commit_callback: &dyn FnMut(&crate::CommitInfo) -> Result<(), Error>, lock_tokens: HashMap<String, String>, keep_locks: bool) -> Result<Box<dyn Editor>, Error> {
+        let pool = std::rc::Rc::new(Pool::new());
+        let commit_callback = Box::into_raw(Box::new(commit_callback));
+        let mut editor = std::ptr::null();
+        let mut edit_baton = std::ptr::null_mut();
+        let mut hash_revprop_table = apr::hash::Hash::<&str, *const crate::generated::svn_string_t>::in_pool(&pool);
+        for (k, v) in revprop_table.iter() {
+            let v: crate::string::String = v.as_slice().into();
+            hash_revprop_table.set(&k, &v.as_ptr());
+        }
+        let mut hash_lock_tokens = apr::hash::Hash::<&str, *const std::os::raw::c_char>::in_pool(&pool);
+        for (k, v) in lock_tokens.iter() {
+            hash_lock_tokens.set(&k, &(v.as_ptr() as *const _));
+        }
+        let mut result_pool = Pool::new();
+        let err = unsafe {
+            crate::generated::svn_ra_get_commit_editor3(
+                self.0.as_mut_ptr(),
+                &mut editor,
+                &mut edit_baton,
+                hash_revprop_table.as_mut_ptr(),
+                Some(crate::client::wrap_commit_callback2),
+                commit_callback as *mut _ as *mut _,
+                hash_lock_tokens.as_mut_ptr(),
+                keep_locks.into(),
+                result_pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        Ok(Box::new(crate::delta::WrapEditor(editor, unsafe { PooledPtr::in_pool(std::rc::Rc::new(result_pool), edit_baton) })))
+    }
+
+    pub fn get_file(&mut self, path: &str, rev: Revnum, mut stream: crate::io::Stream) -> Result<(Revnum, HashMap<String, Vec<u8>>), Error> {
+        let path = std::ffi::CString::new(path).unwrap();
+        let mut pool = Pool::new();
+        let mut props = std::ptr::null_mut();
+        let mut fetched_rev = 0;
+        let err = unsafe {
+            crate::generated::svn_ra_get_file(
+                self.0.as_mut_ptr(),
+                path.as_ptr(),
+                rev.into(),
+                stream.as_mut_ptr(),
+                &mut fetched_rev,
+                &mut props,
+                pool.as_mut_ptr(),
+            )
+        };
+        crate::Error::from_raw(err)?;
+        let mut hash =
+            apr::hash::Hash::<&str, *const crate::generated::svn_string_t>::from_raw(unsafe {
+                PooledPtr::in_pool(std::rc::Rc::new(pool), props)
+            });
+        Ok((fetched_rev, hash.iter().map(|(k, v)| (String::from_utf8_lossy(k).into_owned(), Vec::from(unsafe { std::slice::from_raw_parts((**v).data as *const u8, (**v).len) }))).collect()))
+    }
+
+    pub fn get_dir(&mut self, path: &str, rev: Revnum) -> Result<(Revnum, HashMap<String, Dirent>, HashMap<String, Vec<u8>>), Error> {
+        let path = std::ffi::CString::new(path).unwrap();
+        let mut pool = Pool::new();
+        let mut props = std::ptr::null_mut();
+        let mut fetched_rev = 0;
+        let mut dirents = std::ptr::null_mut();
+        let dirent_fields = crate::generated::SVN_DIRENT_KIND | crate::generated::SVN_DIRENT_SIZE | crate::generated::SVN_DIRENT_HAS_PROPS | crate::generated::SVN_DIRENT_CREATED_REV | crate::generated::SVN_DIRENT_TIME | crate::generated::SVN_DIRENT_LAST_AUTHOR;
+        let err = unsafe {
+            crate::generated::svn_ra_get_dir2(
+                self.0.as_mut_ptr(),
+                &mut dirents,
+                &mut fetched_rev,
+                &mut props,
+                path.as_ptr(),
+                rev.into(),
+                dirent_fields,
+                pool.as_mut_ptr(),
+            )
+        };
+        let pool = std::rc::Rc::new(pool);
+        crate::Error::from_raw(err)?;
+        let mut props_hash =
+            apr::hash::Hash::<&str, *const crate::generated::svn_string_t>::from_raw(unsafe {
+                PooledPtr::in_pool(pool.clone(), props)
+            });
+        let mut dirents_hash = apr::hash::Hash::<&str, *mut crate::generated::svn_dirent_t>::from_raw(unsafe {
+            PooledPtr::in_pool(pool.clone(), dirents)
+        });
+        let props = props_hash.iter().map(|(k, v)| (String::from_utf8_lossy(k).into_owned(), Vec::from(unsafe { std::slice::from_raw_parts((**v).data as *const u8, (**v).len) }))).collect();
+        let dirents = dirents_hash.iter().map(|(k, v)| (String::from_utf8_lossy(k).into_owned(), Dirent(unsafe { PooledPtr::in_pool(pool.clone(), *v) }))).collect();
+        Ok((fetched_rev, dirents, props))
+    }
 }
+
+pub struct Dirent(PooledPtr<crate::generated::svn_dirent_t>);
 
 pub fn version() -> crate::Version {
     unsafe { crate::Version(crate::generated::svn_ra_version()) }

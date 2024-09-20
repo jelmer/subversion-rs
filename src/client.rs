@@ -18,7 +18,7 @@ pub fn version() -> Version {
     unsafe { Version(svn_client_version()) }
 }
 
-extern "C" fn wrap_commit_callback2(
+pub(crate) extern "C" fn wrap_commit_callback2(
     commit_info: *const crate::generated::svn_commit_info_t,
     baton: *mut std::ffi::c_void,
     pool: *mut apr::apr_pool_t,
