@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod client;
 pub mod config;
+pub mod delta;
 pub mod dirent;
 pub mod error;
 pub mod fs;
@@ -10,6 +11,7 @@ pub mod mergeinfo;
 pub mod props;
 pub mod ra;
 pub mod repos;
+pub mod string;
 pub mod time;
 pub mod uri;
 pub mod version;
@@ -538,5 +540,35 @@ impl Lock {
 
     pub fn expiration_date(&self) -> apr::time::Time {
         apr::time::Time::from(self.0.expiration_date)
+    }
+}
+
+pub enum ChecksumKind {
+    MD5,
+    SHA1,
+    Fnv1a32,
+    Fnv1a32x4,
+}
+
+impl From<crate::generated::svn_checksum_kind_t> for ChecksumKind {
+    fn from(kind: crate::generated::svn_checksum_kind_t) -> Self {
+        match kind {
+            crate::generated::svn_checksum_kind_t_svn_checksum_md5 => ChecksumKind::MD5,
+            crate::generated::svn_checksum_kind_t_svn_checksum_sha1 => ChecksumKind::SHA1,
+            crate::generated::svn_checksum_kind_t_svn_checksum_fnv1a_32 => ChecksumKind::Fnv1a32,
+            crate::generated::svn_checksum_kind_t_svn_checksum_fnv1a_32x4 => ChecksumKind::Fnv1a32x4,
+            n => panic!("Unknown checksum kind: {:?}", n),
+        }
+    }
+}
+
+impl From<ChecksumKind> for crate::generated::svn_checksum_kind_t {
+    fn from(kind: ChecksumKind) -> Self {
+        match kind {
+            ChecksumKind::MD5 => crate::generated::svn_checksum_kind_t_svn_checksum_md5,
+            ChecksumKind::SHA1 => crate::generated::svn_checksum_kind_t_svn_checksum_sha1,
+            ChecksumKind::Fnv1a32 => crate::generated::svn_checksum_kind_t_svn_checksum_fnv1a_32,
+            ChecksumKind::Fnv1a32x4 => crate::generated::svn_checksum_kind_t_svn_checksum_fnv1a_32x4,
+        }
     }
 }

@@ -13,7 +13,9 @@ dependencies = [
 
 [[package]]
 name = "apr"
-version = "0.1.10"
+version = "0.1.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "29bde974720ddea8ff34b65f7224164e56fcc7a22540b7f0e61084c98476f7d1"
 dependencies = [
  "bindgen",
  "ctor",
