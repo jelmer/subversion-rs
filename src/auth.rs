@@ -2,6 +2,7 @@ use crate::Error;
 use apr::pool::PooledPtr;
 
 pub struct AuthBaton(PooledPtr<crate::generated::svn_auth_baton_t>);
+unsafe impl Send for AuthBaton {}
 
 pub trait Credentials {
     fn kind() -> &'static str;
