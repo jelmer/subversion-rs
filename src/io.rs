@@ -1,6 +1,7 @@
 use crate::generated::svn_io_dirent2_t;
 use crate::Error;
 
+#[allow(dead_code)]
 pub struct Dirent(*const svn_io_dirent2_t);
 
 impl From<*const svn_io_dirent2_t> for Dirent {
