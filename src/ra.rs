@@ -6,6 +6,7 @@ use apr::pool::{Pool, PooledPtr};
 use std::collections::HashMap;
 
 pub struct Session(PooledPtr<svn_ra_session_t>);
+unsafe impl Send for Session {}
 
 impl Session {
     pub fn open(
