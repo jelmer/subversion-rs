@@ -72,16 +72,24 @@ impl AuthBaton {
         }
     }
 
-    pub fn forget_credentials<C: Credentials>(&mut self, realm: &str) -> Result<(), Error> {
-        let cred_kind = std::ffi::CString::new(C::kind()).unwrap();
-        let realm = std::ffi::CString::new(realm).unwrap();
+    pub fn forget_credentials<C: Credentials>(
+        &mut self,
+        cred_kind: Option<&str>,
+        realm: Option<&str>,
+    ) -> Result<(), Error> {
+        let cred_kind = cred_kind
+            .map(|s| std::ffi::CString::new(s).unwrap())
+            .map_or_else(std::ptr::null, |p| p.as_ptr());
+        let realmstring = realm
+            .map(|s| std::ffi::CString::new(s).unwrap())
+            .map_or_else(std::ptr::null, |p| p.as_ptr());
         let err = std::ptr::null_mut();
         let mut pool = apr::pool::Pool::new();
         unsafe {
             crate::generated::svn_auth_forget_credentials(
                 self.0.as_mut_ptr(),
-                cred_kind.as_ptr(),
-                realm.as_ptr(),
+                cred_kind,
+                realmstring,
                 pool.as_mut_ptr(),
             );
             Error::from_raw(err)?;
