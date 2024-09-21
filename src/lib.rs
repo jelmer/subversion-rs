@@ -71,7 +71,8 @@ impl FromStr for Revision {
 
 #[cfg(feature = "pyo3")]
 impl pyo3::FromPyObject<'_> for Revision {
-    fn extract(ob: &pyo3::PyAny) -> pyo3::PyResult<Self> {
+    fn extract_bound(ob: &pyo3::Bound<pyo3::PyAny>) -> pyo3::PyResult<Self> {
+        use pyo3::prelude::*;
         if ob.is_instance_of::<pyo3::types::PyString>() {
             let rev = ob.extract::<String>()?;
             return Revision::from_str(&rev).map_err(|e| {
@@ -211,7 +212,8 @@ impl std::str::FromStr for Depth {
 
 #[cfg(feature = "pyo3")]
 impl pyo3::FromPyObject<'_> for Depth {
-    fn extract(ob: &pyo3::PyAny) -> pyo3::PyResult<Self> {
+    fn extract_bound(ob: &pyo3::Bound<pyo3::PyAny>) -> pyo3::PyResult<Self> {
+        use pyo3::prelude::*;
         if ob.is_instance_of::<pyo3::types::PyString>() {
             let depth = ob.extract::<String>()?;
             return Depth::from_str(&depth).map_err(|e| {
@@ -556,7 +558,9 @@ impl From<crate::generated::svn_checksum_kind_t> for ChecksumKind {
             crate::generated::svn_checksum_kind_t_svn_checksum_md5 => ChecksumKind::MD5,
             crate::generated::svn_checksum_kind_t_svn_checksum_sha1 => ChecksumKind::SHA1,
             crate::generated::svn_checksum_kind_t_svn_checksum_fnv1a_32 => ChecksumKind::Fnv1a32,
-            crate::generated::svn_checksum_kind_t_svn_checksum_fnv1a_32x4 => ChecksumKind::Fnv1a32x4,
+            crate::generated::svn_checksum_kind_t_svn_checksum_fnv1a_32x4 => {
+                ChecksumKind::Fnv1a32x4
+            }
             n => panic!("Unknown checksum kind: {:?}", n),
         }
     }
@@ -568,7 +572,9 @@ impl From<ChecksumKind> for crate::generated::svn_checksum_kind_t {
             ChecksumKind::MD5 => crate::generated::svn_checksum_kind_t_svn_checksum_md5,
             ChecksumKind::SHA1 => crate::generated::svn_checksum_kind_t_svn_checksum_sha1,
             ChecksumKind::Fnv1a32 => crate::generated::svn_checksum_kind_t_svn_checksum_fnv1a_32,
-            ChecksumKind::Fnv1a32x4 => crate::generated::svn_checksum_kind_t_svn_checksum_fnv1a_32x4,
+            ChecksumKind::Fnv1a32x4 => {
+                crate::generated::svn_checksum_kind_t_svn_checksum_fnv1a_32x4
+            }
         }
     }
 }
