@@ -390,6 +390,7 @@ impl Session {
     }
 }
 
+#[allow(dead_code)]
 pub struct Dirent(PooledPtr<crate::generated::svn_dirent_t>);
 
 pub fn version() -> crate::Version {
