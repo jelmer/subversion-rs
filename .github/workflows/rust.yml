@@ -21,7 +21,15 @@ jobs:
       run: |
         svnversion=$(svn --version | grep -oP 'svn, version \K\d+\.\d+\.\d+')
         sudo sed -i "s/^Version: \$/Version: $svnversion/" /usr/lib/*/pkgconfig/libsvn_*.pc
+    - name: Install cargo-all-features
+      run: cargo install cargo-all-features
     - name: Build
-      run: cargo build --verbose
+      run: cargo build-all-features --verbose
+      env:
+        RUSTFLAGS: -Dwarnings
     - name: Run tests
-      run: cargo test --verbose
+      run: cargo test-all-features --verbose
+      env:
+        RUSTFLAGS: -Dwarnings
+    - name: Check formatting
+      run: cargo fmt -- --check
