@@ -244,6 +244,10 @@ pub fn delete(path: &std::path::Path) -> Result<(), crate::Error> {
     Ok(())
 }
 
+pub fn version() -> crate::Version {
+    unsafe { crate::Version(crate::generated::svn_client_version()) }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -263,8 +267,9 @@ mod tests {
         assert!(repos.has_capability("mergeinfo").unwrap());
         assert!(repos.has_capability("unknown").is_err());
     }
-}
 
-pub fn version() -> crate::Version {
-    unsafe { crate::Version(crate::generated::svn_client_version()) }
+    #[test]
+    fn test_version() {
+        assert!(super::version().major() >= 1);
+    }
 }
