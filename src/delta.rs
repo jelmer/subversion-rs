@@ -231,6 +231,7 @@ pub struct WrapFileEditor<'a>(
     apr::pool::PooledPtr<std::ffi::c_void>,
 );
 
+#[allow(dead_code)]
 pub struct WrapTxdeltaWindowHandler(
     apr::pool::PooledPtr<crate::generated::svn_txdelta_window_handler_t>,
     apr::pool::PooledPtr<std::ffi::c_void>,

@@ -267,10 +267,6 @@ impl Context {
         self.0.as_mut_ptr()
     }
 
-    pub(crate) unsafe fn as_ptr(&self) -> *const svn_client_ctx_t {
-        self.0.as_ptr()
-    }
-
     pub fn set_auth<'a, 'b>(&'a mut self, auth_baton: &'b mut crate::auth::AuthBaton)
     where
         'b: 'a,

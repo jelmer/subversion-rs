@@ -196,6 +196,7 @@ impl Repos {
     }
 }
 
+#[allow(dead_code)]
 pub struct Notify(PooledPtr<crate::generated::svn_repos_notify_t>);
 
 extern "C" fn wrap_notify_func(
