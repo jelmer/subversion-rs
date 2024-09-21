@@ -194,19 +194,12 @@ impl<'a> From<&Uri<'a>> for &'a str {
 }
 
 #[cfg(feature = "url")]
-impl TryFrom<Uri> for url::Url {
-    type Error = crate::Error;
+impl TryFrom<Uri<'_>> for url::Url {
+    type Error = url::ParseError;
 
     fn try_from(uri: Uri) -> Result<Self, Self::Error> {
-        let uri = uri.to_str()?;
-        Ok(url::Url::parse(uri)?)
-    }
-}
-
-#[cfg(feature = "url")]
-impl From<url::Url> for Uri<'_> {
-    fn from(url: url::Url) -> Self {
-        Self::new(url.as_str())
+        let uri = uri.to_string();
+        Ok(url::Url::parse(&uri)?)
     }
 }
 
