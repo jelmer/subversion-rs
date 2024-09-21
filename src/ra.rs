@@ -1,10 +1,76 @@
+use crate::config::Config;
+use crate::delta::Editor;
 use crate::generated::svn_ra_session_t;
-use crate::{Error, Revnum};
+use crate::{Depth, Error, Revnum};
 use apr::pool::{Pool, PooledPtr};
+use std::collections::HashMap;
 
 pub struct Session(PooledPtr<svn_ra_session_t>);
 
 impl Session {
+    pub fn open(
+        url: &str,
+        uuid: Option<&str>,
+        mut callbacks: Option<&mut Callbacks>,
+        mut config: Option<&mut Config>,
+    ) -> Result<(Self, Option<String>, Option<String>), Error> {
+        let url = std::ffi::CString::new(url).unwrap();
+        let mut corrected_url = std::ptr::null();
+        let mut redirect_url = std::ptr::null();
+        let mut pool = Pool::new();
+        let mut session = std::ptr::null_mut();
+        let uuid = uuid.map(|uuid| std::ffi::CString::new(uuid).unwrap());
+        let err = unsafe {
+            crate::generated::svn_ra_open5(
+                &mut session,
+                &mut corrected_url,
+                &mut redirect_url,
+                url.as_ptr(),
+                if let Some(uuid) = uuid {
+                    uuid.as_ptr()
+                } else {
+                    std::ptr::null()
+                },
+                if let Some(callbacks) = callbacks.as_mut() {
+                    callbacks.as_mut_ptr()
+                } else {
+                    Callbacks::default().as_mut_ptr()
+                },
+                std::ptr::null_mut(),
+                if let Some(config) = config.as_mut() {
+                    config.as_mut_ptr()
+                } else {
+                    std::ptr::null_mut()
+                },
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        Ok((
+            Self::from_raw(unsafe { PooledPtr::in_pool(std::rc::Rc::new(pool), session) }),
+            if corrected_url.is_null() {
+                None
+            } else {
+                Some(
+                    unsafe { std::ffi::CStr::from_ptr(corrected_url) }
+                        .to_str()
+                        .unwrap()
+                        .to_string(),
+                )
+            },
+            if redirect_url.is_null() {
+                None
+            } else {
+                Some(
+                    unsafe { std::ffi::CStr::from_ptr(redirect_url) }
+                        .to_str()
+                        .unwrap()
+                        .to_string(),
+                )
+            },
+        ))
+    }
+
     pub fn reparent(&mut self, url: &str) -> Result<(), Error> {
         let url = std::ffi::CString::new(url).unwrap();
         let mut pool = Pool::new();
@@ -49,6 +115,22 @@ impl Session {
         Error::from_raw(err)?;
         let path = unsafe { std::ffi::CStr::from_ptr(path) };
         Ok(path.to_string_lossy().into_owned())
+    }
+
+    pub fn get_path_relative_to_root(&mut self, url: &str) -> String {
+        let url = std::ffi::CString::new(url).unwrap();
+        let mut pool = Pool::new();
+        let mut path = std::ptr::null();
+        unsafe {
+            crate::generated::svn_ra_get_path_relative_to_root(
+                self.0.as_mut_ptr(),
+                &mut path,
+                url.as_ptr(),
+                pool.as_mut_ptr(),
+            );
+        }
+        let path = unsafe { std::ffi::CStr::from_ptr(path) };
+        path.to_string_lossy().into_owned()
     }
 
     pub fn get_latest_revnum(&mut self) -> Result<Revnum, Error> {
@@ -111,10 +193,7 @@ impl Session {
         Ok(())
     }
 
-    pub fn rev_proplist(
-        &mut self,
-        rev: Revnum,
-    ) -> Result<std::collections::HashMap<String, Vec<u8>>, Error> {
+    pub fn rev_proplist(&mut self, rev: Revnum) -> Result<HashMap<String, Vec<u8>>, Error> {
         let mut pool = Pool::new();
         let mut props = std::ptr::null_mut();
         let err = unsafe {
@@ -164,5 +243,205 @@ impl Session {
                 std::slice::from_raw_parts((*value).data as *const u8, (*value).len)
             })))
         }
+    }
+
+    pub fn get_commit_editor(
+        &mut self,
+        revprop_table: HashMap<String, Vec<u8>>,
+        commit_callback: &dyn FnMut(&crate::CommitInfo) -> Result<(), Error>,
+        lock_tokens: HashMap<String, String>,
+        keep_locks: bool,
+    ) -> Result<Box<dyn Editor>, Error> {
+        let pool = std::rc::Rc::new(Pool::new());
+        let commit_callback = Box::into_raw(Box::new(commit_callback));
+        let mut editor = std::ptr::null();
+        let mut edit_baton = std::ptr::null_mut();
+        let mut hash_revprop_table =
+            apr::hash::Hash::<&str, *const crate::generated::svn_string_t>::in_pool(&pool);
+        for (k, v) in revprop_table.iter() {
+            let v: crate::string::String = v.as_slice().into();
+            hash_revprop_table.set(k, &v.as_ptr());
+        }
+        let mut hash_lock_tokens =
+            apr::hash::Hash::<&str, *const std::os::raw::c_char>::in_pool(&pool);
+        for (k, v) in lock_tokens.iter() {
+            hash_lock_tokens.set(k, &(v.as_ptr() as *const _));
+        }
+        let mut result_pool = Pool::new();
+        let err = unsafe {
+            crate::generated::svn_ra_get_commit_editor3(
+                self.0.as_mut_ptr(),
+                &mut editor,
+                &mut edit_baton,
+                hash_revprop_table.as_mut_ptr(),
+                Some(crate::client::wrap_commit_callback2),
+                commit_callback as *mut _ as *mut _,
+                hash_lock_tokens.as_mut_ptr(),
+                keep_locks.into(),
+                result_pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        Ok(Box::new(crate::delta::WrapEditor(editor, unsafe {
+            PooledPtr::in_pool(std::rc::Rc::new(result_pool), edit_baton)
+        })))
+    }
+
+    pub fn get_file(
+        &mut self,
+        path: &str,
+        rev: Revnum,
+        mut stream: crate::io::Stream,
+    ) -> Result<(Revnum, HashMap<String, Vec<u8>>), Error> {
+        let path = std::ffi::CString::new(path).unwrap();
+        let mut pool = Pool::new();
+        let mut props = std::ptr::null_mut();
+        let mut fetched_rev = 0;
+        let err = unsafe {
+            crate::generated::svn_ra_get_file(
+                self.0.as_mut_ptr(),
+                path.as_ptr(),
+                rev,
+                stream.as_mut_ptr(),
+                &mut fetched_rev,
+                &mut props,
+                pool.as_mut_ptr(),
+            )
+        };
+        crate::Error::from_raw(err)?;
+        let mut hash =
+            apr::hash::Hash::<&str, *const crate::generated::svn_string_t>::from_raw(unsafe {
+                PooledPtr::in_pool(std::rc::Rc::new(pool), props)
+            });
+        Ok((
+            fetched_rev,
+            hash.iter()
+                .map(|(k, v)| {
+                    (
+                        String::from_utf8_lossy(k).into_owned(),
+                        Vec::from(unsafe {
+                            std::slice::from_raw_parts((**v).data as *const u8, (**v).len)
+                        }),
+                    )
+                })
+                .collect(),
+        ))
+    }
+
+    pub fn get_dir(
+        &mut self,
+        path: &str,
+        rev: Revnum,
+    ) -> Result<(Revnum, HashMap<String, Dirent>, HashMap<String, Vec<u8>>), Error> {
+        let path = std::ffi::CString::new(path).unwrap();
+        let mut pool = Pool::new();
+        let mut props = std::ptr::null_mut();
+        let mut fetched_rev = 0;
+        let mut dirents = std::ptr::null_mut();
+        let dirent_fields = crate::generated::SVN_DIRENT_KIND
+            | crate::generated::SVN_DIRENT_SIZE
+            | crate::generated::SVN_DIRENT_HAS_PROPS
+            | crate::generated::SVN_DIRENT_CREATED_REV
+            | crate::generated::SVN_DIRENT_TIME
+            | crate::generated::SVN_DIRENT_LAST_AUTHOR;
+        let err = unsafe {
+            crate::generated::svn_ra_get_dir2(
+                self.0.as_mut_ptr(),
+                &mut dirents,
+                &mut fetched_rev,
+                &mut props,
+                path.as_ptr(),
+                rev,
+                dirent_fields,
+                pool.as_mut_ptr(),
+            )
+        };
+        let pool = std::rc::Rc::new(pool);
+        crate::Error::from_raw(err)?;
+        let mut props_hash =
+            apr::hash::Hash::<&str, *const crate::generated::svn_string_t>::from_raw(unsafe {
+                PooledPtr::in_pool(pool.clone(), props)
+            });
+        let mut dirents_hash =
+            apr::hash::Hash::<&str, *mut crate::generated::svn_dirent_t>::from_raw(unsafe {
+                PooledPtr::in_pool(pool.clone(), dirents)
+            });
+        let props = props_hash
+            .iter()
+            .map(|(k, v)| {
+                (
+                    String::from_utf8_lossy(k).into_owned(),
+                    Vec::from(unsafe {
+                        std::slice::from_raw_parts((**v).data as *const u8, (**v).len)
+                    }),
+                )
+            })
+            .collect();
+        let dirents = dirents_hash
+            .iter()
+            .map(|(k, v)| {
+                (
+                    String::from_utf8_lossy(k).into_owned(),
+                    Dirent(unsafe { PooledPtr::in_pool(pool.clone(), *v) }),
+                )
+            })
+            .collect();
+        Ok((fetched_rev, dirents, props))
+    }
+}
+
+pub struct Dirent(PooledPtr<crate::generated::svn_dirent_t>);
+
+pub fn version() -> crate::Version {
+    unsafe { crate::Version(crate::generated::svn_ra_version()) }
+}
+
+pub trait Reporter {
+    fn set_path(
+        &mut self,
+        path: &str,
+        rev: Revnum,
+        depth: Depth,
+        start_empty: bool,
+        lock_token: &str,
+    ) -> Result<(), Error>;
+
+    fn delete_path(&mut self, path: &str) -> Result<(), Error>;
+
+    fn link_path(
+        &mut self,
+        path: &str,
+        url: &str,
+        rev: Revnum,
+        depth: Depth,
+        start_empty: bool,
+        lock_token: &str,
+    ) -> Result<(), Error>;
+
+    fn finish_report(&mut self) -> Result<(), Error>;
+
+    fn abort_report(&mut self) -> Result<(), Error>;
+}
+
+pub struct Callbacks(PooledPtr<crate::generated::svn_ra_callbacks2_t>);
+
+impl Default for Callbacks {
+    fn default() -> Self {
+        Self::new().unwrap()
+    }
+}
+
+impl Callbacks {
+    pub fn new() -> Result<Callbacks, crate::Error> {
+        Ok(Callbacks(PooledPtr::initialize(|pool| unsafe {
+            let mut callbacks = std::ptr::null_mut();
+            let err = crate::generated::svn_ra_create_callbacks(&mut callbacks, pool.as_mut_ptr());
+            Error::from_raw(err)?;
+            Ok::<_, crate::Error>(callbacks)
+        })?))
+    }
+
+    fn as_mut_ptr(&mut self) -> *mut crate::generated::svn_ra_callbacks2_t {
+        self.0.as_mut_ptr()
     }
 }

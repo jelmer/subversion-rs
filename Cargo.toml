@@ -13,7 +13,7 @@ documentation = "https://docs.rs/subversion"
 doctest = false
 
 [dependencies]
-apr = { version = "0.1" }
+apr = { version = ">=0.1.14" }
 #apr = { path = "../apr-rs" }
 ctor = "0.2.8"
 lazy_static = "1.5.0"
@@ -33,6 +33,7 @@ tempfile = "3.12.0"
 
 [package.metadata.system-deps]
 libsvn_client = ">=1.14"
+libsvn_delta = ">=1.14"
 libsvn_subr = ">=1.14"
 libsvn_repos = ">=1.14"
 libsvn_fs = ">=1.14"
