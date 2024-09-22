@@ -433,6 +433,27 @@ impl Session {
         Error::from_raw(err)?;
         Ok(())
     }
+
+    pub fn get_mergeinfo(&mut self, paths: &[&str], revision: Revnum, inherit: crate::mergeinfo::MergeinfoInheritance, include_descendants: bool) -> Result<HashMap<String, crate::mergeinfo::Mergeinfo>, Error> {
+        let paths: apr::tables::ArrayHeader<*const std::os::raw::c_char> = paths.iter().map(|path| std::ffi::CString::new(*path).unwrap().as_ptr()).collect();
+        let mut pool = Pool::new();
+        let mut mergeinfo = std::ptr::null_mut();
+        let err = unsafe {
+            crate::generated::svn_ra_get_mergeinfo(
+                self.0.as_mut_ptr(),
+                &mut mergeinfo,
+                paths.as_ptr(),
+                revision,
+                inherit.into(),
+                include_descendants.into(),
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        let pool = std::rc::Rc::new(pool);
+        let mut mergeinfo = apr::hash::Hash::<&[u8], *mut crate::generated::svn_mergeinfo_t>::from_raw(unsafe { PooledPtr::in_pool(pool.clone(), mergeinfo) });
+        Ok(mergeinfo.iter().map(|(k, v)| (String::from_utf8_lossy(k).into_owned(), crate::mergeinfo::Mergeinfo(unsafe { PooledPtr::in_pool(pool.clone(), *v) }))).collect())
+    }
 }
 
 #[allow(dead_code)]
