@@ -8,6 +8,16 @@ use std::collections::HashMap;
 pub struct Session(PooledPtr<svn_ra_session_t>);
 unsafe impl Send for Session {}
 
+pub(crate) extern "C" fn wrap_dirent_receiver(rel_path: *const std::os::raw::c_char, dirent: *mut crate::generated::svn_dirent_t, baton: *mut std::os::raw::c_void, pool: *mut apr::apr_pool_t) -> *mut crate::generated::svn_error_t {
+    let rel_path = unsafe { std::ffi::CStr::from_ptr(rel_path) };
+    let baton = unsafe { &*(baton as *const _ as *const &dyn Fn(&str, &Dirent) -> Result<(), crate::Error>) };
+    let pool = Pool::from_raw(pool);
+    match baton(rel_path.to_str().unwrap(), &Dirent(unsafe { PooledPtr::in_pool(std::rc::Rc::new(pool), dirent) })) {
+        Ok(()) => std::ptr::null_mut(),
+        Err(mut e) => e.as_mut_ptr()
+    }
+}
+
 impl Session {
     pub fn open(
         url: &str,
@@ -388,6 +398,40 @@ impl Session {
             })
             .collect();
         Ok((fetched_rev, dirents, props))
+    }
+
+    pub fn list(&mut self, path: &str, rev: Revnum, patterns: Option<&[&str]>, depth: Depth, dirent_receiver: impl Fn(&str, &Dirent) -> Result<(), crate::Error>) -> Result<(), Error> {
+        let path = std::ffi::CString::new(path).unwrap();
+        let mut pool = Pool::new();
+        let mut fetched_rev = 0;
+        let patterns: Option<apr::tables::ArrayHeader<*const std::os::raw::c_char>> = patterns.map(|patterns| {
+            patterns.iter().map(|pattern| pattern.as_ptr() as _).collect()
+        });
+        let dirent_fields = crate::generated::SVN_DIRENT_KIND
+            | crate::generated::SVN_DIRENT_SIZE
+            | crate::generated::SVN_DIRENT_HAS_PROPS
+            | crate::generated::SVN_DIRENT_CREATED_REV
+            | crate::generated::SVN_DIRENT_TIME
+            | crate::generated::SVN_DIRENT_LAST_AUTHOR;
+        let err = unsafe {
+            crate::generated::svn_ra_list(
+                self.0.as_mut_ptr(),
+                path.as_ptr(),
+                rev,
+                if let Some(patterns) = patterns.as_ref() {
+                    patterns.as_ptr()
+                } else {
+                    std::ptr::null()
+                },
+                depth.into(),
+                dirent_fields,
+                Some(wrap_dirent_receiver),
+                &dirent_receiver as *const _ as *mut _,
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        Ok(())
     }
 }
 
