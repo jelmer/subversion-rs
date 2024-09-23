@@ -86,6 +86,12 @@ impl Error {
         self.0 = std::ptr::null_mut();
         err
     }
+
+    pub unsafe fn into_raw(self) -> *mut svn_error_t {
+        let err = self.0;
+        std::mem::forget(self);
+        err
+    }
 }
 
 impl Clone for Error {
