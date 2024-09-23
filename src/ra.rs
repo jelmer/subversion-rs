@@ -527,6 +527,107 @@ impl Session {
             PooledPtr::in_pool(std::rc::Rc::new(pool), report_baton)
         })) as Box<dyn Reporter>)
     }
+
+    pub fn check_path(&mut self, path: &str, rev: Revnum) -> Result<crate::NodeKind, Error> {
+        let path = std::ffi::CString::new(path).unwrap();
+        let mut kind = 0;
+        let mut pool = Pool::new();
+        let err = unsafe {
+            crate::generated::svn_ra_check_path(
+                self.0.as_mut_ptr(),
+                path.as_ptr(),
+                rev,
+                &mut kind,
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        Ok(crate::NodeKind::from(kind))
+    }
+
+    pub fn stat(&mut self, path: &str, rev: Revnum) -> Result<Dirent, Error> {
+        let path = std::ffi::CString::new(path).unwrap();
+        let mut dirent = std::ptr::null_mut();
+        let mut pool = Pool::new();
+        let err = unsafe {
+            crate::generated::svn_ra_stat(
+                self.0.as_mut_ptr(),
+                path.as_ptr(),
+                rev,
+                &mut dirent,
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        Ok(Dirent(unsafe {
+            PooledPtr::in_pool(std::rc::Rc::new(pool), dirent)
+        }))
+    }
+
+    pub fn get_uuid(&mut self) -> Result<String, Error> {
+        let mut pool = Pool::new();
+        let mut uuid = std::ptr::null();
+        let err = unsafe {
+            crate::generated::svn_ra_get_uuid2(self.0.as_mut_ptr(), &mut uuid, pool.as_mut_ptr())
+        };
+        Error::from_raw(err)?;
+        let uuid = unsafe { std::ffi::CStr::from_ptr(uuid) };
+        Ok(uuid.to_string_lossy().into_owned())
+    }
+
+    pub fn get_repos_root(&mut self) -> Result<String, Error> {
+        let mut pool = Pool::new();
+        let mut url = std::ptr::null();
+        let err = unsafe {
+            crate::generated::svn_ra_get_repos_root2(
+                self.0.as_mut_ptr(),
+                &mut url,
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        let url = unsafe { std::ffi::CStr::from_ptr(url) };
+        Ok(url.to_str().unwrap().to_string())
+    }
+
+    pub fn get_deleted_rev(
+        &mut self,
+        path: &str,
+        peg_revision: Revnum,
+        end_revision: Revnum,
+    ) -> Result<Revnum, Error> {
+        let path = std::ffi::CString::new(path).unwrap();
+        let mut rev = 0;
+        let mut pool = Pool::new();
+        let err = unsafe {
+            crate::generated::svn_ra_get_deleted_rev(
+                self.0.as_mut_ptr(),
+                path.as_ptr(),
+                peg_revision,
+                end_revision,
+                &mut rev,
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        Ok(rev)
+    }
+
+    pub fn has_capability(&mut self, capability: &str) -> Result<bool, Error> {
+        let capability = std::ffi::CString::new(capability).unwrap();
+        let mut has = 0;
+        let mut pool = Pool::new();
+        let err = unsafe {
+            crate::generated::svn_ra_has_capability(
+                self.0.as_mut_ptr(),
+                &mut has,
+                capability.as_ptr(),
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        Ok(has != 0)
+    }
 }
 
 pub struct WrapReporter(
