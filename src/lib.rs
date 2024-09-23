@@ -106,7 +106,7 @@ impl pyo3::FromPyObject<'_> for Revision {
             });
         } else if ob.is_instance_of::<pyo3::types::PyLong>() {
             let rev = ob.extract::<i64>()?;
-            return Ok(Revision::Number(rev as Revnum));
+            return Ok(Revision::Number(Revnum::from_raw(rev).unwrap()));
         } else {
             Err(pyo3::exceptions::PyTypeError::new_err(format!(
                 "Invalid revision: {:?}",
