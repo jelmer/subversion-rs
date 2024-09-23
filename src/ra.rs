@@ -28,6 +28,21 @@ pub(crate) extern "C" fn wrap_dirent_receiver(
     }
 }
 
+extern "C" fn wrap_location_segment_receiver(
+    svn_location_segment: *mut crate::generated::svn_location_segment_t,
+    baton: *mut std::os::raw::c_void,
+    pool: *mut apr::apr_pool_t,
+) -> *mut crate::generated::svn_error_t {
+    let baton = unsafe {
+        &*(baton as *const _ as *const &dyn Fn(&crate::LocationSegment) -> Result<(), crate::Error>)
+    };
+    let pool = Pool::from_raw(pool);
+    match baton(&crate::LocationSegment(unsafe { PooledPtr::in_pool(std::rc::Rc::new(pool), svn_location_segment) })) {
+        Ok(()) => std::ptr::null_mut(),
+        Err(mut e) => e.as_mut_ptr(),
+    }
+}
+
 impl Session {
     pub fn open(
         url: &str,
@@ -808,6 +823,32 @@ impl Session {
         }
 
         Ok(locations)
+    }
+
+    pub fn get_location_segments(
+        &mut self,
+        path: &str,
+        peg_revision: Revnum,
+        start: Revnum,
+        end: Revnum,
+        location_receiver: &dyn Fn(&crate::LocationSegment) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        let path = std::ffi::CString::new(path).unwrap();
+        let mut pool = Pool::new();
+        let err = unsafe {
+            crate::generated::svn_ra_get_location_segments(
+                self.0.as_mut_ptr(),
+                path.as_ptr(),
+                peg_revision.into(),
+                start.into(),
+                end.into(),
+                Some(wrap_location_segment_receiver),
+                &location_receiver as *const _ as *mut _,
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        Ok(())
     }
 }
 
