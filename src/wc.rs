@@ -39,7 +39,7 @@ impl Context {
         Ok(wc_format)
     }
 
-    pub fn text_modified_p(&mut self, path: &str) -> Result<bool, crate::Error> {
+    pub fn text_modified(&mut self, path: &str) -> Result<bool, crate::Error> {
         let path = std::ffi::CString::new(path).unwrap();
         let mut modified = 0;
         let err = unsafe {
@@ -55,7 +55,7 @@ impl Context {
         Ok(modified != 0)
     }
 
-    pub fn props_modified_p(&mut self, path: &str) -> Result<bool, crate::Error> {
+    pub fn props_modified(&mut self, path: &str) -> Result<bool, crate::Error> {
         let path = std::ffi::CString::new(path).unwrap();
         let mut modified = 0;
         let err = unsafe {
@@ -70,7 +70,7 @@ impl Context {
         Ok(modified != 0)
     }
 
-    pub fn conflicted_p(&mut self, path: &str) -> Result<(bool, bool, bool), crate::Error> {
+    pub fn conflicted(&mut self, path: &str) -> Result<(bool, bool, bool), crate::Error> {
         let path = std::ffi::CString::new(path).unwrap();
         let mut text_conflicted = 0;
         let mut prop_conflicted = 0;
@@ -120,6 +120,25 @@ impl Context {
         };
         Error::from_raw(err)?;
         Ok(())
+    }
+
+    pub fn locked(&mut self, path: &str) -> Result<(bool, bool), crate::Error> {
+        let path = std::ffi::CString::new(path).unwrap();
+        let mut locked = 0;
+        let mut locked_here = 0;
+        let mut scratch_pool = apr::pool::Pool::new();
+        let err = unsafe {
+            crate::generated::svn_wc_locked2(
+                &mut locked_here,
+                &mut locked,
+                self.0.as_mut_ptr(),
+                path.as_ptr(),
+                scratch_pool.as_mut_ptr(),
+            )
+
+        };
+        Error::from_raw(err)?;
+        Ok((locked != 0, locked_here != 0))
     }
 }
 
