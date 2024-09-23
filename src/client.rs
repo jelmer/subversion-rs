@@ -80,7 +80,7 @@ extern "C" fn wrap_status_func(
     }
 }
 
-extern "C" fn wrap_log_entry_receiver(
+pub(crate) extern "C" fn wrap_log_entry_receiver(
     baton: *mut std::ffi::c_void,
     log_entry: *mut crate::generated::svn_log_entry_t,
     pool: *mut apr::apr_pool_t,
@@ -164,8 +164,8 @@ impl Info {
         }
     }
 
-    pub fn revision(&self) -> Revision {
-        unsafe { Revision::from((*self.0).rev) }
+    pub fn revision(&self) -> Revnum {
+        unsafe { Revnum::from_raw((*self.0).rev).unwrap() }
     }
 
     pub fn kind(&self) -> crate::generated::svn_node_kind_t {
@@ -187,7 +187,7 @@ impl Info {
     }
 
     pub fn last_changed_rev(&self) -> Revnum {
-        unsafe { (*self.0).last_changed_rev }
+        Revnum::from_raw(unsafe { (*self.0).last_changed_rev }).unwrap()
     }
 
     pub fn last_changed_date(&self) -> apr::time::Time {
@@ -306,7 +306,7 @@ impl Context {
                 pool.as_mut_ptr(),
             );
             Error::from_raw(err)?;
-            Ok(revnum)
+            Ok(Revnum::from_raw(revnum).unwrap())
         }
     }
 
@@ -382,7 +382,7 @@ impl Context {
                 pool.as_mut_ptr(),
             );
             Error::from_raw(err)?;
-            Ok(result_rev)
+            Ok(Revnum::from_raw(result_rev).unwrap())
         }
     }
 
@@ -604,7 +604,7 @@ impl Context {
                 std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
             );
             Error::from_raw(err)?;
-            Ok(revnum)
+            Ok(Revnum::from_raw(revnum).unwrap())
         }
     }
 
@@ -705,7 +705,7 @@ impl Context {
                 std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
             );
             Error::from_raw(err)?;
-            Ok(revnum as Revnum)
+            Ok(Revnum::from_raw(revnum).unwrap())
         }
     }
 
@@ -1068,7 +1068,10 @@ impl Context {
                 scratch_pool.as_mut_ptr(),
             );
             Error::from_raw(err)?;
-            Ok((min_revision, max_revision))
+            Ok((
+                Revnum::from_raw(min_revision).unwrap(),
+                Revnum::from_raw(max_revision).unwrap(),
+            ))
         }
     }
 
@@ -1266,11 +1269,11 @@ impl Status {
     }
 
     pub fn revision(&self) -> Revnum {
-        unsafe { (*self.0).revision }
+        Revnum::from_raw(unsafe { (*self.0).revision }).unwrap()
     }
 
     pub fn changed_rev(&self) -> Revnum {
-        unsafe { (*self.0).changed_rev }
+        Revnum::from_raw(unsafe { (*self.0).changed_rev }).unwrap()
     }
 
     pub fn changed_date(&self) -> apr::time::Time {
@@ -1336,13 +1339,7 @@ impl Status {
     }
 
     pub fn ood_changed_rev(&self) -> Option<Revnum> {
-        unsafe {
-            if (*self.0).ood_changed_rev == -1 {
-                None
-            } else {
-                Some((*self.0).ood_changed_rev)
-            }
-        }
+        Revnum::from_raw(unsafe { (*self.0).ood_changed_rev })
     }
 
     pub fn ood_changed_author(&self) -> Option<&str> {
@@ -1441,6 +1438,6 @@ mod tests {
                 false,
             )
             .unwrap();
-        assert_eq!(revnum, 0);
+        assert_eq!(revnum, Revnum(0));
     }
 }
