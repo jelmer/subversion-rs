@@ -439,7 +439,9 @@ extern "C" fn wrap_editor_open_root(
     let editor: &mut dyn Editor = unsafe { *(edit_baton as *mut &mut dyn Editor) };
     match editor.open_root(base_revision) {
         Ok(mut root) => {
-            unsafe { *root_baton = root.as_mut() as *mut dyn DirectoryEditor as *mut std::ffi::c_void };
+            unsafe {
+                *root_baton = root.as_mut() as *mut dyn DirectoryEditor as *mut std::ffi::c_void
+            };
             std::ptr::null_mut()
         }
         Err(err) => unsafe { err.into_raw() },
@@ -453,7 +455,8 @@ extern "C" fn wrap_editor_delete_entry(
     _pool: *mut apr::apr_pool_t,
 ) -> *mut crate::generated::svn_error_t {
     let path = unsafe { std::ffi::CStr::from_ptr(path) };
-    let parent : &mut dyn DirectoryEditor = unsafe { *(parent_baton as *mut &mut dyn DirectoryEditor) };
+    let parent: &mut dyn DirectoryEditor =
+        unsafe { *(parent_baton as *mut &mut dyn DirectoryEditor) };
     match parent.delete_entry(path.to_str().unwrap(), Some(revision)) {
         Ok(()) => std::ptr::null_mut(),
         Err(err) => unsafe { err.into_raw() },
@@ -474,15 +477,19 @@ extern "C" fn wrap_editor_add_directory(
     } else {
         Some(unsafe { std::ffi::CStr::from_ptr(copyfrom_path) })
     };
-    let parent : &mut dyn DirectoryEditor = unsafe { *(parent_baton as *mut &mut dyn DirectoryEditor) };
-    let copyfrom = if let (Some(copyfrom_path), copyfrom_revision) = (copyfrom_path, copyfrom_revision) {
-        Some((copyfrom_path.to_str().unwrap(), copyfrom_revision))
-    } else {
-        None
-    };
+    let parent: &mut dyn DirectoryEditor =
+        unsafe { *(parent_baton as *mut &mut dyn DirectoryEditor) };
+    let copyfrom =
+        if let (Some(copyfrom_path), copyfrom_revision) = (copyfrom_path, copyfrom_revision) {
+            Some((copyfrom_path.to_str().unwrap(), copyfrom_revision))
+        } else {
+            None
+        };
     match parent.add_directory(path.to_str().unwrap(), copyfrom) {
         Ok(mut child) => {
-            unsafe { *child_baton = child.as_mut() as *mut dyn DirectoryEditor as *mut std::ffi::c_void };
+            unsafe {
+                *child_baton = child.as_mut() as *mut dyn DirectoryEditor as *mut std::ffi::c_void
+            };
             std::ptr::null_mut()
         }
         Err(err) => unsafe { err.into_raw() },
@@ -497,10 +504,13 @@ extern "C" fn wrap_editor_open_directory(
     child_baton: *mut *mut std::ffi::c_void,
 ) -> *mut crate::generated::svn_error_t {
     let path = unsafe { std::ffi::CStr::from_ptr(path) };
-    let parent : &mut dyn DirectoryEditor = unsafe { *(parent_baton as *mut &mut dyn DirectoryEditor) };
+    let parent: &mut dyn DirectoryEditor =
+        unsafe { *(parent_baton as *mut &mut dyn DirectoryEditor) };
     match parent.open_directory(path.to_str().unwrap(), Some(base_revision)) {
         Ok(mut child) => {
-            unsafe { *child_baton = child.as_mut() as *mut dyn DirectoryEditor as *mut std::ffi::c_void };
+            unsafe {
+                *child_baton = child.as_mut() as *mut dyn DirectoryEditor as *mut std::ffi::c_void
+            };
             std::ptr::null_mut()
         }
         Err(err) => unsafe { err.into_raw() },
@@ -514,8 +524,9 @@ extern "C" fn wrap_editor_change_dir_prop(
     _pool: *mut apr::apr_pool_t,
 ) -> *mut crate::generated::svn_error_t {
     let name = unsafe { std::ffi::CStr::from_ptr(name) };
-    let value = unsafe { std::slice::from_raw_parts((*value).data as *const u8, (*value).len as usize) };
-    let editor : &mut dyn DirectoryEditor = unsafe { *(baton as *mut &mut dyn DirectoryEditor) };
+    let value =
+        unsafe { std::slice::from_raw_parts((*value).data as *const u8, (*value).len as usize) };
+    let editor: &mut dyn DirectoryEditor = unsafe { *(baton as *mut &mut dyn DirectoryEditor) };
     match editor.change_prop(name.to_str().unwrap(), value) {
         Ok(()) => std::ptr::null_mut(),
         Err(err) => unsafe { err.into_raw() },
@@ -526,7 +537,7 @@ extern "C" fn wrap_editor_close_directory(
     baton: *mut std::ffi::c_void,
     _pool: *mut apr::apr_pool_t,
 ) -> *mut crate::generated::svn_error_t {
-    let editor : &mut dyn DirectoryEditor = unsafe { *(baton as *mut &mut dyn DirectoryEditor) };
+    let editor: &mut dyn DirectoryEditor = unsafe { *(baton as *mut &mut dyn DirectoryEditor) };
     match editor.close() {
         Ok(()) => std::ptr::null_mut(),
         Err(err) => unsafe { err.into_raw() },
@@ -539,7 +550,8 @@ extern "C" fn wrap_editor_absent_directory(
     _pool: *mut apr::apr_pool_t,
 ) -> *mut crate::generated::svn_error_t {
     let path = unsafe { std::ffi::CStr::from_ptr(path) };
-    let parent : &mut dyn DirectoryEditor = unsafe { *(parent_baton as *mut &mut dyn DirectoryEditor) };
+    let parent: &mut dyn DirectoryEditor =
+        unsafe { *(parent_baton as *mut &mut dyn DirectoryEditor) };
     match parent.absent_directory(path.to_str().unwrap()) {
         Ok(()) => std::ptr::null_mut(),
         Err(err) => unsafe { err.into_raw() },
@@ -560,12 +572,14 @@ extern "C" fn wrap_editor_add_file(
     } else {
         Some(unsafe { std::ffi::CStr::from_ptr(copyfrom_path) })
     };
-    let parent : &mut dyn DirectoryEditor = unsafe { *(parent_baton as *mut &mut dyn DirectoryEditor) };
-    let copyfrom = if let (Some(copyfrom_path), copyfrom_revision) = (copyfrom_path, copyfrom_revision) {
-        Some((copyfrom_path.to_str().unwrap(), copyfrom_revision))
-    } else {
-        None
-    };
+    let parent: &mut dyn DirectoryEditor =
+        unsafe { *(parent_baton as *mut &mut dyn DirectoryEditor) };
+    let copyfrom =
+        if let (Some(copyfrom_path), copyfrom_revision) = (copyfrom_path, copyfrom_revision) {
+            Some((copyfrom_path.to_str().unwrap(), copyfrom_revision))
+        } else {
+            None
+        };
     match parent.add_file(path.to_str().unwrap(), copyfrom) {
         Ok(mut file) => {
             unsafe { *file_baton = file.as_mut() as *mut dyn FileEditor as *mut std::ffi::c_void };
@@ -583,7 +597,8 @@ extern "C" fn wrap_editor_open_file(
     file_baton: *mut *mut std::ffi::c_void,
 ) -> *mut crate::generated::svn_error_t {
     let path = unsafe { std::ffi::CStr::from_ptr(path) };
-    let parent : &mut dyn DirectoryEditor = unsafe { *(parent_baton as *mut &mut dyn DirectoryEditor) };
+    let parent: &mut dyn DirectoryEditor =
+        unsafe { *(parent_baton as *mut &mut dyn DirectoryEditor) };
     match parent.open_file(path.to_str().unwrap(), Some(base_revision)) {
         Ok(mut file) => {
             unsafe { *file_baton = file.as_mut() as *mut dyn FileEditor as *mut std::ffi::c_void };
@@ -605,7 +620,7 @@ extern "C" fn wrap_editor_apply_textdelta(
     } else {
         Some(unsafe { std::ffi::CStr::from_ptr(base_checksum) })
     };
-    let file : &mut dyn FileEditor = unsafe { *(file_baton as *mut &mut dyn FileEditor) };
+    let file: &mut dyn FileEditor = unsafe { *(file_baton as *mut &mut dyn FileEditor) };
     match file.apply_textdelta(base_checksum.map(|c| c.to_str().unwrap())) {
         Ok(_apply) => {
             todo!();
@@ -621,8 +636,9 @@ extern "C" fn wrap_editor_change_file_prop(
     _pool: *mut apr::apr_pool_t,
 ) -> *mut crate::generated::svn_error_t {
     let name = unsafe { std::ffi::CStr::from_ptr(name) };
-    let value = unsafe { std::slice::from_raw_parts((*value).data as *const u8, (*value).len as usize) };
-    let editor : &mut dyn FileEditor = unsafe { *(baton as *mut &mut dyn FileEditor) };
+    let value =
+        unsafe { std::slice::from_raw_parts((*value).data as *const u8, (*value).len as usize) };
+    let editor: &mut dyn FileEditor = unsafe { *(baton as *mut &mut dyn FileEditor) };
     match editor.change_prop(name.to_str().unwrap(), value) {
         Ok(()) => std::ptr::null_mut(),
         Err(err) => unsafe { err.into_raw() },
@@ -639,7 +655,7 @@ extern "C" fn wrap_editor_close_file(
     } else {
         Some(unsafe { std::ffi::CStr::from_ptr(text_checksum) })
     };
-    let editor : &mut dyn FileEditor = unsafe { *(baton as *mut &mut dyn FileEditor) };
+    let editor: &mut dyn FileEditor = unsafe { *(baton as *mut &mut dyn FileEditor) };
     match editor.close(text_checksum.map(|c| c.to_str().unwrap())) {
         Ok(()) => std::ptr::null_mut(),
         Err(err) => unsafe { err.into_raw() },
@@ -656,7 +672,7 @@ extern "C" fn wrap_editor_absent_file(
     } else {
         Some(unsafe { std::ffi::CStr::from_ptr(text_checksum) })
     };
-    let file : &mut dyn FileEditor = unsafe { *(file_baton as *mut &mut dyn FileEditor) };
+    let file: &mut dyn FileEditor = unsafe { *(file_baton as *mut &mut dyn FileEditor) };
     match file.close(text_checksum.map(|c| c.to_str().unwrap())) {
         Ok(()) => std::ptr::null_mut(),
         Err(err) => unsafe { err.into_raw() },
@@ -667,7 +683,7 @@ extern "C" fn wrap_editor_close_edit(
     edit_baton: *mut std::ffi::c_void,
     _pool: *mut apr::apr_pool_t,
 ) -> *mut crate::generated::svn_error_t {
-    let editor : &mut dyn Editor = unsafe { *(edit_baton as *mut &mut dyn Editor) };
+    let editor: &mut dyn Editor = unsafe { *(edit_baton as *mut &mut dyn Editor) };
     match editor.close() {
         Ok(()) => std::ptr::null_mut(),
         Err(err) => unsafe { err.into_raw() },
@@ -678,7 +694,7 @@ extern "C" fn wrap_editor_abort_edit(
     edit_baton: *mut std::ffi::c_void,
     _pool: *mut apr::apr_pool_t,
 ) -> *mut crate::generated::svn_error_t {
-    let editor : &mut dyn Editor = unsafe { *(edit_baton as *mut &mut dyn Editor) };
+    let editor: &mut dyn Editor = unsafe { *(edit_baton as *mut &mut dyn Editor) };
     match editor.abort() {
         Ok(()) => std::ptr::null_mut(),
         Err(err) => unsafe { err.into_raw() },
@@ -690,7 +706,7 @@ extern "C" fn wrap_editor_set_target_revision(
     revision: crate::generated::svn_revnum_t,
     _pool: *mut apr::apr_pool_t,
 ) -> *mut crate::generated::svn_error_t {
-    let editor : &mut dyn Editor = unsafe { *(edit_baton as *mut &mut dyn Editor) };
+    let editor: &mut dyn Editor = unsafe { *(edit_baton as *mut &mut dyn Editor) };
     match editor.set_target_revision(revision) {
         Ok(()) => std::ptr::null_mut(),
         Err(err) => unsafe { err.into_raw() },
@@ -698,25 +714,26 @@ extern "C" fn wrap_editor_set_target_revision(
 }
 
 #[no_mangle]
-pub(crate) static WRAP_EDITOR: crate::generated::svn_delta_editor_t = crate::generated::svn_delta_editor_t {
-    open_root: Some(wrap_editor_open_root),
-    delete_entry: Some(wrap_editor_delete_entry),
-    add_directory: Some(wrap_editor_add_directory),
-    open_directory: Some(wrap_editor_open_directory),
-    change_dir_prop: Some(wrap_editor_change_dir_prop),
-    close_directory: Some(wrap_editor_close_directory),
-    absent_directory: Some(wrap_editor_absent_directory),
-    add_file: Some(wrap_editor_add_file),
-    open_file: Some(wrap_editor_open_file),
-    apply_textdelta: Some(wrap_editor_apply_textdelta),
-    change_file_prop: Some(wrap_editor_change_file_prop),
-    close_file: Some(wrap_editor_close_file),
-    absent_file: Some(wrap_editor_absent_file),
-    close_edit: Some(wrap_editor_close_edit),
-    abort_edit: Some(wrap_editor_abort_edit),
-    set_target_revision: Some(wrap_editor_set_target_revision),
-    apply_textdelta_stream: None // TODO
-};
+pub(crate) static WRAP_EDITOR: crate::generated::svn_delta_editor_t =
+    crate::generated::svn_delta_editor_t {
+        open_root: Some(wrap_editor_open_root),
+        delete_entry: Some(wrap_editor_delete_entry),
+        add_directory: Some(wrap_editor_add_directory),
+        open_directory: Some(wrap_editor_open_directory),
+        change_dir_prop: Some(wrap_editor_change_dir_prop),
+        close_directory: Some(wrap_editor_close_directory),
+        absent_directory: Some(wrap_editor_absent_directory),
+        add_file: Some(wrap_editor_add_file),
+        open_file: Some(wrap_editor_open_file),
+        apply_textdelta: Some(wrap_editor_apply_textdelta),
+        change_file_prop: Some(wrap_editor_change_file_prop),
+        close_file: Some(wrap_editor_close_file),
+        absent_file: Some(wrap_editor_absent_file),
+        close_edit: Some(wrap_editor_close_edit),
+        abort_edit: Some(wrap_editor_abort_edit),
+        set_target_revision: Some(wrap_editor_set_target_revision),
+        apply_textdelta_stream: None, // TODO
+    };
 
 #[cfg(test)]
 mod tests {

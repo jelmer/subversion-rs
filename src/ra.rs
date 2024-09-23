@@ -8,13 +8,23 @@ use std::collections::HashMap;
 pub struct Session(PooledPtr<svn_ra_session_t>);
 unsafe impl Send for Session {}
 
-pub(crate) extern "C" fn wrap_dirent_receiver(rel_path: *const std::os::raw::c_char, dirent: *mut crate::generated::svn_dirent_t, baton: *mut std::os::raw::c_void, pool: *mut apr::apr_pool_t) -> *mut crate::generated::svn_error_t {
+pub(crate) extern "C" fn wrap_dirent_receiver(
+    rel_path: *const std::os::raw::c_char,
+    dirent: *mut crate::generated::svn_dirent_t,
+    baton: *mut std::os::raw::c_void,
+    pool: *mut apr::apr_pool_t,
+) -> *mut crate::generated::svn_error_t {
     let rel_path = unsafe { std::ffi::CStr::from_ptr(rel_path) };
-    let baton = unsafe { &*(baton as *const _ as *const &dyn Fn(&str, &Dirent) -> Result<(), crate::Error>) };
+    let baton = unsafe {
+        &*(baton as *const _ as *const &dyn Fn(&str, &Dirent) -> Result<(), crate::Error>)
+    };
     let pool = Pool::from_raw(pool);
-    match baton(rel_path.to_str().unwrap(), &Dirent(unsafe { PooledPtr::in_pool(std::rc::Rc::new(pool), dirent) })) {
+    match baton(
+        rel_path.to_str().unwrap(),
+        &Dirent(unsafe { PooledPtr::in_pool(std::rc::Rc::new(pool), dirent) }),
+    ) {
         Ok(()) => std::ptr::null_mut(),
-        Err(mut e) => e.as_mut_ptr()
+        Err(mut e) => e.as_mut_ptr(),
     }
 }
 
@@ -400,12 +410,23 @@ impl Session {
         Ok((fetched_rev, dirents, props))
     }
 
-    pub fn list(&mut self, path: &str, rev: Revnum, patterns: Option<&[&str]>, depth: Depth, dirent_receiver: impl Fn(&str, &Dirent) -> Result<(), crate::Error>) -> Result<(), Error> {
+    pub fn list(
+        &mut self,
+        path: &str,
+        rev: Revnum,
+        patterns: Option<&[&str]>,
+        depth: Depth,
+        dirent_receiver: impl Fn(&str, &Dirent) -> Result<(), crate::Error>,
+    ) -> Result<(), Error> {
         let path = std::ffi::CString::new(path).unwrap();
         let mut pool = Pool::new();
-        let patterns: Option<apr::tables::ArrayHeader<*const std::os::raw::c_char>> = patterns.map(|patterns| {
-            patterns.iter().map(|pattern| pattern.as_ptr() as _).collect()
-        });
+        let patterns: Option<apr::tables::ArrayHeader<*const std::os::raw::c_char>> =
+            patterns.map(|patterns| {
+                patterns
+                    .iter()
+                    .map(|pattern| pattern.as_ptr() as _)
+                    .collect()
+            });
         let dirent_fields = crate::generated::SVN_DIRENT_KIND
             | crate::generated::SVN_DIRENT_SIZE
             | crate::generated::SVN_DIRENT_HAS_PROPS
@@ -433,8 +454,15 @@ impl Session {
         Ok(())
     }
 
-    pub fn get_mergeinfo(&mut self, paths: &[&str], revision: Revnum, inherit: crate::mergeinfo::MergeinfoInheritance, include_descendants: bool) -> Result<HashMap<String, crate::mergeinfo::Mergeinfo>, Error> {
-        let paths: apr::tables::ArrayHeader<*const std::os::raw::c_char> = paths.iter().map(|path| path.as_ptr() as _).collect();
+    pub fn get_mergeinfo(
+        &mut self,
+        paths: &[&str],
+        revision: Revnum,
+        inherit: crate::mergeinfo::MergeinfoInheritance,
+        include_descendants: bool,
+    ) -> Result<HashMap<String, crate::mergeinfo::Mergeinfo>, Error> {
+        let paths: apr::tables::ArrayHeader<*const std::os::raw::c_char> =
+            paths.iter().map(|path| path.as_ptr() as _).collect();
         let mut pool = Pool::new();
         let mut mergeinfo = std::ptr::null_mut();
         let err = unsafe {
@@ -450,8 +478,19 @@ impl Session {
         };
         Error::from_raw(err)?;
         let pool = std::rc::Rc::new(pool);
-        let mut mergeinfo = apr::hash::Hash::<&[u8], *mut crate::generated::svn_mergeinfo_t>::from_raw(unsafe { PooledPtr::in_pool(pool.clone(), mergeinfo) });
-        Ok(mergeinfo.iter().map(|(k, v)| (String::from_utf8_lossy(k).into_owned(), crate::mergeinfo::Mergeinfo(unsafe { PooledPtr::in_pool(pool.clone(), *v) }))).collect())
+        let mut mergeinfo =
+            apr::hash::Hash::<&[u8], *mut crate::generated::svn_mergeinfo_t>::from_raw(unsafe {
+                PooledPtr::in_pool(pool.clone(), mergeinfo)
+            });
+        Ok(mergeinfo
+            .iter()
+            .map(|(k, v)| {
+                (
+                    String::from_utf8_lossy(k).into_owned(),
+                    crate::mergeinfo::Mergeinfo(unsafe { PooledPtr::in_pool(pool.clone(), *v) }),
+                )
+            })
+            .collect())
     }
 
     pub fn do_update(
@@ -484,11 +523,16 @@ impl Session {
             )
         };
         Error::from_raw(err)?;
-        Ok(Box::new(WrapReporter(reporter, unsafe { PooledPtr::in_pool(std::rc::Rc::new(pool), report_baton) })) as Box<dyn Reporter>)
+        Ok(Box::new(WrapReporter(reporter, unsafe {
+            PooledPtr::in_pool(std::rc::Rc::new(pool), report_baton)
+        })) as Box<dyn Reporter>)
     }
 }
 
-pub struct WrapReporter(*const crate::generated::svn_ra_reporter3_t, PooledPtr<std::ffi::c_void>);
+pub struct WrapReporter(
+    *const crate::generated::svn_ra_reporter3_t,
+    PooledPtr<std::ffi::c_void>,
+);
 
 impl Reporter for WrapReporter {
     fn set_path(
@@ -520,7 +564,9 @@ impl Reporter for WrapReporter {
     fn delete_path(&mut self, path: &str) -> Result<(), Error> {
         let path = std::ffi::CString::new(path).unwrap();
         let mut pool = Pool::new();
-        let err = unsafe { (*self.0).delete_path.unwrap()(self.1.as_mut_ptr(), path.as_ptr(), pool.as_mut_ptr()) };
+        let err = unsafe {
+            (*self.0).delete_path.unwrap()(self.1.as_mut_ptr(), path.as_ptr(), pool.as_mut_ptr())
+        };
         Error::from_raw(err)?;
         Ok(())
     }
@@ -556,14 +602,16 @@ impl Reporter for WrapReporter {
 
     fn finish_report(&mut self) -> Result<(), Error> {
         let mut pool = Pool::new();
-        let err = unsafe { (*self.0).finish_report.unwrap()(self.1.as_mut_ptr(), pool.as_mut_ptr()) };
+        let err =
+            unsafe { (*self.0).finish_report.unwrap()(self.1.as_mut_ptr(), pool.as_mut_ptr()) };
         Error::from_raw(err)?;
         Ok(())
     }
 
     fn abort_report(&mut self) -> Result<(), Error> {
         let mut pool = Pool::new();
-        let err = unsafe { (*self.0).abort_report.unwrap()(self.1.as_mut_ptr(), pool.as_mut_ptr()) };
+        let err =
+            unsafe { (*self.0).abort_report.unwrap()(self.1.as_mut_ptr(), pool.as_mut_ptr()) };
         Error::from_raw(err)?;
         Ok(())
     }
