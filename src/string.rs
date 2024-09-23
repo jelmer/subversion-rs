@@ -11,6 +11,12 @@ impl String {
     pub fn as_mut_ptr(&mut self) -> *mut svn_string_t {
         self.0.as_mut_ptr()
     }
+
+    pub fn as_slice(&self) -> &[u8] {
+        let ptr = unsafe { (*self.as_ptr()).data };
+        let len = unsafe { (*self.as_ptr()).len as usize };
+        unsafe { std::slice::from_raw_parts(ptr as *const u8, len) }
+    }
 }
 
 impl From<PooledPtr<svn_string_t>> for String {
