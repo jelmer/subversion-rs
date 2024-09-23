@@ -135,7 +135,6 @@ impl Context {
                 path.as_ptr(),
                 scratch_pool.as_mut_ptr(),
             )
-
         };
         Error::from_raw(err)?;
         Ok((locked != 0, locked_here != 0))

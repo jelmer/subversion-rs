@@ -695,7 +695,8 @@ impl Session {
         Ok(has != 0)
     }
 
-    pub fn diff(&mut self,
+    pub fn diff(
+        &mut self,
         revision: Revnum,
         diff_target: &str,
         depth: Depth,
@@ -731,9 +732,24 @@ impl Session {
         })) as Box<dyn Reporter>)
     }
 
-    pub fn get_log(&mut self, paths: &[&str], start: Revnum, end: Revnum, limit: usize, discover_changed_paths: bool, strict_node_history: bool, include_merged_revisions: bool, revprops: &[&str], log_receiver: &dyn FnMut(&crate::CommitInfo) -> Result<(), Error>) -> Result<(), Error> {
-        let paths: apr::tables::ArrayHeader<*const std::os::raw::c_char> = paths.iter().map(|path| path.as_ptr() as _).collect();
-        let revprops: apr::tables::ArrayHeader<*const std::os::raw::c_char> = revprops.iter().map(|revprop| revprop.as_ptr() as _).collect();
+    pub fn get_log(
+        &mut self,
+        paths: &[&str],
+        start: Revnum,
+        end: Revnum,
+        limit: usize,
+        discover_changed_paths: bool,
+        strict_node_history: bool,
+        include_merged_revisions: bool,
+        revprops: &[&str],
+        log_receiver: &dyn FnMut(&crate::CommitInfo) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        let paths: apr::tables::ArrayHeader<*const std::os::raw::c_char> =
+            paths.iter().map(|path| path.as_ptr() as _).collect();
+        let revprops: apr::tables::ArrayHeader<*const std::os::raw::c_char> = revprops
+            .iter()
+            .map(|revprop| revprop.as_ptr() as _)
+            .collect();
         let mut pool = Pool::new();
         let log_receiver = Box::new(log_receiver);
         let err = unsafe {

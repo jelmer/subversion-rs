@@ -33,10 +33,12 @@ impl From<Revnum> for generated::svn_revnum_t {
 
 impl apr::hash::IntoHashKey<'_> for &Revnum {
     fn into_hash_key(self) -> &'static [u8] {
-        unsafe { std::slice::from_raw_parts(
-            &self.0 as *const _ as *const u8,
-            std::mem::size_of::<generated::svn_revnum_t>(),
-        ) }
+        unsafe {
+            std::slice::from_raw_parts(
+                &self.0 as *const _ as *const u8,
+                std::mem::size_of::<generated::svn_revnum_t>(),
+            )
+        }
     }
 }
 
@@ -82,9 +84,10 @@ impl FromStr for Revision {
         } else if rev == "head" {
             Ok(Revision::Head)
         } else if let Some(rest) = rev.strip_prefix("number:") {
-            Ok(Revision::Number(
-                Revnum(rest.parse::<crate::generated::svn_revnum_t>().map_err(|e| e.to_string())?)
-            ))
+            Ok(Revision::Number(Revnum(
+                rest.parse::<crate::generated::svn_revnum_t>()
+                    .map_err(|e| e.to_string())?,
+            )))
         } else if let Some(rest) = rev.strip_prefix("date:") {
             Ok(Revision::Date(
                 rest.parse::<i64>().map_err(|e| e.to_string())?,
