@@ -16,7 +16,7 @@ impl Editor for WrapEditor {
         let err = unsafe {
             ((*self.0).set_target_revision.unwrap())(
                 self.1.as_mut_ptr(),
-                revision,
+                revision.into(),
                 scratch_pool.as_mut_ptr(),
             )
         };
@@ -32,7 +32,7 @@ impl Editor for WrapEditor {
             let mut baton = std::ptr::null_mut();
             let err = ((*self.0).open_root.unwrap())(
                 self.1.as_mut_ptr(),
-                base_revision,
+                base_revision.into(),
                 p.as_mut_ptr(),
                 &mut baton,
             );
@@ -72,7 +72,7 @@ impl<'a> DirectoryEditor for WrapDirectoryEditor<'a> {
         let err = unsafe {
             ((*(*self.0)).delete_entry.unwrap())(
                 path.as_ptr() as *const i8,
-                revision.map(|r| r).unwrap_or(0),
+                revision.map_or(-1, |r| r.0),
                 self.1.as_mut_ptr(),
                 scratch_pool.as_mut_ptr(),
             )
@@ -88,7 +88,7 @@ impl<'a> DirectoryEditor for WrapDirectoryEditor<'a> {
     ) -> Result<Box<dyn DirectoryEditor + 'b>, crate::Error> {
         let editor = apr::pool::PooledPtr::initialize(|p| unsafe {
             let copyfrom_path = copyfrom.map(|(p, _)| p);
-            let copyfrom_rev = copyfrom.map(|(_, r)| r).unwrap_or(0);
+            let copyfrom_rev = copyfrom.map(|(_, r)| r.0).unwrap_or(-1);
             let mut baton = std::ptr::null_mut();
             let err = ((*(*self.0)).add_directory.unwrap())(
                 path.as_ptr() as *const i8,
@@ -98,7 +98,7 @@ impl<'a> DirectoryEditor for WrapDirectoryEditor<'a> {
                 } else {
                     std::ptr::null()
                 },
-                copyfrom_rev,
+                copyfrom_rev.into(),
                 p.as_mut_ptr(),
                 &mut baton,
             );
@@ -118,7 +118,7 @@ impl<'a> DirectoryEditor for WrapDirectoryEditor<'a> {
             let err = ((*(*self.0)).open_directory.unwrap())(
                 path.as_ptr() as *const i8,
                 self.1.as_mut_ptr(),
-                base_revision.unwrap_or(0),
+                base_revision.map_or(-1, |r| r.0),
                 p.as_mut_ptr(),
                 &mut baton,
             );
@@ -172,7 +172,7 @@ impl<'a> DirectoryEditor for WrapDirectoryEditor<'a> {
     ) -> Result<Box<dyn FileEditor + 'b>, crate::Error> {
         let editor = apr::pool::PooledPtr::initialize(|p| unsafe {
             let copyfrom_path = copyfrom.map(|(p, _)| p);
-            let copyfrom_rev = copyfrom.map(|(_, r)| r).unwrap_or(0);
+            let copyfrom_rev = copyfrom.map(|(_, r)| r.0).unwrap_or(-1);
             let mut baton = std::ptr::null_mut();
             let err = ((*(*self.0)).add_file.unwrap())(
                 path.as_ptr() as *const i8,
@@ -182,7 +182,7 @@ impl<'a> DirectoryEditor for WrapDirectoryEditor<'a> {
                 } else {
                     std::ptr::null()
                 },
-                copyfrom_rev,
+                copyfrom_rev.into(),
                 p.as_mut_ptr(),
                 &mut baton,
             );
@@ -432,12 +432,12 @@ impl TxDeltaWindow {
 
 extern "C" fn wrap_editor_open_root(
     edit_baton: *mut std::ffi::c_void,
-    base_revision: crate::Revnum,
+    base_revision: crate::generated::svn_revnum_t,
     _pool: *mut apr::apr_pool_t,
     root_baton: *mut *mut std::ffi::c_void,
 ) -> *mut crate::generated::svn_error_t {
     let editor: &mut dyn Editor = unsafe { *(edit_baton as *mut &mut dyn Editor) };
-    match editor.open_root(base_revision) {
+    match editor.open_root(Revnum::from_raw(base_revision).unwrap()) {
         Ok(mut root) => {
             unsafe {
                 *root_baton = root.as_mut() as *mut dyn DirectoryEditor as *mut std::ffi::c_void
@@ -457,7 +457,7 @@ extern "C" fn wrap_editor_delete_entry(
     let path = unsafe { std::ffi::CStr::from_ptr(path) };
     let parent: &mut dyn DirectoryEditor =
         unsafe { *(parent_baton as *mut &mut dyn DirectoryEditor) };
-    match parent.delete_entry(path.to_str().unwrap(), Some(revision)) {
+    match parent.delete_entry(path.to_str().unwrap(), Revnum::from_raw(revision)) {
         Ok(()) => std::ptr::null_mut(),
         Err(err) => unsafe { err.into_raw() },
     }
@@ -479,12 +479,13 @@ extern "C" fn wrap_editor_add_directory(
     };
     let parent: &mut dyn DirectoryEditor =
         unsafe { *(parent_baton as *mut &mut dyn DirectoryEditor) };
-    let copyfrom =
-        if let (Some(copyfrom_path), copyfrom_revision) = (copyfrom_path, copyfrom_revision) {
-            Some((copyfrom_path.to_str().unwrap(), copyfrom_revision))
-        } else {
-            None
-        };
+    let copyfrom = if let (Some(copyfrom_path), Some(copyfrom_revision)) =
+        (copyfrom_path, Revnum::from_raw(copyfrom_revision))
+    {
+        Some((copyfrom_path.to_str().unwrap(), copyfrom_revision))
+    } else {
+        None
+    };
     match parent.add_directory(path.to_str().unwrap(), copyfrom) {
         Ok(mut child) => {
             unsafe {
@@ -506,7 +507,7 @@ extern "C" fn wrap_editor_open_directory(
     let path = unsafe { std::ffi::CStr::from_ptr(path) };
     let parent: &mut dyn DirectoryEditor =
         unsafe { *(parent_baton as *mut &mut dyn DirectoryEditor) };
-    match parent.open_directory(path.to_str().unwrap(), Some(base_revision)) {
+    match parent.open_directory(path.to_str().unwrap(), Revnum::from_raw(base_revision)) {
         Ok(mut child) => {
             unsafe {
                 *child_baton = child.as_mut() as *mut dyn DirectoryEditor as *mut std::ffi::c_void
@@ -574,12 +575,13 @@ extern "C" fn wrap_editor_add_file(
     };
     let parent: &mut dyn DirectoryEditor =
         unsafe { *(parent_baton as *mut &mut dyn DirectoryEditor) };
-    let copyfrom =
-        if let (Some(copyfrom_path), copyfrom_revision) = (copyfrom_path, copyfrom_revision) {
-            Some((copyfrom_path.to_str().unwrap(), copyfrom_revision))
-        } else {
-            None
-        };
+    let copyfrom = if let (Some(copyfrom_path), Some(copyfrom_revision)) =
+        (copyfrom_path, Revnum::from_raw(copyfrom_revision))
+    {
+        Some((copyfrom_path.to_str().unwrap(), copyfrom_revision))
+    } else {
+        None
+    };
     match parent.add_file(path.to_str().unwrap(), copyfrom) {
         Ok(mut file) => {
             unsafe { *file_baton = file.as_mut() as *mut dyn FileEditor as *mut std::ffi::c_void };
@@ -599,7 +601,7 @@ extern "C" fn wrap_editor_open_file(
     let path = unsafe { std::ffi::CStr::from_ptr(path) };
     let parent: &mut dyn DirectoryEditor =
         unsafe { *(parent_baton as *mut &mut dyn DirectoryEditor) };
-    match parent.open_file(path.to_str().unwrap(), Some(base_revision)) {
+    match parent.open_file(path.to_str().unwrap(), Revnum::from_raw(base_revision)) {
         Ok(mut file) => {
             unsafe { *file_baton = file.as_mut() as *mut dyn FileEditor as *mut std::ffi::c_void };
             std::ptr::null_mut()
@@ -707,7 +709,7 @@ extern "C" fn wrap_editor_set_target_revision(
     _pool: *mut apr::apr_pool_t,
 ) -> *mut crate::generated::svn_error_t {
     let editor: &mut dyn Editor = unsafe { *(edit_baton as *mut &mut dyn Editor) };
-    match editor.set_target_revision(revision) {
+    match editor.set_target_revision(Revnum::from_raw(revision).unwrap()) {
         Ok(()) => std::ptr::null_mut(),
         Err(err) => unsafe { err.into_raw() },
     }

@@ -165,7 +165,7 @@ impl Session {
             )
         };
         Error::from_raw(err)?;
-        Ok(revnum)
+        Ok(Revnum::from_raw(revnum).unwrap())
     }
 
     pub fn get_dated_revision(&mut self, tm: impl apr::time::IntoTime) -> Result<Revnum, Error> {
@@ -180,7 +180,7 @@ impl Session {
             )
         };
         Error::from_raw(err)?;
-        Ok(revnum)
+        Ok(Revnum::from_raw(revnum).unwrap())
     }
 
     pub fn change_revprop(
@@ -203,7 +203,7 @@ impl Session {
         let err = unsafe {
             crate::generated::svn_ra_change_rev_prop2(
                 self.0.as_mut_ptr(),
-                rev,
+                rev.into(),
                 name.as_ptr(),
                 &old_value.map_or(std::ptr::null(), |v| &v),
                 &new_value,
@@ -220,7 +220,7 @@ impl Session {
         let err = unsafe {
             crate::generated::svn_ra_rev_proplist(
                 self.0.as_mut_ptr(),
-                rev,
+                rev.into(),
                 &mut props,
                 pool.as_mut_ptr(),
             )
@@ -250,7 +250,7 @@ impl Session {
         let err = unsafe {
             crate::generated::svn_ra_rev_prop(
                 self.0.as_mut_ptr(),
-                rev,
+                rev.into(),
                 name.as_ptr(),
                 &mut value,
                 pool.as_mut_ptr(),
@@ -322,7 +322,7 @@ impl Session {
             crate::generated::svn_ra_get_file(
                 self.0.as_mut_ptr(),
                 path.as_ptr(),
-                rev,
+                rev.into(),
                 stream.as_mut_ptr(),
                 &mut fetched_rev,
                 &mut props,
@@ -335,7 +335,7 @@ impl Session {
                 PooledPtr::in_pool(std::rc::Rc::new(pool), props)
             });
         Ok((
-            fetched_rev,
+            Revnum::from_raw(fetched_rev).unwrap(),
             hash.iter()
                 .map(|(k, v)| {
                     (
@@ -372,7 +372,7 @@ impl Session {
                 &mut fetched_rev,
                 &mut props,
                 path.as_ptr(),
-                rev,
+                rev.into(),
                 dirent_fields,
                 pool.as_mut_ptr(),
             )
@@ -407,7 +407,7 @@ impl Session {
                 )
             })
             .collect();
-        Ok((fetched_rev, dirents, props))
+        Ok((Revnum::from_raw(fetched_rev).unwrap(), dirents, props))
     }
 
     pub fn list(
@@ -437,7 +437,7 @@ impl Session {
             crate::generated::svn_ra_list(
                 self.0.as_mut_ptr(),
                 path.as_ptr(),
-                rev,
+                rev.into(),
                 if let Some(patterns) = patterns.as_ref() {
                     patterns.as_ptr()
                 } else {
@@ -470,7 +470,7 @@ impl Session {
                 self.0.as_mut_ptr(),
                 &mut mergeinfo,
                 paths.as_ptr(),
-                revision,
+                revision.into(),
                 inherit.into(),
                 include_descendants.into(),
                 pool.as_mut_ptr(),
@@ -511,9 +511,47 @@ impl Session {
                 self.0.as_mut_ptr(),
                 &mut reporter,
                 &mut report_baton,
-                revision_to_update_to,
+                revision_to_update_to.into(),
                 update_target.as_ptr() as *const _,
                 depth.into(),
+                send_copyfrom_args.into(),
+                ignore_ancestry.into(),
+                &crate::delta::WRAP_EDITOR,
+                editor as *mut _ as *mut std::ffi::c_void,
+                scratch_pool.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        Ok(Box::new(WrapReporter(reporter, unsafe {
+            PooledPtr::in_pool(std::rc::Rc::new(pool), report_baton)
+        })) as Box<dyn Reporter>)
+    }
+
+    pub fn do_switch(
+        &mut self,
+        revision_to_switch_to: Revnum,
+        switch_target: &str,
+        depth: Depth,
+        switch_url: &str,
+        send_copyfrom_args: bool,
+        ignore_ancestry: bool,
+        editor: &mut dyn Editor,
+    ) -> Result<Box<dyn Reporter>, Error> {
+        let switch_target = std::ffi::CString::new(switch_target).unwrap();
+        let mut pool = Pool::new();
+        let mut scratch_pool = Pool::new();
+        let mut reporter = std::ptr::null();
+        let mut report_baton = std::ptr::null_mut();
+        let err = unsafe {
+            crate::generated::svn_ra_do_switch3(
+                self.0.as_mut_ptr(),
+                &mut reporter,
+                &mut report_baton,
+                revision_to_switch_to.into(),
+                switch_target.as_ptr() as *const _,
+                depth.into(),
+                switch_url.as_ptr() as *const _,
                 send_copyfrom_args.into(),
                 ignore_ancestry.into(),
                 &crate::delta::WRAP_EDITOR,
@@ -536,13 +574,41 @@ impl Session {
             crate::generated::svn_ra_check_path(
                 self.0.as_mut_ptr(),
                 path.as_ptr(),
-                rev,
+                rev.into(),
                 &mut kind,
                 pool.as_mut_ptr(),
             )
         };
         Error::from_raw(err)?;
         Ok(crate::NodeKind::from(kind))
+    }
+
+    pub fn do_status(
+        &mut self,
+        status_target: &str,
+        revision: Revnum,
+        depth: Depth,
+        status_editor: &mut dyn Editor,
+    ) -> Result<(), Error> {
+        let status_target = std::ffi::CString::new(status_target).unwrap();
+        let mut pool = Pool::new();
+        let mut reporter = std::ptr::null();
+        let mut report_baton = std::ptr::null_mut();
+        let err = unsafe {
+            crate::generated::svn_ra_do_status2(
+                self.0.as_mut_ptr(),
+                &mut reporter,
+                &mut report_baton,
+                status_target.as_ptr() as *const _,
+                revision.into(),
+                depth.into(),
+                &crate::delta::WRAP_EDITOR,
+                status_editor as *mut _ as *mut std::ffi::c_void,
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        Ok(())
     }
 
     pub fn stat(&mut self, path: &str, rev: Revnum) -> Result<Dirent, Error> {
@@ -553,7 +619,7 @@ impl Session {
             crate::generated::svn_ra_stat(
                 self.0.as_mut_ptr(),
                 path.as_ptr(),
-                rev,
+                rev.into(),
                 &mut dirent,
                 pool.as_mut_ptr(),
             )
@@ -603,14 +669,14 @@ impl Session {
             crate::generated::svn_ra_get_deleted_rev(
                 self.0.as_mut_ptr(),
                 path.as_ptr(),
-                peg_revision,
-                end_revision,
+                peg_revision.into(),
+                end_revision.into(),
                 &mut rev,
                 pool.as_mut_ptr(),
             )
         };
         Error::from_raw(err)?;
-        Ok(rev)
+        Ok(Revnum::from_raw(rev).unwrap())
     }
 
     pub fn has_capability(&mut self, capability: &str) -> Result<bool, Error> {
@@ -627,6 +693,121 @@ impl Session {
         };
         Error::from_raw(err)?;
         Ok(has != 0)
+    }
+
+    pub fn diff(
+        &mut self,
+        revision: Revnum,
+        diff_target: &str,
+        depth: Depth,
+        ignore_ancestry: bool,
+        text_deltas: bool,
+        versus_url: &str,
+        diff_editor: &mut dyn Editor,
+    ) -> Result<Box<dyn Reporter>, Error> {
+        let diff_target = std::ffi::CString::new(diff_target).unwrap();
+        let versus_url = std::ffi::CString::new(versus_url).unwrap();
+        let mut pool = Pool::new();
+        let mut reporter = std::ptr::null();
+        let mut report_baton = std::ptr::null_mut();
+        let err = unsafe {
+            crate::generated::svn_ra_do_diff3(
+                self.0.as_mut_ptr(),
+                &mut reporter,
+                &mut report_baton,
+                revision.into(),
+                diff_target.as_ptr() as *const _,
+                depth.into(),
+                ignore_ancestry.into(),
+                text_deltas.into(),
+                versus_url.as_ptr() as *const _,
+                &crate::delta::WRAP_EDITOR,
+                diff_editor as *mut _ as *mut std::ffi::c_void,
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        Ok(Box::new(WrapReporter(reporter, unsafe {
+            PooledPtr::in_pool(std::rc::Rc::new(pool), report_baton)
+        })) as Box<dyn Reporter>)
+    }
+
+    pub fn get_log(
+        &mut self,
+        paths: &[&str],
+        start: Revnum,
+        end: Revnum,
+        limit: usize,
+        discover_changed_paths: bool,
+        strict_node_history: bool,
+        include_merged_revisions: bool,
+        revprops: &[&str],
+        log_receiver: &dyn FnMut(&crate::CommitInfo) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        let paths: apr::tables::ArrayHeader<*const std::os::raw::c_char> =
+            paths.iter().map(|path| path.as_ptr() as _).collect();
+        let revprops: apr::tables::ArrayHeader<*const std::os::raw::c_char> = revprops
+            .iter()
+            .map(|revprop| revprop.as_ptr() as _)
+            .collect();
+        let mut pool = Pool::new();
+        let log_receiver = Box::new(log_receiver);
+        let err = unsafe {
+            crate::generated::svn_ra_get_log2(
+                self.0.as_mut_ptr(),
+                paths.as_ptr(),
+                start.into(),
+                end.into(),
+                limit as _,
+                discover_changed_paths.into(),
+                strict_node_history.into(),
+                include_merged_revisions.into(),
+                revprops.as_ptr(),
+                Some(crate::client::wrap_log_entry_receiver),
+                &log_receiver as *const _ as *mut _,
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        Ok(())
+    }
+
+    pub fn get_locations(
+        &mut self,
+        path: &str,
+        peg_revision: Revnum,
+        location_revisions: &[Revnum],
+    ) -> Result<HashMap<Revnum, String>, Error> {
+        let path = std::ffi::CString::new(path).unwrap();
+        let location_revisions: apr::tables::ArrayHeader<crate::generated::svn_revnum_t> =
+            location_revisions.iter().map(|rev| (*rev).into()).collect();
+        let mut pool = Pool::new();
+        let mut locations = std::ptr::null_mut();
+        let err = unsafe {
+            crate::generated::svn_ra_get_locations(
+                self.0.as_mut_ptr(),
+                &mut locations,
+                path.as_ptr(),
+                peg_revision.into(),
+                location_revisions.as_ptr(),
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+
+        let mut iter = apr::hash::Hash::<&Revnum, *const std::os::raw::c_char>::from_raw(unsafe {
+            PooledPtr::in_pool(std::rc::Rc::new(pool), locations)
+        });
+
+        let mut locations = HashMap::new();
+        for (k, v) in iter.iter() {
+            let revnum = k.as_ptr() as *const Revnum;
+            locations.insert(unsafe { *revnum }, unsafe {
+                std::ffi::CStr::from_ptr(*v).to_string_lossy().into_owned()
+            });
+        }
+
+        Ok(locations)
     }
 }
 
@@ -651,7 +832,7 @@ impl Reporter for WrapReporter {
             (*self.0).set_path.unwrap()(
                 self.1.as_mut_ptr(),
                 path.as_ptr(),
-                rev,
+                rev.into(),
                 depth.into(),
                 start_empty.into(),
                 lock_token.as_ptr(),
@@ -690,7 +871,7 @@ impl Reporter for WrapReporter {
                 self.1.as_mut_ptr(),
                 path.as_ptr(),
                 url.as_ptr(),
-                rev,
+                rev.into(),
                 depth.into(),
                 start_empty.into(),
                 lock_token.as_ptr(),
@@ -720,6 +901,7 @@ impl Reporter for WrapReporter {
 
 #[allow(dead_code)]
 pub struct Dirent(PooledPtr<crate::generated::svn_dirent_t>);
+unsafe impl Send for Dirent {}
 
 pub fn version() -> crate::Version {
     unsafe { crate::Version(crate::generated::svn_ra_version()) }
