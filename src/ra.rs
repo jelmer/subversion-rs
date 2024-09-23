@@ -755,6 +755,44 @@ impl Session {
         Error::from_raw(err)?;
         Ok(())
     }
+
+    pub fn get_locations(
+        &mut self,
+        path: &str,
+        peg_revision: Revnum,
+        location_revisions: &[Revnum],
+    ) -> Result<HashMap<Revnum, String>, Error> {
+        let path = std::ffi::CString::new(path).unwrap();
+        let location_revisions: apr::tables::ArrayHeader<crate::generated::svn_revnum_t> =
+            location_revisions.iter().map(|rev| (*rev).into()).collect();
+        let mut pool = Pool::new();
+        let mut locations = std::ptr::null_mut();
+        let err = unsafe {
+            crate::generated::svn_ra_get_locations(
+                self.0.as_mut_ptr(),
+                &mut locations,
+                path.as_ptr(),
+                peg_revision.into(),
+                location_revisions.as_ptr(),
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+
+        let mut iter = apr::hash::Hash::<&Revnum, *const std::os::raw::c_char>::from_raw(unsafe {
+            PooledPtr::in_pool(std::rc::Rc::new(pool), locations)
+        });
+
+        let mut locations = HashMap::new();
+        for (k, v) in iter.iter() {
+            let revnum = k.as_ptr() as *const Revnum;
+            locations.insert(unsafe { *revnum }, unsafe {
+                std::ffi::CStr::from_ptr(*v).to_string_lossy().into_owned()
+            });
+        }
+
+        Ok(locations)
+    }
 }
 
 pub struct WrapReporter(

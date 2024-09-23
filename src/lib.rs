@@ -22,12 +22,21 @@ use std::str::FromStr;
 
 pub use version::Version;
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
 pub struct Revnum(generated::svn_revnum_t);
 
 impl From<Revnum> for generated::svn_revnum_t {
     fn from(revnum: Revnum) -> Self {
         revnum.0
+    }
+}
+
+impl apr::hash::IntoHashKey<'_> for &Revnum {
+    fn into_hash_key(self) -> &'static [u8] {
+        unsafe { std::slice::from_raw_parts(
+            &self.0 as *const _ as *const u8,
+            std::mem::size_of::<generated::svn_revnum_t>(),
+        ) }
     }
 }
 
