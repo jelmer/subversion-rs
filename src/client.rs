@@ -1068,7 +1068,10 @@ impl Context {
                 scratch_pool.as_mut_ptr(),
             );
             Error::from_raw(err)?;
-            Ok((Revnum::from_raw(min_revision).unwrap(), Revnum::from_raw(max_revision).unwrap()))
+            Ok((
+                Revnum::from_raw(min_revision).unwrap(),
+                Revnum::from_raw(max_revision).unwrap(),
+            ))
         }
     }
 

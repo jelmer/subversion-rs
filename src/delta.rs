@@ -479,12 +479,13 @@ extern "C" fn wrap_editor_add_directory(
     };
     let parent: &mut dyn DirectoryEditor =
         unsafe { *(parent_baton as *mut &mut dyn DirectoryEditor) };
-    let copyfrom =
-        if let (Some(copyfrom_path), Some(copyfrom_revision)) = (copyfrom_path, Revnum::from_raw(copyfrom_revision)) {
-            Some((copyfrom_path.to_str().unwrap(), copyfrom_revision))
-        } else {
-            None
-        };
+    let copyfrom = if let (Some(copyfrom_path), Some(copyfrom_revision)) =
+        (copyfrom_path, Revnum::from_raw(copyfrom_revision))
+    {
+        Some((copyfrom_path.to_str().unwrap(), copyfrom_revision))
+    } else {
+        None
+    };
     match parent.add_directory(path.to_str().unwrap(), copyfrom) {
         Ok(mut child) => {
             unsafe {
@@ -574,12 +575,13 @@ extern "C" fn wrap_editor_add_file(
     };
     let parent: &mut dyn DirectoryEditor =
         unsafe { *(parent_baton as *mut &mut dyn DirectoryEditor) };
-    let copyfrom =
-        if let (Some(copyfrom_path), Some(copyfrom_revision)) = (copyfrom_path, Revnum::from_raw(copyfrom_revision)) {
-            Some((copyfrom_path.to_str().unwrap(), copyfrom_revision))
-        } else {
-            None
-        };
+    let copyfrom = if let (Some(copyfrom_path), Some(copyfrom_revision)) =
+        (copyfrom_path, Revnum::from_raw(copyfrom_revision))
+    {
+        Some((copyfrom_path.to_str().unwrap(), copyfrom_revision))
+    } else {
+        None
+    };
     match parent.add_file(path.to_str().unwrap(), copyfrom) {
         Ok(mut file) => {
             unsafe { *file_baton = file.as_mut() as *mut dyn FileEditor as *mut std::ffi::c_void };
