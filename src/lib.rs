@@ -607,3 +607,18 @@ impl From<ChecksumKind> for crate::generated::svn_checksum_kind_t {
         }
     }
 }
+
+pub struct LocationSegment(PooledPtr<generated::svn_location_segment_t>);
+
+impl LocationSegment {
+    pub fn range(&self) -> std::ops::Range<Revnum> {
+        Revnum::from_raw(self.0.range_end).unwrap()..Revnum::from_raw(self.0.range_start).unwrap()
+    }
+
+    pub fn path(&self) -> &str {
+        unsafe {
+            let path = self.0.path;
+            std::ffi::CStr::from_ptr(path).to_str().unwrap()
+        }
+    }
+}
