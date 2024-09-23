@@ -528,6 +528,44 @@ impl Session {
         })) as Box<dyn Reporter>)
     }
 
+    pub fn do_switch(
+        &mut self,
+        revision_to_switch_to: Revnum,
+        switch_target: &str,
+        depth: Depth,
+        switch_url: &str,
+        send_copyfrom_args: bool,
+        ignore_ancestry: bool,
+        editor: &mut dyn Editor,
+    ) -> Result<Box<dyn Reporter>, Error> {
+        let switch_target = std::ffi::CString::new(switch_target).unwrap();
+        let mut pool = Pool::new();
+        let mut scratch_pool = Pool::new();
+        let mut reporter = std::ptr::null();
+        let mut report_baton = std::ptr::null_mut();
+        let err = unsafe {
+            crate::generated::svn_ra_do_switch3(
+                self.0.as_mut_ptr(),
+                &mut reporter,
+                &mut report_baton,
+                revision_to_switch_to,
+                switch_target.as_ptr() as *const _,
+                depth.into(),
+                switch_url.as_ptr() as *const _,
+                send_copyfrom_args.into(),
+                ignore_ancestry.into(),
+                &crate::delta::WRAP_EDITOR,
+                editor as *mut _ as *mut std::ffi::c_void,
+                scratch_pool.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        Ok(Box::new(WrapReporter(reporter, unsafe {
+            PooledPtr::in_pool(std::rc::Rc::new(pool), report_baton)
+        })) as Box<dyn Reporter>)
+    }
+
     pub fn check_path(&mut self, path: &str, rev: Revnum) -> Result<crate::NodeKind, Error> {
         let path = std::ffi::CString::new(path).unwrap();
         let mut kind = 0;
@@ -543,6 +581,34 @@ impl Session {
         };
         Error::from_raw(err)?;
         Ok(crate::NodeKind::from(kind))
+    }
+
+    pub fn do_status(
+        &mut self,
+        status_target: &str,
+        revision: Revnum,
+        depth: Depth,
+        status_editor: &mut dyn Editor,
+    ) -> Result<(), Error> {
+        let status_target = std::ffi::CString::new(status_target).unwrap();
+        let mut pool = Pool::new();
+        let mut reporter = std::ptr::null();
+        let mut report_baton = std::ptr::null_mut();
+        let err = unsafe {
+            crate::generated::svn_ra_do_status2(
+                self.0.as_mut_ptr(),
+                &mut reporter,
+                &mut report_baton,
+                status_target.as_ptr() as *const _,
+                revision,
+                depth.into(),
+                &crate::delta::WRAP_EDITOR,
+                status_editor as *mut _ as *mut std::ffi::c_void,
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        Ok(())
     }
 
     pub fn stat(&mut self, path: &str, rev: Revnum) -> Result<Dirent, Error> {
@@ -627,6 +693,42 @@ impl Session {
         };
         Error::from_raw(err)?;
         Ok(has != 0)
+    }
+
+    pub fn diff(&mut self,
+        revision: Revnum,
+        diff_target: &str,
+        depth: Depth,
+        ignore_ancestry: bool,
+        text_deltas: bool,
+        versus_url: &str,
+        diff_editor: &mut dyn Editor,
+    ) -> Result<Box<dyn Reporter>, Error> {
+        let diff_target = std::ffi::CString::new(diff_target).unwrap();
+        let versus_url = std::ffi::CString::new(versus_url).unwrap();
+        let mut pool = Pool::new();
+        let mut reporter = std::ptr::null();
+        let mut report_baton = std::ptr::null_mut();
+        let err = unsafe {
+            crate::generated::svn_ra_do_diff3(
+                self.0.as_mut_ptr(),
+                &mut reporter,
+                &mut report_baton,
+                revision,
+                diff_target.as_ptr() as *const _,
+                depth.into(),
+                ignore_ancestry.into(),
+                text_deltas.into(),
+                versus_url.as_ptr() as *const _,
+                &crate::delta::WRAP_EDITOR,
+                diff_editor as *mut _ as *mut std::ffi::c_void,
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        Ok(Box::new(WrapReporter(reporter, unsafe {
+            PooledPtr::in_pool(std::rc::Rc::new(pool), report_baton)
+        })) as Box<dyn Reporter>)
     }
 }
 
@@ -720,6 +822,7 @@ impl Reporter for WrapReporter {
 
 #[allow(dead_code)]
 pub struct Dirent(PooledPtr<crate::generated::svn_dirent_t>);
+unsafe impl Send for Dirent {}
 
 pub fn version() -> crate::Version {
     unsafe { crate::Version(crate::generated::svn_ra_version()) }
