@@ -165,7 +165,7 @@ impl Session {
             )
         };
         Error::from_raw(err)?;
-        Ok(revnum)
+        Ok(Revnum::from_raw(revnum).unwrap())
     }
 
     pub fn get_dated_revision(&mut self, tm: impl apr::time::IntoTime) -> Result<Revnum, Error> {
@@ -180,7 +180,7 @@ impl Session {
             )
         };
         Error::from_raw(err)?;
-        Ok(revnum)
+        Ok(Revnum::from_raw(revnum).unwrap())
     }
 
     pub fn change_revprop(
@@ -203,7 +203,7 @@ impl Session {
         let err = unsafe {
             crate::generated::svn_ra_change_rev_prop2(
                 self.0.as_mut_ptr(),
-                rev,
+                rev.into(),
                 name.as_ptr(),
                 &old_value.map_or(std::ptr::null(), |v| &v),
                 &new_value,
@@ -220,7 +220,7 @@ impl Session {
         let err = unsafe {
             crate::generated::svn_ra_rev_proplist(
                 self.0.as_mut_ptr(),
-                rev,
+                rev.into(),
                 &mut props,
                 pool.as_mut_ptr(),
             )
@@ -250,7 +250,7 @@ impl Session {
         let err = unsafe {
             crate::generated::svn_ra_rev_prop(
                 self.0.as_mut_ptr(),
-                rev,
+                rev.into(),
                 name.as_ptr(),
                 &mut value,
                 pool.as_mut_ptr(),
@@ -322,7 +322,7 @@ impl Session {
             crate::generated::svn_ra_get_file(
                 self.0.as_mut_ptr(),
                 path.as_ptr(),
-                rev,
+                rev.into(),
                 stream.as_mut_ptr(),
                 &mut fetched_rev,
                 &mut props,
@@ -335,7 +335,7 @@ impl Session {
                 PooledPtr::in_pool(std::rc::Rc::new(pool), props)
             });
         Ok((
-            fetched_rev,
+            Revnum::from_raw(fetched_rev).unwrap(),
             hash.iter()
                 .map(|(k, v)| {
                     (
@@ -372,7 +372,7 @@ impl Session {
                 &mut fetched_rev,
                 &mut props,
                 path.as_ptr(),
-                rev,
+                rev.into(),
                 dirent_fields,
                 pool.as_mut_ptr(),
             )
@@ -407,7 +407,7 @@ impl Session {
                 )
             })
             .collect();
-        Ok((fetched_rev, dirents, props))
+        Ok((Revnum::from_raw(fetched_rev).unwrap(), dirents, props))
     }
 
     pub fn list(
@@ -437,7 +437,7 @@ impl Session {
             crate::generated::svn_ra_list(
                 self.0.as_mut_ptr(),
                 path.as_ptr(),
-                rev,
+                rev.into(),
                 if let Some(patterns) = patterns.as_ref() {
                     patterns.as_ptr()
                 } else {
@@ -470,7 +470,7 @@ impl Session {
                 self.0.as_mut_ptr(),
                 &mut mergeinfo,
                 paths.as_ptr(),
-                revision,
+                revision.into(),
                 inherit.into(),
                 include_descendants.into(),
                 pool.as_mut_ptr(),
@@ -511,7 +511,7 @@ impl Session {
                 self.0.as_mut_ptr(),
                 &mut reporter,
                 &mut report_baton,
-                revision_to_update_to,
+                revision_to_update_to.into(),
                 update_target.as_ptr() as *const _,
                 depth.into(),
                 send_copyfrom_args.into(),
@@ -548,7 +548,7 @@ impl Session {
                 self.0.as_mut_ptr(),
                 &mut reporter,
                 &mut report_baton,
-                revision_to_switch_to,
+                revision_to_switch_to.into(),
                 switch_target.as_ptr() as *const _,
                 depth.into(),
                 switch_url.as_ptr() as *const _,
@@ -574,7 +574,7 @@ impl Session {
             crate::generated::svn_ra_check_path(
                 self.0.as_mut_ptr(),
                 path.as_ptr(),
-                rev,
+                rev.into(),
                 &mut kind,
                 pool.as_mut_ptr(),
             )
@@ -600,7 +600,7 @@ impl Session {
                 &mut reporter,
                 &mut report_baton,
                 status_target.as_ptr() as *const _,
-                revision,
+                revision.into(),
                 depth.into(),
                 &crate::delta::WRAP_EDITOR,
                 status_editor as *mut _ as *mut std::ffi::c_void,
@@ -619,7 +619,7 @@ impl Session {
             crate::generated::svn_ra_stat(
                 self.0.as_mut_ptr(),
                 path.as_ptr(),
-                rev,
+                rev.into(),
                 &mut dirent,
                 pool.as_mut_ptr(),
             )
@@ -669,14 +669,14 @@ impl Session {
             crate::generated::svn_ra_get_deleted_rev(
                 self.0.as_mut_ptr(),
                 path.as_ptr(),
-                peg_revision,
-                end_revision,
+                peg_revision.into(),
+                end_revision.into(),
                 &mut rev,
                 pool.as_mut_ptr(),
             )
         };
         Error::from_raw(err)?;
-        Ok(rev)
+        Ok(Revnum::from_raw(rev).unwrap())
     }
 
     pub fn has_capability(&mut self, capability: &str) -> Result<bool, Error> {
@@ -714,7 +714,7 @@ impl Session {
                 self.0.as_mut_ptr(),
                 &mut reporter,
                 &mut report_baton,
-                revision,
+                revision.into(),
                 diff_target.as_ptr() as *const _,
                 depth.into(),
                 ignore_ancestry.into(),
@@ -740,8 +740,8 @@ impl Session {
             crate::generated::svn_ra_get_log2(
                 self.0.as_mut_ptr(),
                 paths.as_ptr(),
-                start,
-                end,
+                start.into(),
+                end.into(),
                 limit as _,
                 discover_changed_paths.into(),
                 strict_node_history.into(),
@@ -778,7 +778,7 @@ impl Reporter for WrapReporter {
             (*self.0).set_path.unwrap()(
                 self.1.as_mut_ptr(),
                 path.as_ptr(),
-                rev,
+                rev.into(),
                 depth.into(),
                 start_empty.into(),
                 lock_token.as_ptr(),
@@ -817,7 +817,7 @@ impl Reporter for WrapReporter {
                 self.1.as_mut_ptr(),
                 path.as_ptr(),
                 url.as_ptr(),
-                rev,
+                rev.into(),
                 depth.into(),
                 start_empty.into(),
                 lock_token.as_ptr(),
