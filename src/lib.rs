@@ -22,7 +22,24 @@ use std::str::FromStr;
 
 pub use version::Version;
 
-pub type Revnum = generated::svn_revnum_t;
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Revnum(generated::svn_revnum_t);
+
+impl From<Revnum> for generated::svn_revnum_t {
+    fn from(revnum: Revnum) -> Self {
+        revnum.0
+    }
+}
+
+impl Revnum {
+    fn from_raw(raw: generated::svn_revnum_t) -> Option<Self> {
+        if raw < 0 {
+            None
+        } else {
+            Some(Self(raw))
+        }
+    }
+}
 
 pub use error::Error;
 
@@ -57,7 +74,7 @@ impl FromStr for Revision {
             Ok(Revision::Head)
         } else if let Some(rest) = rev.strip_prefix("number:") {
             Ok(Revision::Number(
-                rest.parse::<Revnum>().map_err(|e| e.to_string())?,
+                Revnum(rest.parse::<crate::generated::svn_revnum_t>().map_err(|e| e.to_string())?)
             ))
         } else if let Some(rest) = rev.strip_prefix("date:") {
             Ok(Revision::Date(
@@ -106,7 +123,7 @@ impl From<Revision> for svn_opt_revision_t {
             Revision::Number(revnum) => {
                 let mut uf = crate::generated::__BindgenUnionField::<i64>::new();
                 unsafe {
-                    *uf.as_mut() = revnum;
+                    *uf.as_mut() = revnum.0;
                 }
 
                 svn_opt_revision_t {
@@ -235,7 +252,7 @@ pub struct CommitInfo(PooledPtr<generated::svn_commit_info_t>);
 
 impl CommitInfo {
     pub fn revision(&self) -> Revnum {
-        self.0.revision
+        Revnum::from_raw(self.0.revision).unwrap()
     }
 
     pub fn date(&self) -> &str {

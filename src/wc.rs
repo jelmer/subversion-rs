@@ -113,7 +113,7 @@ impl Context {
                 url.as_ptr(),
                 repos_root_url.as_ptr(),
                 repos_uuid.as_ptr(),
-                revision,
+                revision.0,
                 depth.into(),
                 apr::pool::Pool::new().as_mut_ptr(),
             )
