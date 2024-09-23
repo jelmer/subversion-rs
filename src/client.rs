@@ -80,7 +80,7 @@ extern "C" fn wrap_status_func(
     }
 }
 
-extern "C" fn wrap_log_entry_receiver(
+pub(crate) extern "C" fn wrap_log_entry_receiver(
     baton: *mut std::ffi::c_void,
     log_entry: *mut crate::generated::svn_log_entry_t,
     pool: *mut apr::apr_pool_t,

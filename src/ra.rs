@@ -730,6 +730,31 @@ impl Session {
             PooledPtr::in_pool(std::rc::Rc::new(pool), report_baton)
         })) as Box<dyn Reporter>)
     }
+
+    pub fn get_log(&mut self, paths: &[&str], start: Revnum, end: Revnum, limit: usize, discover_changed_paths: bool, strict_node_history: bool, include_merged_revisions: bool, revprops: &[&str], log_receiver: &dyn FnMut(&crate::CommitInfo) -> Result<(), Error>) -> Result<(), Error> {
+        let paths: apr::tables::ArrayHeader<*const std::os::raw::c_char> = paths.iter().map(|path| path.as_ptr() as _).collect();
+        let revprops: apr::tables::ArrayHeader<*const std::os::raw::c_char> = revprops.iter().map(|revprop| revprop.as_ptr() as _).collect();
+        let mut pool = Pool::new();
+        let log_receiver = Box::new(log_receiver);
+        let err = unsafe {
+            crate::generated::svn_ra_get_log2(
+                self.0.as_mut_ptr(),
+                paths.as_ptr(),
+                start,
+                end,
+                limit as _,
+                discover_changed_paths.into(),
+                strict_node_history.into(),
+                include_merged_revisions.into(),
+                revprops.as_ptr(),
+                Some(crate::client::wrap_log_entry_receiver),
+                &log_receiver as *const _ as *mut _,
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        Ok(())
+    }
 }
 
 pub struct WrapReporter(
