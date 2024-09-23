@@ -403,7 +403,6 @@ impl Session {
     pub fn list(&mut self, path: &str, rev: Revnum, patterns: Option<&[&str]>, depth: Depth, dirent_receiver: impl Fn(&str, &Dirent) -> Result<(), crate::Error>) -> Result<(), Error> {
         let path = std::ffi::CString::new(path).unwrap();
         let mut pool = Pool::new();
-        let mut fetched_rev = 0;
         let patterns: Option<apr::tables::ArrayHeader<*const std::os::raw::c_char>> = patterns.map(|patterns| {
             patterns.iter().map(|pattern| pattern.as_ptr() as _).collect()
         });
@@ -435,7 +434,7 @@ impl Session {
     }
 
     pub fn get_mergeinfo(&mut self, paths: &[&str], revision: Revnum, inherit: crate::mergeinfo::MergeinfoInheritance, include_descendants: bool) -> Result<HashMap<String, crate::mergeinfo::Mergeinfo>, Error> {
-        let paths: apr::tables::ArrayHeader<*const std::os::raw::c_char> = paths.iter().map(|path| std::ffi::CString::new(*path).unwrap().as_ptr()).collect();
+        let paths: apr::tables::ArrayHeader<*const std::os::raw::c_char> = paths.iter().map(|path| path.as_ptr() as _).collect();
         let mut pool = Pool::new();
         let mut mergeinfo = std::ptr::null_mut();
         let err = unsafe {
@@ -453,6 +452,120 @@ impl Session {
         let pool = std::rc::Rc::new(pool);
         let mut mergeinfo = apr::hash::Hash::<&[u8], *mut crate::generated::svn_mergeinfo_t>::from_raw(unsafe { PooledPtr::in_pool(pool.clone(), mergeinfo) });
         Ok(mergeinfo.iter().map(|(k, v)| (String::from_utf8_lossy(k).into_owned(), crate::mergeinfo::Mergeinfo(unsafe { PooledPtr::in_pool(pool.clone(), *v) }))).collect())
+    }
+
+    pub fn do_update(
+        &mut self,
+        revision_to_update_to: Revnum,
+        update_target: &str,
+        depth: Depth,
+        send_copyfrom_args: bool,
+        ignore_ancestry: bool,
+        editor: &mut dyn Editor,
+    ) -> Result<Box<dyn Reporter>, Error> {
+        let mut pool = Pool::new();
+        let mut scratch_pool = Pool::new();
+        let mut reporter = std::ptr::null();
+        let mut report_baton = std::ptr::null_mut();
+        let err = unsafe {
+            crate::generated::svn_ra_do_update3(
+                self.0.as_mut_ptr(),
+                &mut reporter,
+                &mut report_baton,
+                revision_to_update_to,
+                update_target.as_ptr() as *const _,
+                depth.into(),
+                send_copyfrom_args.into(),
+                ignore_ancestry.into(),
+                &crate::delta::WRAP_EDITOR,
+                editor as *mut _ as *mut std::ffi::c_void,
+                scratch_pool.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        Ok(Box::new(WrapReporter(reporter, unsafe { PooledPtr::in_pool(std::rc::Rc::new(pool), report_baton) })) as Box<dyn Reporter>)
+    }
+}
+
+pub struct WrapReporter(*const crate::generated::svn_ra_reporter3_t, PooledPtr<std::ffi::c_void>);
+
+impl Reporter for WrapReporter {
+    fn set_path(
+        &mut self,
+        path: &str,
+        rev: Revnum,
+        depth: Depth,
+        start_empty: bool,
+        lock_token: &str,
+    ) -> Result<(), Error> {
+        let path = std::ffi::CString::new(path).unwrap();
+        let lock_token = std::ffi::CString::new(lock_token).unwrap();
+        let mut pool = Pool::new();
+        let err = unsafe {
+            (*self.0).set_path.unwrap()(
+                self.1.as_mut_ptr(),
+                path.as_ptr(),
+                rev,
+                depth.into(),
+                start_empty.into(),
+                lock_token.as_ptr(),
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        Ok(())
+    }
+
+    fn delete_path(&mut self, path: &str) -> Result<(), Error> {
+        let path = std::ffi::CString::new(path).unwrap();
+        let mut pool = Pool::new();
+        let err = unsafe { (*self.0).delete_path.unwrap()(self.1.as_mut_ptr(), path.as_ptr(), pool.as_mut_ptr()) };
+        Error::from_raw(err)?;
+        Ok(())
+    }
+
+    fn link_path(
+        &mut self,
+        path: &str,
+        url: &str,
+        rev: Revnum,
+        depth: Depth,
+        start_empty: bool,
+        lock_token: &str,
+    ) -> Result<(), Error> {
+        let path = std::ffi::CString::new(path).unwrap();
+        let url = std::ffi::CString::new(url).unwrap();
+        let lock_token = std::ffi::CString::new(lock_token).unwrap();
+        let mut pool = Pool::new();
+        let err = unsafe {
+            (*self.0).link_path.unwrap()(
+                self.1.as_mut_ptr(),
+                path.as_ptr(),
+                url.as_ptr(),
+                rev,
+                depth.into(),
+                start_empty.into(),
+                lock_token.as_ptr(),
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        Ok(())
+    }
+
+    fn finish_report(&mut self) -> Result<(), Error> {
+        let mut pool = Pool::new();
+        let err = unsafe { (*self.0).finish_report.unwrap()(self.1.as_mut_ptr(), pool.as_mut_ptr()) };
+        Error::from_raw(err)?;
+        Ok(())
+    }
+
+    fn abort_report(&mut self) -> Result<(), Error> {
+        let mut pool = Pool::new();
+        let err = unsafe { (*self.0).abort_report.unwrap()(self.1.as_mut_ptr(), pool.as_mut_ptr()) };
+        Error::from_raw(err)?;
+        Ok(())
     }
 }
 

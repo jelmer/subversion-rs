@@ -1,6 +1,7 @@
 use apr::pool::PooledPtr;
 use crate::generated::svn_mergeinfo_t;
 
+#[allow(dead_code)]
 pub struct Mergeinfo(pub(crate) PooledPtr<svn_mergeinfo_t>);
 
 #[derive(Debug, PartialEq)]
