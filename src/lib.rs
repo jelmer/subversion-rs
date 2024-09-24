@@ -530,47 +530,47 @@ impl From<StatusKind> for generated::svn_wc_status_kind {
     }
 }
 
-pub struct Lock(apr::pool::PooledPtr<generated::svn_lock_t>);
+pub struct Lock(*const generated::svn_lock_t);
 
 impl Lock {
     pub fn path(&self) -> &str {
         unsafe {
-            let path = self.0.path;
+            let path = (*self.0).path;
             std::ffi::CStr::from_ptr(path).to_str().unwrap()
         }
     }
 
     pub fn token(&self) -> &str {
         unsafe {
-            let token = self.0.token;
+            let token = (*self.0).token;
             std::ffi::CStr::from_ptr(token).to_str().unwrap()
         }
     }
 
     pub fn owner(&self) -> &str {
         unsafe {
-            let owner = self.0.owner;
+            let owner = (*self.0).owner;
             std::ffi::CStr::from_ptr(owner).to_str().unwrap()
         }
     }
 
     pub fn comment(&self) -> &str {
         unsafe {
-            let comment = self.0.comment;
+            let comment = (*self.0).comment;
             std::ffi::CStr::from_ptr(comment).to_str().unwrap()
         }
     }
 
     pub fn is_dav_comment(&self) -> bool {
-        self.0.is_dav_comment == 1
+        unsafe { (*self.0).is_dav_comment == 1 }
     }
 
     pub fn creation_date(&self) -> i64 {
-        self.0.creation_date
+        unsafe { (*self.0).creation_date }
     }
 
     pub fn expiration_date(&self) -> apr::time::Time {
-        apr::time::Time::from(self.0.expiration_date)
+        unsafe { apr::time::Time::from((*self.0).expiration_date) }
     }
 }
 
