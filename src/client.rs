@@ -232,6 +232,48 @@ pub struct CatOptions {
     expand_keywords: bool,
 }
 
+/// Options for cleanup
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CleanupOptions {
+    break_locks: bool,
+    fix_recorded_timestamps: bool,
+    clear_dav_cache: bool,
+    vacuum_pristines: bool,
+    include_externals: bool,
+}
+
+/// Options for proplist
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ProplistOptions<'a> {
+    peg_revision: Revision,
+    revision: Revision,
+    depth: Depth,
+    changelists: Option<&'a [&'a str]>,
+    get_target_inherited_props: bool,
+}
+
+/// Options for export
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ExportOptions {
+    peg_revision: Revision,
+    revision: Revision,
+    overwrite: bool,
+    ignore_externals: bool,
+    ignore_keywords: bool,
+    depth: Depth,
+    native_eol: crate::NativeEOL,
+}
+
+/// Options for vacuum
+#[derive(Debug, Clone, Copy, Default)]
+pub struct VacuumOptions {
+    remove_unversioned_items: bool,
+    remove_ignored_items: bool,
+    fix_recorded_timestamps: bool,
+    vacuum_pristines: bool,
+    include_externals: bool,
+}
+
 /// Options for a checkout
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CheckoutOptions {
@@ -389,7 +431,7 @@ impl Context {
         &mut self,
         paths: &[&str],
         revision: Revision,
-        options: &UpdateOptions
+        options: &UpdateOptions,
     ) -> Result<Vec<Revnum>, Error> {
         let mut pool = std::rc::Rc::new(Pool::default());
         let mut result_revs = std::ptr::null_mut();
@@ -424,7 +466,7 @@ impl Context {
         &mut self,
         path: impl AsCanonicalDirent<'a>,
         url: impl AsCanonicalUri<'a>,
-        options: &SwitchOptions
+        options: &SwitchOptions,
     ) -> Result<Revnum, Error> {
         let mut pool = Pool::default();
         let mut result_rev = 0;
@@ -453,7 +495,7 @@ impl Context {
     pub fn add<'a>(
         &mut self,
         path: impl AsCanonicalDirent<'a>,
-        options: &AddOptions
+        options: &AddOptions,
     ) -> Result<(), Error> {
         let mut pool = Pool::default();
         let path = path.as_canonical_dirent(&mut pool);
@@ -509,8 +551,8 @@ impl Context {
     pub fn delete(
         &mut self,
         paths: &[&str],
-        revprop_table: std::collections::HashMap<& str, & str>,
-        options: &DeleteOptions
+        revprop_table: std::collections::HashMap<&str, &str>,
+        options: &DeleteOptions,
     ) -> Result<(), Error> {
         let mut pool = std::rc::Rc::new(Pool::default());
         unsafe {
@@ -542,11 +584,7 @@ impl Context {
     pub fn proplist(
         &mut self,
         target: &str,
-        peg_revision: Revision,
-        revision: Revision,
-        depth: Depth,
-        changelists: Option<&[&str]>,
-        get_target_inherited_props: bool,
+        options: &ProplistOptions,
         receiver: &mut dyn FnMut(
             &str,
             &std::collections::HashMap<String, Vec<u8>>,
@@ -555,7 +593,7 @@ impl Context {
     ) -> Result<(), Error> {
         let mut pool = Pool::default();
 
-        let changelists = changelists.map(|cl| {
+        let changelists = options.changelists.map(|cl| {
             cl.iter()
                 .map(|cl| std::ffi::CString::new(*cl).unwrap())
                 .collect::<Vec<_>>()
@@ -570,13 +608,13 @@ impl Context {
             let receiver = Box::into_raw(Box::new(receiver));
             let err = svn_client_proplist4(
                 target.as_ptr() as *const i8,
-                &peg_revision.into(),
-                &revision.into(),
-                depth.into(),
+                &options.peg_revision.into(),
+                &options.revision.into(),
+                options.depth.into(),
                 changelists
                     .map(|cl| cl.as_ptr())
                     .unwrap_or(std::ptr::null()),
-                get_target_inherited_props.into(),
+                options.get_target_inherited_props.into(),
                 Some(wrap_proplist_receiver2),
                 receiver as *mut std::ffi::c_void,
                 &mut *self.0,
@@ -633,16 +671,10 @@ impl Context {
         &mut self,
         from_path_or_url: &str,
         to_path: impl AsCanonicalDirent<'a>,
-        peg_revision: Revision,
-        revision: Revision,
-        overwrite: bool,
-        ignore_externals: bool,
-        ignore_keywords: bool,
-        depth: Depth,
-        native_eol: crate::NativeEOL,
+        options: &ExportOptions,
     ) -> Result<Revnum, Error> {
         let mut pool = std::rc::Rc::new(Pool::default());
-        let native_eol: Option<&str> = native_eol.into();
+        let native_eol: Option<&str> = options.native_eol.into();
         let native_eol = native_eol.map(|s| std::ffi::CString::new(s).unwrap());
         let mut revnum = 0;
         let to_path = to_path.as_canonical_dirent(std::rc::Rc::get_mut(&mut pool).unwrap());
@@ -651,12 +683,12 @@ impl Context {
                 &mut revnum,
                 from_path_or_url.as_ptr() as *const i8,
                 to_path.as_ptr(),
-                &peg_revision.into(),
-                &revision.into(),
-                overwrite as i32,
-                ignore_externals as i32,
-                ignore_keywords as i32,
-                depth as i32,
+                &options.peg_revision.into(),
+                &options.revision.into(),
+                options.overwrite as i32,
+                options.ignore_externals as i32,
+                options.ignore_keywords as i32,
+                options.depth as i32,
                 native_eol.map(|s| s.as_ptr()).unwrap_or(std::ptr::null()),
                 &mut *self.0,
                 std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
@@ -893,25 +925,17 @@ impl Context {
             .collect::<Vec<_>>())
     }
 
-    pub fn vacuum(
-        &mut self,
-        path: &str,
-        remove_unversioned_items: bool,
-        remove_ignored_items: bool,
-        fix_recorded_timestamps: bool,
-        vacuum_pristines: bool,
-        include_externals: bool,
-    ) -> Result<(), Error> {
+    pub fn vacuum(&mut self, path: &str, options: &VacuumOptions) -> Result<(), Error> {
         let mut pool = std::rc::Rc::new(Pool::default());
         let path = std::ffi::CString::new(path).unwrap();
         unsafe {
             let err = svn_client_vacuum(
                 path.as_ptr(),
-                remove_unversioned_items.into(),
-                remove_ignored_items.into(),
-                fix_recorded_timestamps.into(),
-                vacuum_pristines.into(),
-                include_externals.into(),
+                options.remove_unversioned_items.into(),
+                options.remove_ignored_items.into(),
+                options.fix_recorded_timestamps.into(),
+                options.vacuum_pristines.into(),
+                options.include_externals.into(),
                 &mut *self.0,
                 std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
             );
@@ -920,25 +944,17 @@ impl Context {
         }
     }
 
-    pub fn cleanup(
-        &mut self,
-        path: &str,
-        break_locks: bool,
-        fix_recorded_timestamps: bool,
-        clear_dav_cache: bool,
-        vacuum_pristines: bool,
-        include_externals: bool,
-    ) -> Result<(), Error> {
+    pub fn cleanup(&mut self, path: &str, options: &CleanupOptions) -> Result<(), Error> {
         let mut pool = std::rc::Rc::new(Pool::default());
         let path = std::ffi::CString::new(path).unwrap();
         unsafe {
             let err = svn_client_cleanup2(
                 path.as_ptr(),
-                break_locks.into(),
-                fix_recorded_timestamps.into(),
-                clear_dav_cache.into(),
-                vacuum_pristines.into(),
-                include_externals.into(),
+                options.break_locks.into(),
+                options.fix_recorded_timestamps.into(),
+                options.clear_dav_cache.into(),
+                options.vacuum_pristines.into(),
+                options.include_externals.into(),
                 &mut *self.0,
                 std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
             );
@@ -997,7 +1013,7 @@ impl Context {
         &mut self,
         path_or_url: &str,
         stream: &mut dyn std::io::Write,
-        options: &CatOptions
+        options: &CatOptions,
     ) -> Result<HashMap<String, Vec<u8>>, Error> {
         let mut pool = std::rc::Rc::new(Pool::default());
         let path_or_url = std::ffi::CString::new(path_or_url).unwrap();
@@ -1479,7 +1495,7 @@ mod tests {
                     depth: Depth::Infinity,
                     ignore_externals: false,
                     allow_unver_obstructions: false,
-                }
+                },
             )
             .unwrap();
         assert_eq!(revnum, Revnum(0));

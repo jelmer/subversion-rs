@@ -6,7 +6,7 @@ fn main() {
     ctx.checkout(
         "http://svn.apache.org/repos/asf/subversion/trunk/subversion/libsvn_client",
         std::path::Path::new("libsvn_client"),
-        &CheckoutOptions::default()
+        &CheckoutOptions::default(),
     )
     .unwrap();
 }
