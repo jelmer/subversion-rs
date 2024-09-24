@@ -224,6 +224,14 @@ extern "C" fn wrap_info_receiver2(
     }
 }
 
+/// Options for cat
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CatOptions {
+    revision: Revision,
+    peg_revision: Revision,
+    expand_keywords: bool,
+}
+
 /// Options for a checkout
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CheckoutOptions {
@@ -989,9 +997,7 @@ impl Context {
         &mut self,
         path_or_url: &str,
         stream: &mut dyn std::io::Write,
-        peg_revision: Revision,
-        revision: Revision,
-        expand_keywords: bool,
+        options: &CatOptions
     ) -> Result<HashMap<String, Vec<u8>>, Error> {
         let mut pool = std::rc::Rc::new(Pool::default());
         let path_or_url = std::ffi::CString::new(path_or_url).unwrap();
@@ -1002,9 +1008,9 @@ impl Context {
                 &mut props,
                 s.as_mut_ptr(),
                 path_or_url.as_ptr(),
-                &peg_revision.into(),
-                &revision.into(),
-                expand_keywords.into(),
+                &options.peg_revision.into(),
+                &options.revision.into(),
+                options.expand_keywords.into(),
                 self.as_mut_ptr(),
                 std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
                 apr::pool::Pool::new().as_mut_ptr(),
