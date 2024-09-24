@@ -189,4 +189,5 @@ pub fn delete_fs(path: &std::path::Path) -> Result<(), Error> {
     }
 }
 
+#[allow(dead_code)]
 pub struct Root(pub(crate) PooledPtr<crate::generated::svn_fs_root_t>);
