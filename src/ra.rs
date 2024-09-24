@@ -28,6 +28,49 @@ pub(crate) extern "C" fn wrap_dirent_receiver(
     }
 }
 
+extern "C" fn wrap_location_segment_receiver(
+    svn_location_segment: *mut crate::generated::svn_location_segment_t,
+    baton: *mut std::os::raw::c_void,
+    pool: *mut apr::apr_pool_t,
+) -> *mut crate::generated::svn_error_t {
+    let baton = unsafe {
+        &*(baton as *const _ as *const &dyn Fn(&crate::LocationSegment) -> Result<(), crate::Error>)
+    };
+    let pool = Pool::from_raw(pool);
+    match baton(&crate::LocationSegment(unsafe {
+        PooledPtr::in_pool(std::rc::Rc::new(pool), svn_location_segment)
+    })) {
+        Ok(()) => std::ptr::null_mut(),
+        Err(mut e) => e.as_mut_ptr(),
+    }
+}
+
+extern "C" fn wrap_lock_func(
+    lock_baton: *mut std::os::raw::c_void,
+    path: *const std::os::raw::c_char,
+    do_lock: i32,
+    lock: *const crate::generated::svn_lock_t,
+    error: *mut crate::generated::svn_error_t,
+    pool: *mut apr::apr_pool_t,
+) -> *mut crate::generated::svn_error_t {
+    let lock_baton = unsafe {
+        &mut *(lock_baton
+            as *mut &mut dyn Fn(&str, bool, &crate::Lock, Option<&Error>) -> Result<(), Error>)
+    };
+    let path = unsafe { std::ffi::CStr::from_ptr(path) };
+
+    let pool = Pool::from_raw(pool);
+
+    let error = Error::from_raw(error).err();
+
+    let lock = crate::Lock(unsafe { PooledPtr::in_pool(std::rc::Rc::new(pool), lock as *mut _) });
+
+    match lock_baton(path.to_str().unwrap(), do_lock != 0, &lock, error.as_ref()) {
+        Ok(()) => std::ptr::null_mut(),
+        Err(e) => unsafe { e.into_raw() },
+    }
+}
+
 impl Session {
     pub fn open(
         url: &str,
@@ -809,6 +852,323 @@ impl Session {
 
         Ok(locations)
     }
+
+    pub fn get_location_segments(
+        &mut self,
+        path: &str,
+        peg_revision: Revnum,
+        start: Revnum,
+        end: Revnum,
+        location_receiver: &dyn Fn(&crate::LocationSegment) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        let path = std::ffi::CString::new(path).unwrap();
+        let mut pool = Pool::new();
+        let err = unsafe {
+            crate::generated::svn_ra_get_location_segments(
+                self.0.as_mut_ptr(),
+                path.as_ptr(),
+                peg_revision.into(),
+                start.into(),
+                end.into(),
+                Some(wrap_location_segment_receiver),
+                &location_receiver as *const _ as *mut _,
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        Ok(())
+    }
+
+    pub fn lock(
+        &mut self,
+        path_revs: &HashMap<String, Revnum>,
+        commnt: &str,
+        steal_lock: bool,
+        mut lock_func: impl Fn(&str, bool, &crate::Lock, Option<&Error>) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        let mut pool = Pool::new();
+        let scratch_pool = std::rc::Rc::new(Pool::new());
+        let mut hash =
+            apr::hash::Hash::<&str, crate::generated::svn_revnum_t>::in_pool(&scratch_pool);
+        for (k, v) in path_revs.iter() {
+            hash.set(k, &v.0);
+        }
+        let commnt = std::ffi::CString::new(commnt).unwrap();
+        let err = unsafe {
+            crate::generated::svn_ra_lock(
+                self.0.as_mut_ptr(),
+                hash.as_mut_ptr(),
+                commnt.as_ptr(),
+                steal_lock.into(),
+                Some(wrap_lock_func),
+                &mut lock_func as *mut _ as *mut std::ffi::c_void,
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        Ok(())
+    }
+
+    pub fn unlock(
+        &mut self,
+        path_tokens: &HashMap<String, String>,
+        break_lock: bool,
+        mut lock_func: impl Fn(&str, bool, &crate::Lock, Option<&Error>) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        let mut pool = Pool::new();
+        let scratch_pool = std::rc::Rc::new(Pool::new());
+        let mut hash = apr::hash::Hash::<&str, *const std::os::raw::c_char>::in_pool(&scratch_pool);
+        for (k, v) in path_tokens.iter() {
+            hash.set(k, &(v.as_ptr() as *const _));
+        }
+        let err = unsafe {
+            crate::generated::svn_ra_unlock(
+                self.0.as_mut_ptr(),
+                hash.as_mut_ptr(),
+                break_lock.into(),
+                Some(wrap_lock_func),
+                &mut lock_func as *mut _ as *mut std::ffi::c_void,
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        Ok(())
+    }
+
+    pub fn get_lock(&mut self, path: &str) -> Result<crate::Lock, Error> {
+        let path = std::ffi::CString::new(path).unwrap();
+        let mut lock = std::ptr::null_mut();
+        let mut pool = Pool::new();
+        let err = unsafe {
+            crate::generated::svn_ra_get_lock(
+                self.0.as_mut_ptr(),
+                &mut lock,
+                path.as_ptr(),
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        Ok(crate::Lock(unsafe {
+            PooledPtr::in_pool(std::rc::Rc::new(pool), lock)
+        }))
+    }
+
+    pub fn get_locks(
+        &mut self,
+        path: &str,
+        depth: Depth,
+    ) -> Result<HashMap<String, crate::Lock>, Error> {
+        let path = std::ffi::CString::new(path).unwrap();
+        let mut locks = std::ptr::null_mut();
+        let mut pool = Pool::new();
+        let err = unsafe {
+            crate::generated::svn_ra_get_locks2(
+                self.0.as_mut_ptr(),
+                &mut locks,
+                path.as_ptr(),
+                depth.into(),
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        let pool = std::rc::Rc::new(pool);
+        let mut hash =
+            apr::hash::Hash::<&str, *mut crate::generated::svn_lock_t>::from_raw(unsafe {
+                PooledPtr::in_pool(pool.clone(), locks)
+            });
+        Ok(hash
+            .iter()
+            .map(|(k, v)| {
+                (
+                    String::from_utf8_lossy(k).into_owned(),
+                    crate::Lock(unsafe { PooledPtr::in_pool(pool.clone(), *v) }),
+                )
+            })
+            .collect())
+    }
+
+    pub fn replay_range(
+        &mut self,
+        start_revision: Revnum,
+        end_revision: Revnum,
+        low_water_mark: Revnum,
+        send_deltas: bool,
+        replay_revstart_callback: &dyn FnMut(
+            Revnum,
+            &HashMap<String, Vec<u8>>,
+        )
+            -> Result<Box<dyn crate::delta::Editor>, Error>,
+        replay_revend_callback: &dyn FnMut(
+            Revnum,
+            &dyn crate::delta::Editor,
+            &HashMap<String, Vec<u8>>,
+        ) -> Result<Box<dyn crate::delta::Editor>, Error>,
+    ) -> Result<(), Error> {
+        extern "C" fn wrap_replay_revstart_callback(
+            revision: crate::generated::svn_revnum_t,
+            replay_baton: *mut std::ffi::c_void,
+            editor: *mut *const crate::generated::svn_delta_editor_t,
+            edit_baton: *mut *mut std::ffi::c_void,
+            rev_props: *mut apr::hash::apr_hash_t,
+            pool: *mut apr::apr_pool_t,
+        ) -> *mut crate::generated::svn_error_t {
+            let baton = unsafe {
+                (replay_baton
+                    as *mut (
+                        &mut dyn FnMut(
+                            Revnum,
+                            &HashMap<String, Vec<u8>>,
+                        )
+                            -> Result<Box<dyn crate::delta::Editor>, Error>,
+                        &mut dyn FnMut(
+                            Revnum,
+                            &dyn crate::delta::Editor,
+                            &HashMap<String, Vec<u8>>,
+                        ) -> Result<(), Error>,
+                    ))
+                    .as_mut()
+                    .unwrap()
+            };
+            let mut revprops =
+                apr::hash::Hash::<&str, *const crate::generated::svn_string_t>::from_raw(unsafe {
+                    PooledPtr::in_pool(std::rc::Rc::new(Pool::from_raw(pool)), rev_props)
+                });
+
+            let revprops = revprops
+                .iter()
+                .map(|(k, v)| {
+                    (
+                        std::str::from_utf8(k).unwrap().to_string(),
+                        Vec::from(unsafe {
+                            std::slice::from_raw_parts((**v).data as *const u8, (**v).len)
+                        }),
+                    )
+                })
+                .collect();
+
+            match ((*baton).0)(Revnum::from_raw(revision).unwrap(), &revprops) {
+                Ok(mut e) => {
+                    unsafe { *editor = &crate::delta::WRAP_EDITOR };
+                    unsafe { *edit_baton = e.as_mut() as *mut _ as *mut std::ffi::c_void };
+                    std::ptr::null_mut()
+                }
+                Err(err) => unsafe { err.into_raw() },
+            }
+        }
+
+        extern "C" fn wrap_replay_revend_callback(
+            revision: crate::generated::svn_revnum_t,
+            replay_baton: *mut std::ffi::c_void,
+            editor: *const crate::generated::svn_delta_editor_t,
+            edit_baton: *mut std::ffi::c_void,
+            rev_props: *mut apr::hash::apr_hash_t,
+            pool: *mut apr::apr_pool_t,
+        ) -> *mut crate::generated::svn_error_t {
+            let baton = unsafe {
+                (replay_baton
+                    as *mut (
+                        &mut dyn FnMut(
+                            Revnum,
+                            &HashMap<String, Vec<u8>>,
+                        )
+                            -> Result<Box<dyn crate::delta::Editor>, Error>,
+                        &mut dyn FnMut(
+                            Revnum,
+                            &dyn crate::delta::Editor,
+                            &HashMap<String, Vec<u8>>,
+                        ) -> Result<(), Error>,
+                    ))
+                    .as_mut()
+                    .unwrap()
+            };
+
+            let mut editor = crate::delta::WrapEditor(editor as *const _, unsafe {
+                PooledPtr::in_pool(std::rc::Rc::new(Pool::from_raw(pool)), edit_baton)
+            });
+
+            let mut revprops =
+                apr::hash::Hash::<&str, *const crate::generated::svn_string_t>::from_raw(unsafe {
+                    PooledPtr::in_pool(std::rc::Rc::new(Pool::from_raw(pool)), rev_props)
+                });
+
+            let revprops = revprops
+                .iter()
+                .map(|(k, v)| {
+                    (
+                        std::str::from_utf8(k).unwrap().to_string(),
+                        Vec::from(unsafe {
+                            std::slice::from_raw_parts((**v).data as *const u8, (**v).len)
+                        }),
+                    )
+                })
+                .collect();
+
+            match ((*baton).1)(Revnum::from_raw(revision).unwrap(), &mut editor, &revprops) {
+                Ok(_) => std::ptr::null_mut(),
+                Err(err) => unsafe { err.into_raw() },
+            }
+        }
+
+        let mut pool = Pool::new();
+        let err = unsafe {
+            crate::generated::svn_ra_replay_range(
+                self.0.as_mut_ptr(),
+                start_revision.into(),
+                end_revision.into(),
+                low_water_mark.into(),
+                send_deltas.into(),
+                Some(wrap_replay_revstart_callback),
+                Some(wrap_replay_revend_callback),
+                &(replay_revstart_callback, replay_revend_callback) as *const _ as *mut _,
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        Ok(())
+    }
+
+    pub fn replay(
+        &mut self,
+        revision: Revnum,
+        low_water_mark: Revnum,
+        send_deltas: bool,
+        editor: &mut dyn crate::delta::Editor,
+    ) -> Result<(), Error> {
+        let mut pool = Pool::new();
+        let err = unsafe {
+            crate::generated::svn_ra_replay(
+                self.0.as_mut_ptr(),
+                revision.into(),
+                low_water_mark.into(),
+                send_deltas.into(),
+                &crate::delta::WRAP_EDITOR,
+                editor as *mut _ as *mut std::ffi::c_void,
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        Ok(())
+    }
+}
+
+pub fn modules() -> Result<String, Error> {
+    let mut pool = Pool::new();
+    let buf = unsafe {
+        crate::generated::svn_stringbuf_create(
+            std::ffi::CStr::from_bytes_with_nul(b"").unwrap().as_ptr(),
+            pool.as_mut_ptr(),
+        )
+    };
+
+    let err = unsafe { crate::generated::svn_ra_print_modules(buf, pool.as_mut_ptr()) };
+
+    Error::from_raw(err)?;
+
+    Ok(unsafe {
+        std::ffi::CStr::from_ptr((*buf).data)
+            .to_string_lossy()
+            .into_owned()
+    })
 }
 
 pub struct WrapReporter(

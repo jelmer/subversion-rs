@@ -1,9 +1,9 @@
-use crate::Error;
+use crate::{Error, Revnum};
 use apr::pool::PooledPtr;
 pub struct Fs(pub(crate) PooledPtr<crate::generated::svn_fs_t>);
 
 impl Fs {
-    pub fn create(path: &std::path::Path) -> Result<Fs, crate::Error> {
+    pub fn create(path: &std::path::Path) -> Result<Fs, Error> {
         unsafe {
             Ok(Self(PooledPtr::initialize(|pool| {
                 let mut fs_ptr = std::ptr::null_mut();
@@ -21,7 +21,7 @@ impl Fs {
         }
     }
 
-    pub fn open(path: &std::path::Path) -> Result<Fs, crate::Error> {
+    pub fn open(path: &std::path::Path) -> Result<Fs, Error> {
         unsafe {
             Ok(Self(PooledPtr::initialize(|pool| {
                 let mut fs_ptr = std::ptr::null_mut();
@@ -50,7 +50,72 @@ impl Fs {
         }
     }
 
-    pub fn get_uuid(&mut self) -> Result<String, crate::Error> {
+    pub fn youngest_revision(&mut self) -> Result<Revnum, Error> {
+        unsafe {
+            let mut pool = apr::pool::Pool::new();
+            let mut youngest = 0;
+            let err = crate::generated::svn_fs_youngest_rev(
+                &mut youngest,
+                self.0.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            );
+            Error::from_raw(err)?;
+            Ok(Revnum::from_raw(youngest).unwrap())
+        }
+    }
+
+    pub fn revision_proplist(
+        &mut self,
+        rev: Revnum,
+    ) -> Result<std::collections::HashMap<String, Vec<u8>>, Error> {
+        let mut pool = apr::pool::Pool::new();
+        let mut props = std::ptr::null_mut();
+        let err = unsafe {
+            crate::generated::svn_fs_revision_proplist(
+                &mut props,
+                self.0.as_mut_ptr(),
+                rev.0,
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        let mut revprops =
+            apr::hash::Hash::<&str, *const crate::generated::svn_string_t>::from_raw(unsafe {
+                PooledPtr::in_pool(std::rc::Rc::new(pool), props)
+            });
+
+        let revprops = revprops
+            .iter()
+            .map(|(k, v)| {
+                (
+                    std::str::from_utf8(k).unwrap().to_string(),
+                    Vec::from(unsafe {
+                        std::slice::from_raw_parts((**v).data as *const u8, (**v).len)
+                    }),
+                )
+            })
+            .collect();
+
+        Ok(revprops)
+    }
+
+    pub fn revision_root(&mut self, rev: Revnum) -> Result<Root, Error> {
+        unsafe {
+            Ok(Root(PooledPtr::initialize(|pool| {
+                let mut root_ptr = std::ptr::null_mut();
+                let err = crate::generated::svn_fs_revision_root(
+                    &mut root_ptr,
+                    self.0.as_mut_ptr(),
+                    rev.0,
+                    pool.as_mut_ptr(),
+                );
+                Error::from_raw(err)?;
+                Ok::<_, Error>(root_ptr)
+            })?))
+        }
+    }
+
+    pub fn get_uuid(&mut self) -> Result<String, Error> {
         unsafe {
             let mut pool = apr::pool::Pool::new();
             let mut uuid = std::ptr::null();
@@ -66,7 +131,7 @@ impl Fs {
         }
     }
 
-    pub fn set_uuid(&mut self, uuid: &str) -> Result<(), crate::Error> {
+    pub fn set_uuid(&mut self, uuid: &str) -> Result<(), Error> {
         unsafe {
             let uuid = std::ffi::CString::new(uuid).unwrap();
             let err = crate::generated::svn_fs_set_uuid(
@@ -84,7 +149,7 @@ impl Fs {
         path: &std::path::Path,
         token: &str,
         break_lock: bool,
-    ) -> Result<(), crate::Error> {
+    ) -> Result<(), Error> {
         unsafe {
             let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
             let token = std::ffi::CString::new(token).unwrap();
@@ -101,7 +166,7 @@ impl Fs {
     }
 }
 
-pub fn fs_type(path: &std::path::Path) -> Result<String, crate::Error> {
+pub fn fs_type(path: &std::path::Path) -> Result<String, Error> {
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     unsafe {
         let mut pool = apr::pool::Pool::new();
@@ -114,7 +179,7 @@ pub fn fs_type(path: &std::path::Path) -> Result<String, crate::Error> {
     }
 }
 
-pub fn delete_fs(path: &std::path::Path) -> Result<(), crate::Error> {
+pub fn delete_fs(path: &std::path::Path) -> Result<(), Error> {
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     unsafe {
         let err =
@@ -123,3 +188,6 @@ pub fn delete_fs(path: &std::path::Path) -> Result<(), crate::Error> {
         Ok(())
     }
 }
+
+#[allow(dead_code)]
+pub struct Root(pub(crate) PooledPtr<crate::generated::svn_fs_root_t>);
