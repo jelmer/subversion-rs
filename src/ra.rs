@@ -952,6 +952,107 @@ impl Session {
         Error::from_raw(err)?;
         Ok(crate::Lock(unsafe { PooledPtr::in_pool(std::rc::Rc::new(pool), lock) }))
     }
+
+    pub fn get_locks(
+        &mut self,
+        path: &str,
+        depth: Depth) -> Result<HashMap<String, crate::Lock>, Error> {
+        let path = std::ffi::CString::new(path).unwrap();
+        let mut locks = std::ptr::null_mut();
+        let mut pool = Pool::new();
+        let err = unsafe {
+            crate::generated::svn_ra_get_locks2(
+                self.0.as_mut_ptr(),
+                &mut locks,
+                path.as_ptr(),
+                depth.into(),
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        let pool = std::rc::Rc::new(pool);
+        let mut hash = apr::hash::Hash::<&str, *mut crate::generated::svn_lock_t>::from_raw(unsafe {
+            PooledPtr::in_pool(pool.clone(), locks)
+        });
+        Ok(hash
+            .iter()
+            .map(|(k, v)| {
+                (
+                    String::from_utf8_lossy(k).into_owned(),
+                    crate::Lock(unsafe { PooledPtr::in_pool(pool.clone(), *v) }),
+                )
+            })
+            .collect())
+    }
+
+    pub fn replay_range(&mut self,
+        start_revision: Revnum,
+        end_revision: Revnum,
+        low_water_mark: Revnum,
+        send_deltas: bool,
+        replay_revstart_callback: &dyn FnMut(Revnum, &HashMap<String, Vec<u8>>) -> Result<Box<dyn crate::delta::Editor>, Error>,
+        replay_revend_callback: &dyn FnMut(Revnum, &dyn crate::delta::Editor, &HashMap<String, Vec<u8>>) -> Result<Box<dyn crate::delta::Editor>, Error>,
+    ) -> Result<(), Error> {
+        extern "C" fn wrap_replay_revstart_callback(
+            revision: crate::generated::svn_revnum_t,
+            replay_baton: *mut std::ffi::c_void,
+            editor: *mut *const crate::generated::svn_delta_editor_t,
+            edit_baton: *mut *mut std::ffi::c_void,
+            rev_props: *mut apr::hash::apr_hash_t,
+            pool: *mut apr::apr_pool_t) -> *mut crate::generated::svn_error_t {
+            let baton = unsafe { (replay_baton as *mut (&mut dyn FnMut(Revnum, &HashMap<String, Vec<u8>>) -> Result<Box<dyn crate::delta::Editor>, Error>, &mut dyn FnMut(Revnum, &dyn crate::delta::Editor, &HashMap<String, Vec<u8>>) -> Result<(), Error>)).as_mut().unwrap() };
+            let mut revprops = apr::hash::Hash::<&str, *const crate::generated::svn_string_t>::from_raw(unsafe { PooledPtr::in_pool(std::rc::Rc::new(Pool::from_raw(pool)), rev_props) });
+
+            let revprops = revprops.iter().map(|(k, v)| (std::str::from_utf8(k).unwrap().to_string(), Vec::from(unsafe { std::slice::from_raw_parts((**v).data as *const u8, (**v).len) }))).collect();
+
+            match ((*baton).0)(Revnum::from_raw(revision).unwrap(), &revprops) {
+                Ok(mut e) => {
+                    unsafe { *editor = &crate::delta::WRAP_EDITOR };
+                    unsafe { *edit_baton = e.as_mut() as *mut _ as *mut std::ffi::c_void };
+                    std::ptr::null_mut()
+                },
+                Err(err) => unsafe { err.into_raw() },
+            }
+        }
+
+        extern "C" fn wrap_replay_revend_callback(
+            revision: crate::generated::svn_revnum_t,
+            replay_baton: *mut std::ffi::c_void,
+            editor: *const crate::generated::svn_delta_editor_t,
+            edit_baton: *mut std::ffi::c_void,
+            rev_props: *mut apr::hash::apr_hash_t,
+            pool: *mut apr::apr_pool_t) -> *mut crate::generated::svn_error_t {
+            let baton = unsafe { (replay_baton as *mut (&mut dyn FnMut(Revnum, &HashMap<String, Vec<u8>>) -> Result<Box<dyn crate::delta::Editor>, Error>, &mut dyn FnMut(Revnum, &dyn crate::delta::Editor, &HashMap<String, Vec<u8>>) -> Result<(), Error>)).as_mut().unwrap() };
+
+            let mut editor = crate::delta::WrapEditor(editor as *const _, unsafe { PooledPtr::in_pool(std::rc::Rc::new(Pool::from_raw(pool)), edit_baton) });
+
+            let mut revprops = apr::hash::Hash::<&str, *const crate::generated::svn_string_t>::from_raw(unsafe { PooledPtr::in_pool(std::rc::Rc::new(Pool::from_raw(pool)), rev_props) });
+
+            let revprops = revprops.iter().map(|(k, v)| (std::str::from_utf8(k).unwrap().to_string(), Vec::from(unsafe { std::slice::from_raw_parts((**v).data as *const u8, (**v).len) }))).collect();
+
+            match ((*baton).1)(Revnum::from_raw(revision).unwrap(), &mut editor, &revprops) {
+                Ok(_) => std::ptr::null_mut(),
+                Err(err) => unsafe { err.into_raw() },
+            }
+        }
+
+        let mut pool = Pool::new();
+        let err = unsafe {
+            crate::generated::svn_ra_replay_range(
+                self.0.as_mut_ptr(),
+                start_revision.into(),
+                end_revision.into(),
+                low_water_mark.into(),
+                send_deltas.into(),
+                Some(wrap_replay_revstart_callback),
+                Some(wrap_replay_revend_callback),
+                &(replay_revstart_callback, replay_revend_callback) as *const _ as *mut _,
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        Ok(())
+    }
 }
 
 pub struct WrapReporter(
