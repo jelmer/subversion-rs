@@ -19,6 +19,12 @@ impl String {
     }
 }
 
+impl From<String> for Vec<u8> {
+    fn from(s: String) -> Self {
+        s.as_slice().to_vec()
+    }
+}
+
 impl From<PooledPtr<svn_string_t>> for String {
     fn from(ptr: PooledPtr<svn_string_t>) -> Self {
         String(ptr)
