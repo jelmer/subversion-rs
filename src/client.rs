@@ -224,6 +224,78 @@ extern "C" fn wrap_info_receiver2(
     }
 }
 
+/// Options for a checkout
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CheckoutOptions {
+    peg_revision: Revision,
+    revision: Revision,
+    depth: Depth,
+    ignore_externals: bool,
+    allow_unver_obstructions: bool,
+}
+
+/// Options for an update
+#[derive(Debug, Clone, Copy, Default)]
+pub struct UpdateOptions {
+    depth: Depth,
+    depth_is_sticky: bool,
+    ignore_externals: bool,
+    allow_unver_obstructions: bool,
+    adds_as_modifications: bool,
+    make_parents: bool,
+}
+
+/// Options for a switch
+pub struct SwitchOptions {
+    peg_revision: Revision,
+    revision: Revision,
+    depth: Depth,
+    depth_is_sticky: bool,
+    ignore_externals: bool,
+    allow_unver_obstructions: bool,
+    make_parents: bool,
+}
+
+/// Options for add
+pub struct AddOptions {
+    depth: Depth,
+    force: bool,
+    no_ignore: bool,
+    no_autoprops: bool,
+    add_parents: bool,
+}
+
+/// Options for delete
+pub struct DeleteOptions<'a> {
+    force: bool,
+    keep_local: bool,
+    commit_callback: &'a dyn FnMut(&crate::CommitInfo) -> Result<(), Error>,
+}
+
+/// Options for commit
+pub struct CommitOptions<'a> {
+    depth: Depth,
+    keep_locks: bool,
+    keep_changelists: bool,
+    commit_as_operations: bool,
+    include_file_externals: bool,
+    include_dir_externals: bool,
+    changelists: Option<&'a [&'a str]>,
+}
+
+/// Options for status
+pub struct StatusOptions<'a> {
+    revision: Revision,
+    depth: Depth,
+    get_all: bool,
+    check_out_of_date: bool,
+    check_working_copy: bool,
+    no_ignore: bool,
+    ignore_externals: bool,
+    depth_as_sticky: bool,
+    changelists: Option<&'a [&'a str]>,
+}
+
 /// A client context.
 ///
 /// This is the main entry point for the client library. It holds client specific configuration and
@@ -279,15 +351,10 @@ impl Context {
         &mut self,
         url: impl AsCanonicalUri<'a>,
         path: impl AsCanonicalDirent<'a>,
-        peg_revision: Revision,
-        revision: Revision,
-        depth: Depth,
-        ignore_externals: bool,
-        allow_unver_obstructions: bool,
+        options: &CheckoutOptions,
     ) -> Result<Revnum, Error> {
-        // call svn_client_checkout2
-        let peg_revision = peg_revision.into();
-        let revision = revision.into();
+        let peg_revision = options.peg_revision.into();
+        let revision = options.revision.into();
         let mut pool = Pool::default();
         unsafe {
             let mut revnum = 0;
@@ -299,9 +366,9 @@ impl Context {
                 path.as_ptr(),
                 &peg_revision,
                 &revision,
-                depth.into(),
-                ignore_externals.into(),
-                allow_unver_obstructions.into(),
+                options.depth.into(),
+                options.ignore_externals.into(),
+                options.allow_unver_obstructions.into(),
                 &mut *self.0,
                 pool.as_mut_ptr(),
             );
@@ -314,12 +381,7 @@ impl Context {
         &mut self,
         paths: &[&str],
         revision: Revision,
-        depth: Depth,
-        depth_is_sticky: bool,
-        ignore_externals: bool,
-        allow_unver_obstructions: bool,
-        adds_as_modifications: bool,
-        make_parents: bool,
+        options: &UpdateOptions
     ) -> Result<Vec<Revnum>, Error> {
         let mut pool = std::rc::Rc::new(Pool::default());
         let mut result_revs = std::ptr::null_mut();
@@ -334,12 +396,12 @@ impl Context {
                 &mut result_revs,
                 ps.as_ptr(),
                 &revision.into(),
-                depth.into(),
-                depth_is_sticky.into(),
-                ignore_externals.into(),
-                allow_unver_obstructions.into(),
-                adds_as_modifications.into(),
-                make_parents.into(),
+                options.depth.into(),
+                options.depth_is_sticky.into(),
+                options.ignore_externals.into(),
+                options.allow_unver_obstructions.into(),
+                options.adds_as_modifications.into(),
+                options.make_parents.into(),
                 &mut *self.0,
                 std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
             );
@@ -354,13 +416,7 @@ impl Context {
         &mut self,
         path: impl AsCanonicalDirent<'a>,
         url: impl AsCanonicalUri<'a>,
-        peg_revision: Revision,
-        revision: Revision,
-        depth: Depth,
-        depth_is_sticky: bool,
-        ignore_externals: bool,
-        allow_unver_obstructions: bool,
-        make_parents: bool,
+        options: &SwitchOptions
     ) -> Result<Revnum, Error> {
         let mut pool = Pool::default();
         let mut result_rev = 0;
@@ -371,13 +427,13 @@ impl Context {
                 &mut result_rev,
                 path.as_ptr(),
                 url.as_ptr(),
-                &peg_revision.into(),
-                &revision.into(),
-                depth.into(),
-                depth_is_sticky.into(),
-                ignore_externals.into(),
-                allow_unver_obstructions.into(),
-                make_parents.into(),
+                &options.peg_revision.into(),
+                &options.revision.into(),
+                options.depth.into(),
+                options.depth_is_sticky.into(),
+                options.ignore_externals.into(),
+                options.allow_unver_obstructions.into(),
+                options.make_parents.into(),
                 &mut *self.0,
                 pool.as_mut_ptr(),
             );
@@ -389,22 +445,18 @@ impl Context {
     pub fn add<'a>(
         &mut self,
         path: impl AsCanonicalDirent<'a>,
-        depth: Depth,
-        force: bool,
-        no_ignore: bool,
-        no_autoprops: bool,
-        add_parents: bool,
+        options: &AddOptions
     ) -> Result<(), Error> {
         let mut pool = Pool::default();
         let path = path.as_canonical_dirent(&mut pool);
         unsafe {
             let err = svn_client_add5(
                 path.as_ptr(),
-                depth.into(),
-                force.into(),
-                no_ignore.into(),
-                no_autoprops.into(),
-                add_parents.into(),
+                options.depth.into(),
+                options.force.into(),
+                options.no_ignore.into(),
+                options.no_autoprops.into(),
+                options.add_parents.into(),
                 &mut *self.0,
                 pool.as_mut_ptr(),
             );
@@ -449,10 +501,8 @@ impl Context {
     pub fn delete(
         &mut self,
         paths: &[&str],
-        force: bool,
-        keep_local: bool,
-        revprop_table: std::collections::HashMap<&str, &str>,
-        commit_callback: &dyn FnMut(&crate::CommitInfo) -> Result<(), Error>,
+        revprop_table: std::collections::HashMap<& str, & str>,
+        options: &DeleteOptions
     ) -> Result<(), Error> {
         let mut pool = std::rc::Rc::new(Pool::default());
         unsafe {
@@ -465,11 +515,11 @@ impl Context {
                 let path = std::ffi::CString::new(*path).unwrap();
                 ps.push(path.as_ptr() as *mut std::ffi::c_void);
             }
-            let commit_callback = Box::into_raw(Box::new(commit_callback));
+            let commit_callback = Box::into_raw(Box::new(options.commit_callback));
             let err = svn_client_delete4(
                 ps.as_ptr(),
-                force.into(),
-                keep_local.into(),
+                options.force.into(),
+                options.keep_local.into(),
                 rps.as_ptr(),
                 Some(wrap_commit_callback2),
                 commit_callback as *mut std::ffi::c_void,
@@ -611,13 +661,7 @@ impl Context {
     pub fn commit(
         &mut self,
         targets: &[&str],
-        depth: Depth,
-        keep_locks: bool,
-        keep_changelists: bool,
-        commit_as_operations: bool,
-        include_file_externals: bool,
-        include_dir_externals: bool,
-        changelists: Option<&[&str]>,
+        options: &CommitOptions,
         revprop_table: std::collections::HashMap<&str, &str>,
         commit_callback: &dyn FnMut(&crate::CommitInfo) -> Result<(), Error>,
     ) -> Result<(), Error> {
@@ -634,7 +678,7 @@ impl Context {
                 ps.push(target.as_ptr() as *mut std::ffi::c_void);
             }
             let mut cl = apr::tables::ArrayHeader::in_pool(&pool, 0);
-            if let Some(changelists) = changelists {
+            if let Some(changelists) = options.changelists {
                 for changelist in changelists {
                     let changelist = std::ffi::CString::new(*changelist).unwrap();
                     cl.push(changelist.as_ptr() as *mut std::ffi::c_void);
@@ -643,12 +687,12 @@ impl Context {
             let commit_callback = Box::into_raw(Box::new(commit_callback));
             let err = svn_client_commit6(
                 ps.as_ptr(),
-                depth.into(),
-                keep_locks.into(),
-                keep_changelists.into(),
-                commit_as_operations.into(),
-                include_file_externals.into(),
-                include_dir_externals.into(),
+                options.depth.into(),
+                options.keep_locks.into(),
+                options.keep_changelists.into(),
+                options.commit_as_operations.into(),
+                options.include_file_externals.into(),
+                options.include_dir_externals.into(),
                 cl.as_ptr(),
                 rps.as_ptr(),
                 Some(wrap_commit_callback2),
@@ -664,20 +708,12 @@ impl Context {
     pub fn status(
         &mut self,
         path: &str,
-        revision: Revision,
-        depth: Depth,
-        get_all: bool,
-        check_out_of_date: bool,
-        check_working_copy: bool,
-        no_ignore: bool,
-        ignore_externals: bool,
-        depth_as_sticky: bool,
-        changelists: Option<&[&str]>,
+        options: &StatusOptions,
         status_func: &dyn FnMut(&'_ str, &'_ Status) -> Result<(), Error>,
     ) -> Result<Revnum, Error> {
         let mut pool = std::rc::Rc::new(Pool::default());
         let mut cl = apr::tables::ArrayHeader::in_pool(&pool, 0);
-        if let Some(changelists) = changelists {
+        if let Some(changelists) = options.changelists {
             for changelist in changelists {
                 let changelist = std::ffi::CString::new(*changelist).unwrap();
                 cl.push(changelist.as_ptr() as *mut std::ffi::c_void);
@@ -691,14 +727,14 @@ impl Context {
                 &mut revnum,
                 &mut *self.0,
                 path.as_ptr() as *const i8,
-                &revision.into(),
-                depth.into(),
-                get_all.into(),
-                check_out_of_date.into(),
-                check_working_copy.into(),
-                no_ignore.into(),
-                ignore_externals.into(),
-                depth_as_sticky.into(),
+                &options.revision.into(),
+                options.depth.into(),
+                options.get_all.into(),
+                options.check_out_of_date.into(),
+                options.check_working_copy.into(),
+                options.no_ignore.into(),
+                options.ignore_externals.into(),
+                options.depth_as_sticky.into(),
                 cl.as_ptr(),
                 Some(wrap_status_func),
                 status_func as *mut std::ffi::c_void,
@@ -1431,11 +1467,13 @@ mod tests {
             .checkout(
                 url,
                 &td.path().join("wc"),
-                Revision::Head,
-                Revision::Head,
-                Depth::Infinity,
-                false,
-                false,
+                &CheckoutOptions {
+                    peg_revision: Revision::Head,
+                    revision: Revision::Head,
+                    depth: Depth::Infinity,
+                    ignore_externals: false,
+                    allow_unver_obstructions: false,
+                }
             )
             .unwrap();
         assert_eq!(revnum, Revnum(0));
