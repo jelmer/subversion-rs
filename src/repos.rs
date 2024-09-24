@@ -524,6 +524,46 @@ pub fn version() -> crate::Version {
     unsafe { crate::Version(crate::generated::svn_client_version()) }
 }
 
+pub fn hotcopy(
+    src_path: &str,
+    dst_path: &str,
+    clean_logs: bool,
+    incremental: bool,
+    notify_func: Option<&impl Fn(&Notify)>,
+    cancel_func: Option<&impl Fn() -> Result<(), Error>>,
+) -> Result<(), Error> {
+    let src_path = std::ffi::CString::new(src_path).unwrap();
+    let dst_path = std::ffi::CString::new(dst_path).unwrap();
+    let mut pool = apr::Pool::new();
+    let ret = unsafe {
+        crate::generated::svn_repos_hotcopy3(
+            src_path.as_ptr(),
+            dst_path.as_ptr(),
+            clean_logs.into(),
+            incremental.into(),
+            if notify_func.is_some() {
+                Some(wrap_notify_func)
+            } else {
+                None
+            },
+            notify_func
+                .map(|notify_func| Box::into_raw(Box::new(notify_func)) as *mut std::ffi::c_void)
+                .unwrap_or(std::ptr::null_mut()),
+            if cancel_func.is_some() {
+                Some(wrap_cancel_func)
+            } else {
+                None
+            },
+            cancel_func
+                .map(|cancel_func| Box::into_raw(Box::new(cancel_func)) as *mut std::ffi::c_void)
+                .unwrap_or(std::ptr::null_mut()),
+            pool.as_mut_ptr(),
+        )
+    };
+    Error::from_raw(ret)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
