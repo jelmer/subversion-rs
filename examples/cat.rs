@@ -1,4 +1,4 @@
-use subversion::Revision;
+use subversion::client::CatOptions;
 
 fn main() {
     let mut ctx = subversion::client::Context::new().unwrap();
@@ -8,9 +8,7 @@ fn main() {
     ctx.cat(
         "http://svn.apache.org/repos/asf/subversion/trunk/subversion/libsvn_client/cat.c",
         &mut stdout,
-        Revision::Head,
-        Revision::Head,
-        true,
+        &CatOptions::default(),
     )
     .unwrap();
 }
