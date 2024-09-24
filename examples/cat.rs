@@ -8,7 +8,7 @@ fn main() {
     ctx.cat(
         "http://svn.apache.org/repos/asf/subversion/trunk/subversion/libsvn_client/cat.c",
         &mut stdout,
-        &CatOptions::default()
+        &CatOptions::default(),
     )
     .unwrap();
 }
