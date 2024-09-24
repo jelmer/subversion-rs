@@ -1,6 +1,50 @@
 use crate::generated::{svn_repos_create, svn_repos_find_root_path, svn_repos_t};
-use crate::Error;
+use crate::{Error, Revnum};
 use apr::pool::PooledPtr;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LoadUUID {
+    #[default]
+    /// Only update UUID if the repos has no revisions
+    Default,
+
+    /// Never update UUID
+    Ignore,
+
+    /// Always update UUID
+    Force,
+}
+
+impl From<crate::generated::svn_repos_load_uuid> for LoadUUID {
+    fn from(load_uuid: crate::generated::svn_repos_load_uuid) -> Self {
+        match load_uuid {
+            crate::generated::svn_repos_load_uuid_svn_repos_load_uuid_default => Self::Default,
+            crate::generated::svn_repos_load_uuid_svn_repos_load_uuid_ignore => Self::Ignore,
+            crate::generated::svn_repos_load_uuid_svn_repos_load_uuid_force => Self::Force,
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl From<LoadUUID> for crate::generated::svn_repos_load_uuid {
+    fn from(load_uuid: LoadUUID) -> Self {
+        match load_uuid {
+            LoadUUID::Default => crate::generated::svn_repos_load_uuid_svn_repos_load_uuid_default,
+            LoadUUID::Ignore => crate::generated::svn_repos_load_uuid_svn_repos_load_uuid_ignore,
+            LoadUUID::Force => crate::generated::svn_repos_load_uuid_svn_repos_load_uuid_force,
+        }
+    }
+}
+
+extern "C" fn wrap_cancel_func(
+    cancel_baton: *mut std::ffi::c_void,
+) -> *mut crate::generated::svn_error_t {
+    let cancel_check = unsafe { &*(cancel_baton as *const Box<dyn Fn() -> Result<(), Error>>) };
+    match cancel_check() {
+        Ok(()) => std::ptr::null_mut(),
+        Err(e) => unsafe { e.into_raw() },
+    }
+}
 
 pub fn find_root_path(path: &std::path::Path) -> Option<std::path::PathBuf> {
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
@@ -17,7 +61,7 @@ pub fn find_root_path(path: &std::path::Path) -> Option<std::path::PathBuf> {
 pub struct Repos(PooledPtr<svn_repos_t>);
 
 impl Repos {
-    pub fn create(path: &std::path::Path) -> Result<Repos, crate::Error> {
+    pub fn create(path: &std::path::Path) -> Result<Repos, Error> {
         // TODO: Support config, fs_config
         let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
         let config = std::ptr::null_mut();
@@ -38,7 +82,7 @@ impl Repos {
         })?))
     }
 
-    pub fn open(path: &std::path::Path) -> Result<Repos, crate::Error> {
+    pub fn open(path: &std::path::Path) -> Result<Repos, Error> {
         let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
         Ok(Self(PooledPtr::initialize(|pool| {
             let mut repos: *mut svn_repos_t = std::ptr::null_mut();
@@ -50,7 +94,7 @@ impl Repos {
         })?))
     }
 
-    pub fn capabilities(&mut self) -> Result<std::collections::HashSet<String>, crate::Error> {
+    pub fn capabilities(&mut self) -> Result<std::collections::HashSet<String>, Error> {
         let mut capabilities =
             apr::hash::Hash::<&str, &str>::from_raw(PooledPtr::initialize(|pool| {
                 let mut capabilities: *mut apr::hash::apr_hash_t = std::ptr::null_mut();
@@ -73,7 +117,7 @@ impl Repos {
             .collect::<std::collections::HashSet<String>>())
     }
 
-    pub fn has_capability(&mut self, capability: &str) -> Result<bool, crate::Error> {
+    pub fn has_capability(&mut self, capability: &str) -> Result<bool, Error> {
         let capability = std::ffi::CString::new(capability).unwrap();
         let mut pool = apr::Pool::new();
         unsafe {
@@ -89,10 +133,7 @@ impl Repos {
         }
     }
 
-    pub fn remember_client_capabilities(
-        &mut self,
-        capabilities: &[&str],
-    ) -> Result<(), crate::Error> {
+    pub fn remember_client_capabilities(&mut self, capabilities: &[&str]) -> Result<(), Error> {
         let capabilities = capabilities
             .iter()
             .map(|c| std::ffi::CString::new(*c).unwrap())
@@ -111,12 +152,15 @@ impl Repos {
         Ok(())
     }
 
-    pub fn fs(&mut self) -> Result<crate::fs::Fs, crate::Error> {
-        unsafe {
-            Ok(crate::fs::Fs(PooledPtr::in_pool(
-                self.0.pool(),
-                crate::generated::svn_repos_fs(self.0.as_mut_ptr()),
-            )))
+    pub fn fs(&mut self) -> Option<crate::fs::Fs> {
+        let fs = unsafe { crate::generated::svn_repos_fs(self.0.as_mut_ptr()) };
+
+        if fs.is_null() {
+            None
+        } else {
+            Some(crate::fs::Fs(unsafe {
+                PooledPtr::in_pool(self.0.pool(), fs as *mut _)
+            }))
         }
     }
 
@@ -194,6 +238,237 @@ impl Repos {
         let hook_dir = unsafe { std::ffi::CStr::from_ptr(ret) };
         std::path::PathBuf::from(hook_dir.to_str().unwrap())
     }
+
+    pub fn load_fs(
+        &mut self,
+        dumpstream: &mut crate::io::Stream,
+        start_rev: Revnum,
+        end_rev: Revnum,
+        uuid_action: LoadUUID,
+        parent_dir: &std::path::Path,
+        use_pre_commit_hook: bool,
+        use_post_commit_hook: bool,
+        cancel_check: Option<&impl Fn() -> bool>,
+        validate_props: bool,
+        ignore_dates: bool,
+        normalize_props: bool,
+        notify_func: Option<&impl Fn(&Notify)>,
+    ) -> Result<(), Error> {
+        let mut pool = apr::Pool::new();
+        let ret = unsafe {
+            crate::generated::svn_repos_load_fs6(
+                self.0.as_mut_ptr(),
+                dumpstream.as_mut_ptr(),
+                start_rev.0,
+                end_rev.0,
+                uuid_action.into(),
+                parent_dir.to_str().unwrap().as_ptr() as *const i8,
+                use_pre_commit_hook.into(),
+                use_post_commit_hook.into(),
+                validate_props.into(),
+                ignore_dates.into(),
+                normalize_props.into(),
+                if notify_func.is_some() {
+                    Some(wrap_notify_func)
+                } else {
+                    None
+                },
+                notify_func
+                    .map(|notify_func| {
+                        Box::into_raw(Box::new(notify_func)) as *mut std::ffi::c_void
+                    })
+                    .unwrap_or(std::ptr::null_mut()),
+                if cancel_check.is_some() {
+                    Some(wrap_cancel_func)
+                } else {
+                    None
+                },
+                cancel_check
+                    .map(|cancel_check| {
+                        Box::into_raw(Box::new(cancel_check)) as *mut std::ffi::c_void
+                    })
+                    .unwrap_or(std::ptr::null_mut()),
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(ret)?;
+        Ok(())
+    }
+
+    pub fn verify_fs(
+        &mut self,
+        start_rev: Revnum,
+        end_rev: Revnum,
+        check_normalization: bool,
+        metadata_only: bool,
+        notify_func: Option<&impl Fn(&Notify)>,
+        callback_func: &impl Fn(Revnum, &Error) -> Result<(), Error>,
+        cancel_func: Option<&impl Fn() -> Result<(), Error>>,
+    ) -> Result<(), Error> {
+        extern "C" fn verify_callback(
+            baton: *mut std::ffi::c_void,
+            revision: crate::generated::svn_revnum_t,
+            verify_err: *mut crate::generated::svn_error_t,
+            _pool: *mut apr::apr_pool_t,
+        ) -> *mut crate::generated::svn_error_t {
+            let baton = unsafe {
+                &mut *(baton as *mut Box<dyn FnMut(Revnum, &Error) -> Result<(), Error>>)
+            };
+            let verify_err = Error::from_raw(verify_err).unwrap_err();
+            match baton(Revnum::from_raw(revision).unwrap(), &verify_err) {
+                Ok(()) => std::ptr::null_mut(),
+                Err(e) => unsafe { e.into_raw() },
+            }
+        }
+        let mut pool = apr::Pool::new();
+        let ret = unsafe {
+            crate::generated::svn_repos_verify_fs3(
+                self.0.as_mut_ptr(),
+                start_rev.0,
+                end_rev.0,
+                check_normalization.into(),
+                metadata_only.into(),
+                if notify_func.is_some() {
+                    Some(wrap_notify_func)
+                } else {
+                    None
+                },
+                notify_func
+                    .map(|notify_func| {
+                        Box::into_raw(Box::new(notify_func)) as *mut std::ffi::c_void
+                    })
+                    .unwrap_or(std::ptr::null_mut()),
+                Some(verify_callback),
+                Box::into_raw(Box::new(callback_func)) as *mut std::ffi::c_void,
+                if cancel_func.is_some() {
+                    Some(wrap_cancel_func)
+                } else {
+                    None
+                },
+                cancel_func
+                    .map(|cancel_func| {
+                        Box::into_raw(Box::new(cancel_func)) as *mut std::ffi::c_void
+                    })
+                    .unwrap_or(std::ptr::null_mut()),
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(ret)?;
+        Ok(())
+    }
+
+    pub fn pack_fs(
+        &mut self,
+        notify_func: Option<&impl Fn(&Notify)>,
+        cancel_func: Option<&impl Fn() -> Result<(), Error>>,
+    ) -> Result<(), Error> {
+        let mut pool = apr::Pool::new();
+        let ret = unsafe {
+            crate::generated::svn_repos_fs_pack2(
+                self.0.as_mut_ptr(),
+                if notify_func.is_some() {
+                    Some(wrap_notify_func)
+                } else {
+                    None
+                },
+                notify_func
+                    .map(|notify_func| {
+                        Box::into_raw(Box::new(notify_func)) as *mut std::ffi::c_void
+                    })
+                    .unwrap_or(std::ptr::null_mut()),
+                if cancel_func.is_some() {
+                    Some(wrap_cancel_func)
+                } else {
+                    None
+                },
+                cancel_func
+                    .map(|cancel_func| {
+                        Box::into_raw(Box::new(cancel_func)) as *mut std::ffi::c_void
+                    })
+                    .unwrap_or(std::ptr::null_mut()),
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(ret)?;
+        Ok(())
+    }
+}
+
+pub fn recover(
+    path: &str,
+    nonblocking: bool,
+    notify_func: Option<&impl Fn(&Notify)>,
+    cance_func: Option<&impl Fn() -> Result<(), Error>>,
+) -> Result<(), Error> {
+    let path = std::ffi::CString::new(path).unwrap();
+    let mut pool = apr::Pool::new();
+    let ret = unsafe {
+        crate::generated::svn_repos_recover4(
+            path.as_ptr(),
+            nonblocking.into(),
+            if notify_func.is_some() {
+                Some(wrap_notify_func)
+            } else {
+                None
+            },
+            notify_func
+                .map(|notify_func| Box::into_raw(Box::new(notify_func)) as *mut std::ffi::c_void)
+                .unwrap_or(std::ptr::null_mut()),
+            if cance_func.is_some() {
+                Some(wrap_cancel_func)
+            } else {
+                None
+            },
+            cance_func
+                .map(|cancel_func| Box::into_raw(Box::new(cancel_func)) as *mut std::ffi::c_void)
+                .unwrap_or(std::ptr::null_mut()),
+            pool.as_mut_ptr(),
+        )
+    };
+    Error::from_raw(ret)?;
+    Ok(())
+}
+
+extern "C" fn wrap_freeze_func(
+    baton: *mut std::ffi::c_void,
+    _pool: *mut apr::apr_pool_t,
+) -> *mut crate::generated::svn_error_t {
+    let freeze_func = unsafe { &*(baton as *const Box<dyn Fn() -> Result<(), Error>>) };
+    match freeze_func() {
+        Ok(()) => std::ptr::null_mut(),
+        Err(e) => unsafe { e.into_raw() },
+    }
+}
+
+pub fn freeze(
+    paths: &[&str],
+    freeze_func: Option<&impl Fn(&str) -> Result<(), Error>>,
+) -> Result<(), Error> {
+    let paths = paths
+        .iter()
+        .map(|p| std::ffi::CString::new(*p).unwrap())
+        .collect::<Vec<_>>();
+    let paths_array = paths
+        .iter()
+        .map(|p| p.as_ptr())
+        .collect::<apr::tables::ArrayHeader<_>>();
+    let mut pool = apr::Pool::new();
+    let ret = unsafe {
+        crate::generated::svn_repos_freeze(
+            paths_array.as_ptr(),
+            if freeze_func.is_some() {
+                Some(wrap_freeze_func)
+            } else {
+                None
+            },
+            freeze_func
+                .map(|freeze_func| Box::into_raw(Box::new(freeze_func)) as *mut std::ffi::c_void)
+                .unwrap_or(std::ptr::null_mut()),
+            pool.as_mut_ptr(),
+        )
+    };
+    Error::from_raw(ret)?;
+    Ok(())
 }
 
 #[allow(dead_code)]
@@ -219,7 +494,7 @@ pub fn upgrade(
     path: &std::path::Path,
     nonblocking: bool,
     notify_func: Option<&mut dyn FnMut(&Notify)>,
-) -> Result<(), crate::Error> {
+) -> Result<(), Error> {
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     let notify_func = notify_func.map(|_notify_func| wrap_notify_func as _);
     let notify_baton = Box::into_raw(Box::new(notify_func)).cast();
@@ -237,7 +512,7 @@ pub fn upgrade(
     Ok(())
 }
 
-pub fn delete(path: &std::path::Path) -> Result<(), crate::Error> {
+pub fn delete(path: &std::path::Path) -> Result<(), Error> {
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     let mut pool = apr::Pool::new();
     let ret = unsafe { crate::generated::svn_repos_delete(path.as_ptr(), pool.as_mut_ptr()) };
@@ -247,6 +522,46 @@ pub fn delete(path: &std::path::Path) -> Result<(), crate::Error> {
 
 pub fn version() -> crate::Version {
     unsafe { crate::Version(crate::generated::svn_client_version()) }
+}
+
+pub fn hotcopy(
+    src_path: &str,
+    dst_path: &str,
+    clean_logs: bool,
+    incremental: bool,
+    notify_func: Option<&impl Fn(&Notify)>,
+    cancel_func: Option<&impl Fn() -> Result<(), Error>>,
+) -> Result<(), Error> {
+    let src_path = std::ffi::CString::new(src_path).unwrap();
+    let dst_path = std::ffi::CString::new(dst_path).unwrap();
+    let mut pool = apr::Pool::new();
+    let ret = unsafe {
+        crate::generated::svn_repos_hotcopy3(
+            src_path.as_ptr(),
+            dst_path.as_ptr(),
+            clean_logs.into(),
+            incremental.into(),
+            if notify_func.is_some() {
+                Some(wrap_notify_func)
+            } else {
+                None
+            },
+            notify_func
+                .map(|notify_func| Box::into_raw(Box::new(notify_func)) as *mut std::ffi::c_void)
+                .unwrap_or(std::ptr::null_mut()),
+            if cancel_func.is_some() {
+                Some(wrap_cancel_func)
+            } else {
+                None
+            },
+            cancel_func
+                .map(|cancel_func| Box::into_raw(Box::new(cancel_func)) as *mut std::ffi::c_void)
+                .unwrap_or(std::ptr::null_mut()),
+            pool.as_mut_ptr(),
+        )
+    };
+    Error::from_raw(ret)?;
+    Ok(())
 }
 
 #[cfg(test)]
