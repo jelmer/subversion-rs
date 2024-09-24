@@ -51,7 +51,7 @@ extern "C" fn wrap_lock_func(
     do_lock: i32,
     lock: *const crate::generated::svn_lock_t,
     error: *mut crate::generated::svn_error_t,
-    _pool: *mut apr::apr_pool_t,
+    pool: *mut apr::apr_pool_t,
 ) -> *mut crate::generated::svn_error_t {
     let lock_baton = unsafe {
         &mut *(lock_baton
@@ -59,9 +59,11 @@ extern "C" fn wrap_lock_func(
     };
     let path = unsafe { std::ffi::CStr::from_ptr(path) };
 
+    let pool = Pool::from_raw(pool);
+
     let error = Error::from_raw(error).err();
 
-    let lock = crate::Lock(lock);
+    let lock = crate::Lock(unsafe { PooledPtr::in_pool(std::rc::Rc::new(pool), lock as *mut _) });
 
     match lock_baton(path.to_str().unwrap(), do_lock != 0, &lock, error.as_ref()) {
         Ok(()) => std::ptr::null_mut(),
@@ -931,6 +933,24 @@ impl Session {
         };
         Error::from_raw(err)?;
         Ok(())
+    }
+
+    pub fn get_lock(
+        &mut self,
+        path: &str) -> Result<crate::Lock, Error> {
+        let path = std::ffi::CString::new(path).unwrap();
+        let mut lock = std::ptr::null_mut();
+        let mut pool = Pool::new();
+        let err = unsafe {
+            crate::generated::svn_ra_get_lock(
+                self.0.as_mut_ptr(),
+                &mut lock,
+                path.as_ptr(),
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        Ok(crate::Lock(unsafe { PooledPtr::in_pool(std::rc::Rc::new(pool), lock) }))
     }
 }
 

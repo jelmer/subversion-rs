@@ -530,7 +530,7 @@ impl From<StatusKind> for generated::svn_wc_status_kind {
     }
 }
 
-pub struct Lock(*const generated::svn_lock_t);
+pub struct Lock(PooledPtr<generated::svn_lock_t>);
 
 impl Lock {
     pub fn path(&self) -> &str {
@@ -562,15 +562,15 @@ impl Lock {
     }
 
     pub fn is_dav_comment(&self) -> bool {
-        unsafe { (*self.0).is_dav_comment == 1 }
+        (*self.0).is_dav_comment == 1
     }
 
     pub fn creation_date(&self) -> i64 {
-        unsafe { (*self.0).creation_date }
+        (*self.0).creation_date
     }
 
     pub fn expiration_date(&self) -> apr::time::Time {
-        unsafe { apr::time::Time::from((*self.0).expiration_date) }
+        apr::time::Time::from((*self.0).expiration_date)
     }
 }
 
