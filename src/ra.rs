@@ -37,9 +37,35 @@ extern "C" fn wrap_location_segment_receiver(
         &*(baton as *const _ as *const &dyn Fn(&crate::LocationSegment) -> Result<(), crate::Error>)
     };
     let pool = Pool::from_raw(pool);
-    match baton(&crate::LocationSegment(unsafe { PooledPtr::in_pool(std::rc::Rc::new(pool), svn_location_segment) })) {
+    match baton(&crate::LocationSegment(unsafe {
+        PooledPtr::in_pool(std::rc::Rc::new(pool), svn_location_segment)
+    })) {
         Ok(()) => std::ptr::null_mut(),
         Err(mut e) => e.as_mut_ptr(),
+    }
+}
+
+extern "C" fn wrap_lock_func(
+    lock_baton: *mut std::os::raw::c_void,
+    path: *const std::os::raw::c_char,
+    do_lock: i32,
+    lock: *const crate::generated::svn_lock_t,
+    error: *mut crate::generated::svn_error_t,
+    _pool: *mut apr::apr_pool_t,
+) -> *mut crate::generated::svn_error_t {
+    let lock_baton = unsafe {
+        &mut *(lock_baton
+            as *mut &mut dyn Fn(&str, bool, &crate::Lock, Option<&Error>) -> Result<(), Error>)
+    };
+    let path = unsafe { std::ffi::CStr::from_ptr(path) };
+
+    let error = Error::from_raw(error).err();
+
+    let lock = crate::Lock(lock);
+
+    match lock_baton(path.to_str().unwrap(), do_lock != 0, &lock, error.as_ref()) {
+        Ok(()) => std::ptr::null_mut(),
+        Err(e) => unsafe { e.into_raw() },
     }
 }
 
@@ -844,6 +870,62 @@ impl Session {
                 end.into(),
                 Some(wrap_location_segment_receiver),
                 &location_receiver as *const _ as *mut _,
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        Ok(())
+    }
+
+    pub fn lock(
+        &mut self,
+        path_revs: &HashMap<String, Revnum>,
+        commnt: &str,
+        steal_lock: bool,
+        mut lock_func: impl Fn(&str, bool, &crate::Lock, Option<&Error>) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        let mut pool = Pool::new();
+        let scratch_pool = std::rc::Rc::new(Pool::new());
+        let mut hash =
+            apr::hash::Hash::<&str, crate::generated::svn_revnum_t>::in_pool(&scratch_pool);
+        for (k, v) in path_revs.iter() {
+            hash.set(k, &v.0);
+        }
+        let commnt = std::ffi::CString::new(commnt).unwrap();
+        let err = unsafe {
+            crate::generated::svn_ra_lock(
+                self.0.as_mut_ptr(),
+                hash.as_mut_ptr(),
+                commnt.as_ptr(),
+                steal_lock.into(),
+                Some(wrap_lock_func),
+                &mut lock_func as *mut _ as *mut std::ffi::c_void,
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        Ok(())
+    }
+
+    pub fn unlock(
+        &mut self,
+        path_tokens: &HashMap<String, String>,
+        break_lock: bool,
+        mut lock_func: impl Fn(&str, bool, &crate::Lock, Option<&Error>) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        let mut pool = Pool::new();
+        let scratch_pool = std::rc::Rc::new(Pool::new());
+        let mut hash = apr::hash::Hash::<&str, *const std::os::raw::c_char>::in_pool(&scratch_pool);
+        for (k, v) in path_tokens.iter() {
+            hash.set(k, &(v.as_ptr() as *const _));
+        }
+        let err = unsafe {
+            crate::generated::svn_ra_unlock(
+                self.0.as_mut_ptr(),
+                hash.as_mut_ptr(),
+                break_lock.into(),
+                Some(wrap_lock_func),
+                &mut lock_func as *mut _ as *mut std::ffi::c_void,
                 pool.as_mut_ptr(),
             )
         };
