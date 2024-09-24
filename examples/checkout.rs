@@ -1,4 +1,4 @@
-use subversion::{Depth, Revision};
+use subversion::client::CheckoutOptions;
 
 fn main() {
     let mut ctx = subversion::client::Context::new().unwrap();
@@ -6,11 +6,7 @@ fn main() {
     ctx.checkout(
         "http://svn.apache.org/repos/asf/subversion/trunk/subversion/libsvn_client",
         std::path::Path::new("libsvn_client"),
-        Revision::Head,
-        Revision::Head,
-        Depth::Infinity,
-        false,
-        false,
+        &CheckoutOptions::default(),
     )
     .unwrap();
 }
