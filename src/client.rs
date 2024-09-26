@@ -591,7 +591,7 @@ impl Context {
             Option<&[crate::InheritedItem]>,
         ) -> Result<(), Error>,
     ) -> Result<(), Error> {
-        let mut pool = Pool::default();
+        let pool = Pool::default();
 
         let changelists = options.changelists.map(|cl| {
             cl.iter()
@@ -894,7 +894,7 @@ impl Context {
         known_targets: &[&str],
         keep_last_origpath_on_truepath_collision: bool,
     ) -> Result<Vec<String>, crate::Error> {
-        let mut pool = apr::pool::Pool::new();
+        let pool = apr::pool::Pool::new();
         let known_targets = known_targets
             .iter()
             .map(|s| std::ffi::CString::new(*s).unwrap())
@@ -1151,7 +1151,7 @@ impl Context {
     }
 
     pub fn get_repos_root(&mut self, path_or_url: &str) -> Result<(String, String), Error> {
-        let mut pool = Pool::default();
+        let pool = Pool::default();
         let path_or_url = std::ffi::CString::new(path_or_url).unwrap();
         let mut repos_root: *const i8 = std::ptr::null();
         let mut repos_uuid: *const i8 = std::ptr::null();
@@ -1187,7 +1187,7 @@ impl Context {
         let url = std::ffi::CString::new(url).unwrap();
         let wri_path = std::ffi::CString::new(wri_path.to_str().unwrap()).unwrap();
         let session = PooledPtr::initialize(|pool| unsafe {
-            let mut scratch_pool = Pool::default();
+            let scratch_pool = Pool::default();
             let mut session: *mut crate::generated::svn_ra_session_t = std::ptr::null_mut();
             let err = crate::generated::svn_client_open_ra_session2(
                 &mut session,
@@ -1215,7 +1215,7 @@ impl Context {
         changelists: Option<&[&str]>,
         receiver: &dyn FnMut(&Info) -> Result<(), Error>,
     ) -> Result<(), Error> {
-        let mut pool = Pool::default();
+        let pool = Pool::default();
         let abspath_or_url = std::ffi::CString::new(abspath_or_url).unwrap();
         let changelists = changelists.map(|cl| {
             cl.iter()
@@ -1448,7 +1448,7 @@ pub struct Conflict(pub(crate) apr::pool::PooledPtr<crate::generated::svn_client
 
 impl Conflict {
     pub fn prop_get_description(&mut self) -> Result<String, Error> {
-        let mut pool = apr::pool::Pool::new();
+        let pool = apr::pool::Pool::new();
         let mut description: *const i8 = std::ptr::null_mut();
         let err = unsafe {
             crate::generated::svn_client_conflict_prop_get_description(
