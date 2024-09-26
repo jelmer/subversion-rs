@@ -81,7 +81,7 @@ impl Session {
         let url = std::ffi::CString::new(url).unwrap();
         let mut corrected_url = std::ptr::null();
         let mut redirect_url = std::ptr::null();
-        let mut pool = Pool::new();
+        let pool = Pool::new();
         let mut session = std::ptr::null_mut();
         let uuid = uuid.map(|uuid| std::ffi::CString::new(uuid).unwrap());
         let err = unsafe {
@@ -137,7 +137,7 @@ impl Session {
 
     pub fn reparent(&mut self, url: &str) -> Result<(), Error> {
         let url = std::ffi::CString::new(url).unwrap();
-        let mut pool = Pool::new();
+        let pool = Pool::new();
         let err = unsafe {
             crate::generated::svn_ra_reparent(self.0.as_mut_ptr(), url.as_ptr(), pool.as_mut_ptr())
         };
@@ -150,7 +150,7 @@ impl Session {
     }
 
     pub fn get_session_url(&mut self) -> Result<String, Error> {
-        let mut pool = Pool::new();
+        let pool = Pool::new();
         let mut url = std::ptr::null();
         let err = unsafe {
             crate::generated::svn_ra_get_session_url(
@@ -166,7 +166,7 @@ impl Session {
 
     pub fn get_path_relative_to_session(&mut self, url: &str) -> Result<String, Error> {
         let url = std::ffi::CString::new(url).unwrap();
-        let mut pool = Pool::new();
+        let pool = Pool::new();
         let mut path = std::ptr::null();
         let err = unsafe {
             crate::generated::svn_ra_get_path_relative_to_session(
@@ -183,7 +183,7 @@ impl Session {
 
     pub fn get_path_relative_to_root(&mut self, url: &str) -> String {
         let url = std::ffi::CString::new(url).unwrap();
-        let mut pool = Pool::new();
+        let pool = Pool::new();
         let mut path = std::ptr::null();
         unsafe {
             crate::generated::svn_ra_get_path_relative_to_root(
@@ -198,7 +198,7 @@ impl Session {
     }
 
     pub fn get_latest_revnum(&mut self) -> Result<Revnum, Error> {
-        let mut pool = Pool::new();
+        let pool = Pool::new();
         let mut revnum = 0;
         let err = unsafe {
             crate::generated::svn_ra_get_latest_revnum(
@@ -212,7 +212,7 @@ impl Session {
     }
 
     pub fn get_dated_revision(&mut self, tm: impl apr::time::IntoTime) -> Result<Revnum, Error> {
-        let mut pool = Pool::new();
+        let pool = Pool::new();
         let mut revnum = 0;
         let err = unsafe {
             crate::generated::svn_ra_get_dated_revision(
@@ -234,7 +234,7 @@ impl Session {
         new_value: &[u8],
     ) -> Result<(), Error> {
         let name = std::ffi::CString::new(name).unwrap();
-        let mut pool = Pool::new();
+        let pool = Pool::new();
         let new_value = crate::generated::svn_string_t {
             data: new_value.as_ptr() as *mut _,
             len: new_value.len(),
@@ -258,7 +258,7 @@ impl Session {
     }
 
     pub fn rev_proplist(&mut self, rev: Revnum) -> Result<HashMap<String, Vec<u8>>, Error> {
-        let mut pool = Pool::new();
+        let pool = Pool::new();
         let mut props = std::ptr::null_mut();
         let err = unsafe {
             crate::generated::svn_ra_rev_proplist(
@@ -288,7 +288,7 @@ impl Session {
 
     pub fn rev_prop(&mut self, rev: Revnum, name: &str) -> Result<Option<Vec<u8>>, Error> {
         let name = std::ffi::CString::new(name).unwrap();
-        let mut pool = Pool::new();
+        let pool = Pool::new();
         let mut value = std::ptr::null_mut();
         let err = unsafe {
             crate::generated::svn_ra_rev_prop(
@@ -331,7 +331,7 @@ impl Session {
         for (k, v) in lock_tokens.iter() {
             hash_lock_tokens.set(k, &(v.as_ptr() as *const _));
         }
-        let mut result_pool = Pool::new();
+        let result_pool = Pool::new();
         let err = unsafe {
             crate::generated::svn_ra_get_commit_editor3(
                 self.0.as_mut_ptr(),
@@ -358,7 +358,7 @@ impl Session {
         mut stream: crate::io::Stream,
     ) -> Result<(Revnum, HashMap<String, Vec<u8>>), Error> {
         let path = std::ffi::CString::new(path).unwrap();
-        let mut pool = Pool::new();
+        let pool = Pool::new();
         let mut props = std::ptr::null_mut();
         let mut fetched_rev = 0;
         let err = unsafe {
@@ -398,7 +398,7 @@ impl Session {
         rev: Revnum,
     ) -> Result<(Revnum, HashMap<String, Dirent>, HashMap<String, Vec<u8>>), Error> {
         let path = std::ffi::CString::new(path).unwrap();
-        let mut pool = Pool::new();
+        let pool = Pool::new();
         let mut props = std::ptr::null_mut();
         let mut fetched_rev = 0;
         let mut dirents = std::ptr::null_mut();
@@ -462,7 +462,7 @@ impl Session {
         dirent_receiver: impl Fn(&str, &Dirent) -> Result<(), crate::Error>,
     ) -> Result<(), Error> {
         let path = std::ffi::CString::new(path).unwrap();
-        let mut pool = Pool::new();
+        let pool = Pool::new();
         let patterns: Option<apr::tables::ArrayHeader<*const std::os::raw::c_char>> =
             patterns.map(|patterns| {
                 patterns
@@ -506,7 +506,7 @@ impl Session {
     ) -> Result<HashMap<String, crate::mergeinfo::Mergeinfo>, Error> {
         let paths: apr::tables::ArrayHeader<*const std::os::raw::c_char> =
             paths.iter().map(|path| path.as_ptr() as _).collect();
-        let mut pool = Pool::new();
+        let pool = Pool::new();
         let mut mergeinfo = std::ptr::null_mut();
         let err = unsafe {
             crate::generated::svn_ra_get_mergeinfo(
@@ -545,8 +545,8 @@ impl Session {
         ignore_ancestry: bool,
         editor: &mut dyn Editor,
     ) -> Result<Box<dyn Reporter>, Error> {
-        let mut pool = Pool::new();
-        let mut scratch_pool = Pool::new();
+        let pool = Pool::new();
+        let scratch_pool = Pool::new();
         let mut reporter = std::ptr::null();
         let mut report_baton = std::ptr::null_mut();
         let err = unsafe {
@@ -582,8 +582,8 @@ impl Session {
         editor: &mut dyn Editor,
     ) -> Result<Box<dyn Reporter>, Error> {
         let switch_target = std::ffi::CString::new(switch_target).unwrap();
-        let mut pool = Pool::new();
-        let mut scratch_pool = Pool::new();
+        let pool = Pool::new();
+        let scratch_pool = Pool::new();
         let mut reporter = std::ptr::null();
         let mut report_baton = std::ptr::null_mut();
         let err = unsafe {
@@ -612,7 +612,7 @@ impl Session {
     pub fn check_path(&mut self, path: &str, rev: Revnum) -> Result<crate::NodeKind, Error> {
         let path = std::ffi::CString::new(path).unwrap();
         let mut kind = 0;
-        let mut pool = Pool::new();
+        let pool = Pool::new();
         let err = unsafe {
             crate::generated::svn_ra_check_path(
                 self.0.as_mut_ptr(),
@@ -634,7 +634,7 @@ impl Session {
         status_editor: &mut dyn Editor,
     ) -> Result<(), Error> {
         let status_target = std::ffi::CString::new(status_target).unwrap();
-        let mut pool = Pool::new();
+        let pool = Pool::new();
         let mut reporter = std::ptr::null();
         let mut report_baton = std::ptr::null_mut();
         let err = unsafe {
@@ -657,7 +657,7 @@ impl Session {
     pub fn stat(&mut self, path: &str, rev: Revnum) -> Result<Dirent, Error> {
         let path = std::ffi::CString::new(path).unwrap();
         let mut dirent = std::ptr::null_mut();
-        let mut pool = Pool::new();
+        let pool = Pool::new();
         let err = unsafe {
             crate::generated::svn_ra_stat(
                 self.0.as_mut_ptr(),
@@ -674,7 +674,7 @@ impl Session {
     }
 
     pub fn get_uuid(&mut self) -> Result<String, Error> {
-        let mut pool = Pool::new();
+        let pool = Pool::new();
         let mut uuid = std::ptr::null();
         let err = unsafe {
             crate::generated::svn_ra_get_uuid2(self.0.as_mut_ptr(), &mut uuid, pool.as_mut_ptr())
@@ -685,7 +685,7 @@ impl Session {
     }
 
     pub fn get_repos_root(&mut self) -> Result<String, Error> {
-        let mut pool = Pool::new();
+        let pool = Pool::new();
         let mut url = std::ptr::null();
         let err = unsafe {
             crate::generated::svn_ra_get_repos_root2(
@@ -707,7 +707,7 @@ impl Session {
     ) -> Result<Revnum, Error> {
         let path = std::ffi::CString::new(path).unwrap();
         let mut rev = 0;
-        let mut pool = Pool::new();
+        let pool = Pool::new();
         let err = unsafe {
             crate::generated::svn_ra_get_deleted_rev(
                 self.0.as_mut_ptr(),
@@ -725,7 +725,7 @@ impl Session {
     pub fn has_capability(&mut self, capability: &str) -> Result<bool, Error> {
         let capability = std::ffi::CString::new(capability).unwrap();
         let mut has = 0;
-        let mut pool = Pool::new();
+        let pool = Pool::new();
         let err = unsafe {
             crate::generated::svn_ra_has_capability(
                 self.0.as_mut_ptr(),
@@ -750,7 +750,7 @@ impl Session {
     ) -> Result<Box<dyn Reporter>, Error> {
         let diff_target = std::ffi::CString::new(diff_target).unwrap();
         let versus_url = std::ffi::CString::new(versus_url).unwrap();
-        let mut pool = Pool::new();
+        let pool = Pool::new();
         let mut reporter = std::ptr::null();
         let mut report_baton = std::ptr::null_mut();
         let err = unsafe {
@@ -793,7 +793,7 @@ impl Session {
             .iter()
             .map(|revprop| revprop.as_ptr() as _)
             .collect();
-        let mut pool = Pool::new();
+        let pool = Pool::new();
         let log_receiver = Box::new(log_receiver);
         let err = unsafe {
             crate::generated::svn_ra_get_log2(
@@ -824,7 +824,7 @@ impl Session {
         let path = std::ffi::CString::new(path).unwrap();
         let location_revisions: apr::tables::ArrayHeader<crate::generated::svn_revnum_t> =
             location_revisions.iter().map(|rev| (*rev).into()).collect();
-        let mut pool = Pool::new();
+        let pool = Pool::new();
         let mut locations = std::ptr::null_mut();
         let err = unsafe {
             crate::generated::svn_ra_get_locations(
@@ -862,7 +862,7 @@ impl Session {
         location_receiver: &dyn Fn(&crate::LocationSegment) -> Result<(), Error>,
     ) -> Result<(), Error> {
         let path = std::ffi::CString::new(path).unwrap();
-        let mut pool = Pool::new();
+        let pool = Pool::new();
         let err = unsafe {
             crate::generated::svn_ra_get_location_segments(
                 self.0.as_mut_ptr(),
@@ -886,7 +886,7 @@ impl Session {
         steal_lock: bool,
         mut lock_func: impl Fn(&str, bool, &crate::Lock, Option<&Error>) -> Result<(), Error>,
     ) -> Result<(), Error> {
-        let mut pool = Pool::new();
+        let pool = Pool::new();
         let scratch_pool = std::rc::Rc::new(Pool::new());
         let mut hash =
             apr::hash::Hash::<&str, crate::generated::svn_revnum_t>::in_pool(&scratch_pool);
@@ -915,7 +915,7 @@ impl Session {
         break_lock: bool,
         mut lock_func: impl Fn(&str, bool, &crate::Lock, Option<&Error>) -> Result<(), Error>,
     ) -> Result<(), Error> {
-        let mut pool = Pool::new();
+        let pool = Pool::new();
         let scratch_pool = std::rc::Rc::new(Pool::new());
         let mut hash = apr::hash::Hash::<&str, *const std::os::raw::c_char>::in_pool(&scratch_pool);
         for (k, v) in path_tokens.iter() {
@@ -938,7 +938,7 @@ impl Session {
     pub fn get_lock(&mut self, path: &str) -> Result<crate::Lock, Error> {
         let path = std::ffi::CString::new(path).unwrap();
         let mut lock = std::ptr::null_mut();
-        let mut pool = Pool::new();
+        let pool = Pool::new();
         let err = unsafe {
             crate::generated::svn_ra_get_lock(
                 self.0.as_mut_ptr(),
@@ -960,7 +960,7 @@ impl Session {
     ) -> Result<HashMap<String, crate::Lock>, Error> {
         let path = std::ffi::CString::new(path).unwrap();
         let mut locks = std::ptr::null_mut();
-        let mut pool = Pool::new();
+        let pool = Pool::new();
         let err = unsafe {
             crate::generated::svn_ra_get_locks2(
                 self.0.as_mut_ptr(),
@@ -1109,7 +1109,7 @@ impl Session {
             }
         }
 
-        let mut pool = Pool::new();
+        let pool = Pool::new();
         let err = unsafe {
             crate::generated::svn_ra_replay_range(
                 self.0.as_mut_ptr(),
@@ -1134,7 +1134,7 @@ impl Session {
         send_deltas: bool,
         editor: &mut dyn crate::delta::Editor,
     ) -> Result<(), Error> {
-        let mut pool = Pool::new();
+        let pool = Pool::new();
         let err = unsafe {
             crate::generated::svn_ra_replay(
                 self.0.as_mut_ptr(),
@@ -1152,7 +1152,7 @@ impl Session {
 }
 
 pub fn modules() -> Result<String, Error> {
-    let mut pool = Pool::new();
+    let pool = Pool::new();
     let buf = unsafe {
         crate::generated::svn_stringbuf_create(
             std::ffi::CStr::from_bytes_with_nul(b"").unwrap().as_ptr(),
@@ -1187,7 +1187,7 @@ impl Reporter for WrapReporter {
     ) -> Result<(), Error> {
         let path = std::ffi::CString::new(path).unwrap();
         let lock_token = std::ffi::CString::new(lock_token).unwrap();
-        let mut pool = Pool::new();
+        let pool = Pool::new();
         let err = unsafe {
             (*self.0).set_path.unwrap()(
                 self.1.as_mut_ptr(),
@@ -1205,7 +1205,7 @@ impl Reporter for WrapReporter {
 
     fn delete_path(&mut self, path: &str) -> Result<(), Error> {
         let path = std::ffi::CString::new(path).unwrap();
-        let mut pool = Pool::new();
+        let pool = Pool::new();
         let err = unsafe {
             (*self.0).delete_path.unwrap()(self.1.as_mut_ptr(), path.as_ptr(), pool.as_mut_ptr())
         };
@@ -1225,7 +1225,7 @@ impl Reporter for WrapReporter {
         let path = std::ffi::CString::new(path).unwrap();
         let url = std::ffi::CString::new(url).unwrap();
         let lock_token = std::ffi::CString::new(lock_token).unwrap();
-        let mut pool = Pool::new();
+        let pool = Pool::new();
         let err = unsafe {
             (*self.0).link_path.unwrap()(
                 self.1.as_mut_ptr(),
@@ -1243,7 +1243,7 @@ impl Reporter for WrapReporter {
     }
 
     fn finish_report(&mut self) -> Result<(), Error> {
-        let mut pool = Pool::new();
+        let pool = Pool::new();
         let err =
             unsafe { (*self.0).finish_report.unwrap()(self.1.as_mut_ptr(), pool.as_mut_ptr()) };
         Error::from_raw(err)?;
@@ -1251,7 +1251,7 @@ impl Reporter for WrapReporter {
     }
 
     fn abort_report(&mut self) -> Result<(), Error> {
-        let mut pool = Pool::new();
+        let pool = Pool::new();
         let err =
             unsafe { (*self.0).abort_report.unwrap()(self.1.as_mut_ptr(), pool.as_mut_ptr()) };
         Error::from_raw(err)?;

@@ -126,7 +126,7 @@ impl Context {
         let path = std::ffi::CString::new(path).unwrap();
         let mut locked = 0;
         let mut locked_here = 0;
-        let mut scratch_pool = apr::pool::Pool::new();
+        let scratch_pool = apr::pool::Pool::new();
         let err = unsafe {
             crate::generated::svn_wc_locked2(
                 &mut locked_here,
@@ -159,7 +159,7 @@ pub fn set_adm_dir(name: &str) -> Result<(), crate::Error> {
 }
 
 pub fn get_adm_dir() -> String {
-    let mut pool = apr::pool::Pool::new();
+    let pool = apr::pool::Pool::new();
     let name = unsafe { crate::generated::svn_wc_get_adm_dir(pool.as_mut_ptr()) };
     unsafe { std::ffi::CStr::from_ptr(name) }
         .to_string_lossy()
