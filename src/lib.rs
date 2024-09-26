@@ -572,6 +572,7 @@ impl From<StatusKind> for generated::svn_wc_status_kind {
 }
 
 pub struct Lock(PooledPtr<generated::svn_lock_t>);
+unsafe impl Send for Lock {}
 
 impl Lock {
     pub fn path(&self) -> &str {
@@ -579,6 +580,15 @@ impl Lock {
             let path = (*self.0).path;
             std::ffi::CStr::from_ptr(path).to_str().unwrap()
         }
+    }
+
+    pub fn dup(&self) -> Self {
+        Self(
+            apr::pool::PooledPtr::initialize(|pool| {
+                Ok::<_, Error>(unsafe { crate::generated::svn_lock_dup(self.0.as_ptr(), pool.as_mut_ptr()) })
+            })
+            .unwrap(),
+        )
     }
 
     pub fn token(&self) -> &str {
@@ -612,6 +622,15 @@ impl Lock {
 
     pub fn expiration_date(&self) -> apr::time::Time {
         apr::time::Time::from((*self.0).expiration_date)
+    }
+
+    pub fn create() -> Self {
+        Self(
+            apr::pool::PooledPtr::initialize(|pool| {
+                Ok::<_, Error>(unsafe { crate::generated::svn_lock_create(pool.as_mut_ptr()) })
+            })
+            .unwrap(),
+        )
     }
 }
 
