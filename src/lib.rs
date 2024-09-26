@@ -650,8 +650,20 @@ impl From<ChecksumKind> for crate::generated::svn_checksum_kind_t {
 }
 
 pub struct LocationSegment(PooledPtr<generated::svn_location_segment_t>);
+unsafe impl Send for LocationSegment {}
 
 impl LocationSegment {
+    pub fn dup(&self) -> Self {
+        Self(
+            apr::pool::PooledPtr::initialize(|pool| {
+                Ok::<_, Error>(unsafe {
+                    crate::generated::svn_location_segment_dup(self.0.as_ptr(), pool.as_mut_ptr())
+                })
+            })
+            .unwrap(),
+        )
+    }
+
     pub fn range(&self) -> std::ops::Range<Revnum> {
         Revnum::from_raw(self.0.range_end).unwrap()..Revnum::from_raw(self.0.range_start).unwrap()
     }
@@ -702,5 +714,129 @@ pub(crate) extern "C" fn wrap_log_entry_receiver(
         } else {
             std::ptr::null_mut()
         }
+    }
+}
+
+extern "C" fn wrap_cancel_func(
+    cancel_baton: *mut std::ffi::c_void,
+) -> *mut crate::generated::svn_error_t {
+    let cancel_check = unsafe { &*(cancel_baton as *const Box<dyn Fn() -> Result<(), Error>>) };
+    match cancel_check() {
+        Ok(()) => std::ptr::null_mut(),
+        Err(e) => unsafe { e.into_raw() },
+    }
+}
+
+pub struct Checksum(PooledPtr<crate::generated::svn_checksum_t>);
+
+impl Checksum {
+    pub fn kind(&self) -> ChecksumKind {
+        ChecksumKind::from(self.0.kind)
+    }
+
+    pub fn size(&self) -> usize {
+        unsafe { crate::generated::svn_checksum_size(self.0.as_ptr()) }
+    }
+
+    pub fn is_empty(&mut self) -> bool {
+        unsafe { crate::generated::svn_checksum_is_empty_checksum(self.0.as_mut_ptr()) == 1 }
+    }
+
+    pub fn digest(&self) -> &[u8] {
+        unsafe {
+            let digest = self.0.digest;
+            std::slice::from_raw_parts(digest, self.size() as usize)
+        }
+    }
+
+    pub fn parse_hex(kind: ChecksumKind, hex: &str) -> Result<Self, Error> {
+        let mut checksum = std::ptr::null_mut();
+        let kind = kind.into();
+        let hex = std::ffi::CString::new(hex).unwrap();
+        let pool = apr::pool::Pool::new();
+        unsafe {
+            Error::from_raw(crate::generated::svn_checksum_parse_hex(
+                &mut checksum,
+                kind,
+                hex.as_ptr(),
+                pool.as_mut_ptr(),
+            ))?;
+            Ok(Self(PooledPtr::in_pool(std::rc::Rc::new(pool), checksum)))
+        }
+    }
+
+    pub fn empty(kind: ChecksumKind) -> Result<Self, Error> {
+        let kind = kind.into();
+        let pool = apr::pool::Pool::new();
+        unsafe {
+            let checksum = crate::generated::svn_checksum_empty_checksum(kind, pool.as_mut_ptr());
+            Ok(Self(PooledPtr::in_pool(std::rc::Rc::new(pool), checksum)))
+        }
+    }
+}
+
+pub struct ChecksumContext(PooledPtr<crate::generated::svn_checksum_ctx_t>);
+
+impl ChecksumContext {
+    pub fn new(kind: ChecksumKind) -> Result<Self, Error> {
+        let kind = kind.into();
+        let pool = apr::pool::Pool::new();
+        unsafe {
+            let cc = crate::generated::svn_checksum_ctx_create(kind, pool.as_mut_ptr());
+            Ok(Self(PooledPtr::in_pool(std::rc::Rc::new(pool), cc)))
+        }
+    }
+
+    pub fn reset(&mut self) -> Result<(), Error> {
+        let err = unsafe { crate::generated::svn_checksum_ctx_reset(self.0.as_mut_ptr()) };
+        Error::from_raw(err)?;
+        Ok(())
+    }
+
+    pub fn update(&mut self, data: &[u8]) -> Result<(), Error> {
+        let err = unsafe {
+            crate::generated::svn_checksum_update(
+                self.0.as_mut_ptr(),
+                data.as_ptr() as *const std::ffi::c_void,
+                data.len(),
+            )
+        };
+        Error::from_raw(err)?;
+        Ok(())
+    }
+
+    pub fn finish(&self) -> Result<Checksum, Error> {
+        let mut checksum = std::ptr::null_mut();
+        let pool = apr::pool::Pool::new();
+        unsafe {
+            Error::from_raw(crate::generated::svn_checksum_final(
+                &mut checksum,
+                self.0.as_ptr(),
+                pool.as_mut_ptr(),
+            ))?;
+            Ok(Checksum(PooledPtr::in_pool(
+                std::rc::Rc::new(pool),
+                checksum,
+            )))
+        }
+    }
+}
+
+pub fn checksum(kind: ChecksumKind, data: &[u8]) -> Result<Checksum, Error> {
+    let mut checksum = std::ptr::null_mut();
+    let kind = kind.into();
+    let pool = apr::pool::Pool::new();
+    unsafe {
+        Error::from_raw(crate::generated::svn_checksum(
+            &mut checksum,
+            kind,
+            data.as_ptr() as *const std::ffi::c_void,
+            data.len(),
+            pool.as_mut_ptr(),
+        ))?;
+        Ok(Checksum(PooledPtr::in_pool(
+            std::rc::Rc::new(pool),
+            checksum,
+        )))
     }
 }
