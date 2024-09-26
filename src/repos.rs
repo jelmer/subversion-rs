@@ -36,16 +36,6 @@ impl From<LoadUUID> for crate::generated::svn_repos_load_uuid {
     }
 }
 
-extern "C" fn wrap_cancel_func(
-    cancel_baton: *mut std::ffi::c_void,
-) -> *mut crate::generated::svn_error_t {
-    let cancel_check = unsafe { &*(cancel_baton as *const Box<dyn Fn() -> Result<(), Error>>) };
-    match cancel_check() {
-        Ok(()) => std::ptr::null_mut(),
-        Err(e) => unsafe { e.into_raw() },
-    }
-}
-
 pub fn find_root_path(path: &std::path::Path) -> Option<std::path::PathBuf> {
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     let pool = apr::Pool::new();
@@ -279,7 +269,7 @@ impl Repos {
                     })
                     .unwrap_or(std::ptr::null_mut()),
                 if cancel_check.is_some() {
-                    Some(wrap_cancel_func)
+                    Some(crate::wrap_cancel_func)
                 } else {
                     None
                 },
@@ -341,7 +331,7 @@ impl Repos {
                 Some(verify_callback),
                 Box::into_raw(Box::new(callback_func)) as *mut std::ffi::c_void,
                 if cancel_func.is_some() {
-                    Some(wrap_cancel_func)
+                    Some(crate::wrap_cancel_func)
                 } else {
                     None
                 },
@@ -377,7 +367,7 @@ impl Repos {
                     })
                     .unwrap_or(std::ptr::null_mut()),
                 if cancel_func.is_some() {
-                    Some(wrap_cancel_func)
+                    Some(crate::wrap_cancel_func)
                 } else {
                     None
                 },
@@ -415,7 +405,7 @@ pub fn recover(
                 .map(|notify_func| Box::into_raw(Box::new(notify_func)) as *mut std::ffi::c_void)
                 .unwrap_or(std::ptr::null_mut()),
             if cance_func.is_some() {
-                Some(wrap_cancel_func)
+                Some(crate::wrap_cancel_func)
             } else {
                 None
             },
@@ -550,7 +540,7 @@ pub fn hotcopy(
                 .map(|notify_func| Box::into_raw(Box::new(notify_func)) as *mut std::ffi::c_void)
                 .unwrap_or(std::ptr::null_mut()),
             if cancel_func.is_some() {
-                Some(wrap_cancel_func)
+                Some(crate::wrap_cancel_func)
             } else {
                 None
             },
