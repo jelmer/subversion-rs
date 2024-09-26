@@ -355,7 +355,7 @@ impl Session {
         &mut self,
         path: &str,
         rev: Revnum,
-        mut stream: crate::io::Stream,
+        stream: &mut crate::io::Stream,
     ) -> Result<(Revnum, HashMap<String, Vec<u8>>), Error> {
         let path = std::ffi::CString::new(path).unwrap();
         let pool = Pool::new();
