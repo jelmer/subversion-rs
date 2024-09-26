@@ -21,8 +21,11 @@ pyo3 = { version = ">=0.22", optional = true }
 url = { version = "2.5.2", optional = true }
 
 [features]
+default = ["ra", "wc"]
 pyo3 = ["dep:pyo3"]
 url = ["dep:url"]
+ra = []
+wc = []
 
 [build-dependencies]
 bindgen = "0.70"
@@ -37,5 +40,5 @@ libsvn_delta = ">=1.14"
 libsvn_subr = ">=1.14"
 libsvn_repos = ">=1.14"
 libsvn_fs = ">=1.14"
-libsvn_wc = ">=1.14"
-libsvn_ra = ">=1.14"
+libsvn_wc = { version = ">=1.14", feature = "wc" }
+libsvn_ra = { version = ">=1.14", feature = "ra" }
