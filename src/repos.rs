@@ -521,7 +521,7 @@ pub fn delete(path: &std::path::Path) -> Result<(), Error> {
 }
 
 pub fn version() -> crate::Version {
-    unsafe { crate::Version(crate::generated::svn_client_version()) }
+    unsafe { crate::Version(crate::generated::svn_repos_version()) }
 }
 
 pub fn hotcopy(
