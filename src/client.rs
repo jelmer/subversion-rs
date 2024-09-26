@@ -18,24 +18,6 @@ pub fn version() -> Version {
     unsafe { Version(svn_client_version()) }
 }
 
-pub(crate) extern "C" fn wrap_commit_callback2(
-    commit_info: *const crate::generated::svn_commit_info_t,
-    baton: *mut std::ffi::c_void,
-    pool: *mut apr::apr_pool_t,
-) -> *mut crate::generated::svn_error_t {
-    unsafe {
-        let callback = baton as *mut &mut dyn FnMut(&crate::CommitInfo) -> Result<(), Error>;
-        let mut callback = Box::from_raw(callback);
-        match callback(&crate::CommitInfo(PooledPtr::in_pool(
-            std::rc::Rc::new(Pool::from_raw(pool)),
-            commit_info as *mut crate::generated::svn_commit_info_t,
-        ))) {
-            Ok(()) => std::ptr::null_mut(),
-            Err(mut err) => err.as_mut_ptr(),
-        }
-    }
-}
-
 extern "C" fn wrap_filter_callback(
     baton: *mut std::ffi::c_void,
     filtered: *mut crate::generated::svn_boolean_t,
@@ -72,27 +54,6 @@ extern "C" fn wrap_status_func(
         let mut callback = Box::from_raw(callback);
         let path: &std::path::Path = std::ffi::CStr::from_ptr(path).to_str().unwrap().as_ref();
         let ret = callback(path, &Status(status));
-        if let Err(mut err) = ret {
-            err.as_mut_ptr()
-        } else {
-            std::ptr::null_mut()
-        }
-    }
-}
-
-pub(crate) extern "C" fn wrap_log_entry_receiver(
-    baton: *mut std::ffi::c_void,
-    log_entry: *mut crate::generated::svn_log_entry_t,
-    pool: *mut apr::apr_pool_t,
-) -> *mut crate::generated::svn_error_t {
-    unsafe {
-        let callback = baton as *mut &mut dyn FnMut(&LogEntry) -> Result<(), Error>;
-        let mut callback = Box::from_raw(callback);
-        let pool = apr::pool::Pool::from_raw(pool);
-        let ret = callback(&LogEntry(apr::pool::PooledPtr::in_pool(
-            std::rc::Rc::new(pool),
-            log_entry,
-        )));
         if let Err(mut err) = ret {
             err.as_mut_ptr()
         } else {
@@ -538,7 +499,7 @@ impl Context {
                 ps.as_ptr(),
                 make_parents.into(),
                 rps.as_ptr(),
-                Some(wrap_commit_callback2),
+                Some(crate::wrap_commit_callback2),
                 commit_callback as *mut std::ffi::c_void,
                 &mut *self.0,
                 std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
@@ -571,7 +532,7 @@ impl Context {
                 options.force.into(),
                 options.keep_local.into(),
                 rps.as_ptr(),
-                Some(wrap_commit_callback2),
+                Some(crate::wrap_commit_callback2),
                 commit_callback as *mut std::ffi::c_void,
                 &mut *self.0,
                 std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
@@ -657,7 +618,7 @@ impl Context {
                 rps.as_ptr(),
                 Some(wrap_filter_callback),
                 filter_callback as *mut std::ffi::c_void,
-                Some(wrap_commit_callback2),
+                Some(crate::wrap_commit_callback2),
                 commit_callback as *mut std::ffi::c_void,
                 &mut *self.0,
                 std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
@@ -735,7 +696,7 @@ impl Context {
                 options.include_dir_externals.into(),
                 cl.as_ptr(),
                 rps.as_ptr(),
-                Some(wrap_commit_callback2),
+                Some(crate::wrap_commit_callback2),
                 commit_callback as *mut std::ffi::c_void,
                 &mut *self.0,
                 std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
@@ -824,7 +785,7 @@ impl Context {
                 strict_node_history.into(),
                 include_merged_revisions.into(),
                 rps.as_ptr(),
-                Some(wrap_log_entry_receiver),
+                Some(crate::wrap_log_entry_receiver),
                 log_entry_receiver as *mut std::ffi::c_void,
                 &mut *self.0,
                 std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
