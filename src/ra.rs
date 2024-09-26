@@ -338,7 +338,7 @@ impl Session {
                 &mut editor,
                 &mut edit_baton,
                 hash_revprop_table.as_mut_ptr(),
-                Some(crate::client::wrap_commit_callback2),
+                Some(crate::wrap_commit_callback2),
                 commit_callback as *mut _ as *mut _,
                 hash_lock_tokens.as_mut_ptr(),
                 keep_locks.into(),
@@ -806,7 +806,7 @@ impl Session {
                 strict_node_history.into(),
                 include_merged_revisions.into(),
                 revprops.as_ptr(),
-                Some(crate::client::wrap_log_entry_receiver),
+                Some(crate::wrap_log_entry_receiver),
                 &log_receiver as *const _ as *mut _,
                 pool.as_mut_ptr(),
             )

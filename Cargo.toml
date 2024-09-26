@@ -1,6 +1,6 @@
 [package]
 name = "subversion"
-version = "0.0.5"
+version = "0.0.6"
 edition = "2021"
 authors = ["Jelmer Vernooĳ <jelmer@apache.org>"]
 repository = "https://github.com/jelmer/subversion-rs.git"
@@ -21,11 +21,13 @@ pyo3 = { version = ">=0.22", optional = true }
 url = { version = "2.5.2", optional = true }
 
 [features]
-default = ["ra", "wc"]
+default = ["ra", "wc", "client", "delta"]
 pyo3 = ["dep:pyo3"]
 url = ["dep:url"]
-ra = []
-wc = []
+client = []
+ra = ["delta"]
+wc = ["delta"]
+delta = []
 
 [build-dependencies]
 bindgen = "0.70"
@@ -35,10 +37,18 @@ system-deps = "7.0"
 tempfile = "3.12.0"
 
 [package.metadata.system-deps]
-libsvn_client = ">=1.14"
-libsvn_delta = ">=1.14"
+libsvn_client = { version = ">=1.14", feature = "client" }
+libsvn_delta = { version = ">=1.14", feature = "delta" }
 libsvn_subr = ">=1.14"
 libsvn_repos = ">=1.14"
 libsvn_fs = ">=1.14"
 libsvn_wc = { version = ">=1.14", feature = "wc" }
 libsvn_ra = { version = ">=1.14", feature = "ra" }
+
+[[example]]
+name = "checkout"
+required-features = ["client"]
+
+[[example]]
+name = "cat"
+required-features = ["client"]
