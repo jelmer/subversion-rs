@@ -315,7 +315,7 @@ impl Session {
         commit_callback: &dyn FnMut(&crate::CommitInfo) -> Result<(), Error>,
         lock_tokens: HashMap<String, String>,
         keep_locks: bool,
-    ) -> Result<Box<dyn Editor>, Error> {
+    ) -> Result<Box<dyn Editor + Send>, Error> {
         let pool = std::rc::Rc::new(Pool::new());
         let commit_callback = Box::into_raw(Box::new(commit_callback));
         let mut editor = std::ptr::null();
@@ -544,7 +544,7 @@ impl Session {
         send_copyfrom_args: bool,
         ignore_ancestry: bool,
         editor: &mut dyn Editor,
-    ) -> Result<Box<dyn Reporter>, Error> {
+    ) -> Result<Box<dyn Reporter + Send>, Error> {
         let pool = Pool::new();
         let scratch_pool = Pool::new();
         let mut reporter = std::ptr::null();
@@ -568,7 +568,7 @@ impl Session {
         Error::from_raw(err)?;
         Ok(Box::new(WrapReporter(reporter, unsafe {
             PooledPtr::in_pool(std::rc::Rc::new(pool), report_baton)
-        })) as Box<dyn Reporter>)
+        })) as Box<dyn Reporter + Send>)
     }
 
     pub fn do_switch(
@@ -580,7 +580,7 @@ impl Session {
         send_copyfrom_args: bool,
         ignore_ancestry: bool,
         editor: &mut dyn Editor,
-    ) -> Result<Box<dyn Reporter>, Error> {
+    ) -> Result<Box<dyn Reporter + Send>, Error> {
         let switch_target = std::ffi::CString::new(switch_target).unwrap();
         let pool = Pool::new();
         let scratch_pool = Pool::new();
@@ -606,7 +606,7 @@ impl Session {
         Error::from_raw(err)?;
         Ok(Box::new(WrapReporter(reporter, unsafe {
             PooledPtr::in_pool(std::rc::Rc::new(pool), report_baton)
-        })) as Box<dyn Reporter>)
+        })) as Box<dyn Reporter + Send>)
     }
 
     pub fn check_path(&mut self, path: &str, rev: Revnum) -> Result<crate::NodeKind, Error> {
@@ -747,7 +747,7 @@ impl Session {
         text_deltas: bool,
         versus_url: &str,
         diff_editor: &mut dyn Editor,
-    ) -> Result<Box<dyn Reporter>, Error> {
+    ) -> Result<Box<dyn Reporter + Send>, Error> {
         let diff_target = std::ffi::CString::new(diff_target).unwrap();
         let versus_url = std::ffi::CString::new(versus_url).unwrap();
         let pool = Pool::new();
@@ -772,7 +772,7 @@ impl Session {
         Error::from_raw(err)?;
         Ok(Box::new(WrapReporter(reporter, unsafe {
             PooledPtr::in_pool(std::rc::Rc::new(pool), report_baton)
-        })) as Box<dyn Reporter>)
+        })) as Box<dyn Reporter + Send>)
     }
 
     pub fn get_log(
@@ -1175,6 +1175,8 @@ pub struct WrapReporter(
     *const crate::generated::svn_ra_reporter3_t,
     PooledPtr<std::ffi::c_void>,
 );
+
+unsafe impl Send for WrapReporter {}
 
 impl Reporter for WrapReporter {
     fn set_path(

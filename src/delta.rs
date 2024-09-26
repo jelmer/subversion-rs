@@ -9,6 +9,7 @@ pub struct WrapEditor(
     pub(crate) *const crate::generated::svn_delta_editor_t,
     pub(crate) apr::pool::PooledPtr<std::ffi::c_void>,
 );
+unsafe impl Send for WrapEditor {}
 
 impl Editor for WrapEditor {
     fn set_target_revision(&mut self, revision: Revnum) -> Result<(), crate::Error> {
@@ -372,6 +373,7 @@ pub trait FileEditor {
 }
 
 pub struct TxDeltaWindow(apr::pool::PooledPtr<crate::generated::svn_txdelta_window_t>);
+unsafe impl Send for TxDeltaWindow {}
 
 impl TxDeltaWindow {
     pub fn as_ptr(&self) -> *const crate::generated::svn_txdelta_window_t {
@@ -427,6 +429,18 @@ impl TxDeltaWindow {
             );
         }
         Ok(())
+    }
+
+    pub fn dup(&self) -> Self {
+        Self(
+            apr::pool::PooledPtr::initialize(|pool| unsafe {
+                Ok::<_, crate::Error>(crate::generated::svn_txdelta_window_dup(
+                    self.0.as_ptr(),
+                    pool.as_mut_ptr(),
+                ))
+            })
+            .unwrap(),
+        )
     }
 }
 
