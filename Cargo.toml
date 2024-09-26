@@ -44,3 +44,11 @@ libsvn_repos = ">=1.14"
 libsvn_fs = ">=1.14"
 libsvn_wc = { version = ">=1.14", feature = "wc" }
 libsvn_ra = { version = ">=1.14", feature = "ra" }
+
+[[example]]
+name = "checkout"
+required-features = ["client"]
+
+[[example]]
+name = "cat"
+required-features = ["client"]
