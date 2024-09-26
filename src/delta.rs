@@ -9,10 +9,11 @@ pub struct WrapEditor(
     pub(crate) *const crate::generated::svn_delta_editor_t,
     pub(crate) apr::pool::PooledPtr<std::ffi::c_void>,
 );
+unsafe impl Send for WrapEditor {}
 
 impl Editor for WrapEditor {
     fn set_target_revision(&mut self, revision: Revnum) -> Result<(), crate::Error> {
-        let mut scratch_pool = Pool::new();
+        let scratch_pool = Pool::new();
         let err = unsafe {
             ((*self.0).set_target_revision.unwrap())(
                 self.1.as_mut_ptr(),
@@ -43,7 +44,7 @@ impl Editor for WrapEditor {
     }
 
     fn close(&mut self) -> Result<(), crate::Error> {
-        let mut scratch_pool = Pool::new();
+        let scratch_pool = Pool::new();
         let err = unsafe {
             ((*self.0).close_edit.unwrap())(self.1.as_mut_ptr(), scratch_pool.as_mut_ptr())
         };
@@ -52,7 +53,7 @@ impl Editor for WrapEditor {
     }
 
     fn abort(&mut self) -> Result<(), crate::Error> {
-        let mut scratch_pool = Pool::new();
+        let scratch_pool = Pool::new();
         let err = unsafe {
             ((*self.0).abort_edit.unwrap())(self.1.as_mut_ptr(), scratch_pool.as_mut_ptr())
         };
@@ -68,7 +69,7 @@ pub struct WrapDirectoryEditor<'a>(
 
 impl<'a> DirectoryEditor for WrapDirectoryEditor<'a> {
     fn delete_entry(&mut self, path: &str, revision: Option<Revnum>) -> Result<(), crate::Error> {
-        let mut scratch_pool = self.1.pool().subpool();
+        let scratch_pool = self.1.pool().subpool();
         let err = unsafe {
             ((*(*self.0)).delete_entry.unwrap())(
                 path.as_ptr() as *const i8,
@@ -129,7 +130,7 @@ impl<'a> DirectoryEditor for WrapDirectoryEditor<'a> {
     }
 
     fn change_prop(&mut self, name: &str, value: &[u8]) -> Result<(), crate::Error> {
-        let mut scratch_pool = self.1.pool().subpool();
+        let scratch_pool = self.1.pool().subpool();
         let value: crate::string::String = value.into();
         let err = unsafe {
             ((*(*self.0)).change_dir_prop.unwrap())(
@@ -144,7 +145,7 @@ impl<'a> DirectoryEditor for WrapDirectoryEditor<'a> {
     }
 
     fn close(&mut self) -> Result<(), crate::Error> {
-        let mut scratch_pool = self.1.pool().subpool();
+        let scratch_pool = self.1.pool().subpool();
         let err = unsafe {
             ((*(*self.0)).close_directory.unwrap())(self.1.as_mut_ptr(), scratch_pool.as_mut_ptr())
         };
@@ -153,7 +154,7 @@ impl<'a> DirectoryEditor for WrapDirectoryEditor<'a> {
     }
 
     fn absent_directory(&mut self, path: &str) -> Result<(), crate::Error> {
-        let mut scratch_pool = self.1.pool().subpool();
+        let scratch_pool = self.1.pool().subpool();
         let err = unsafe {
             ((*(*self.0)).absent_directory.unwrap())(
                 path.as_ptr() as *const i8,
@@ -213,7 +214,7 @@ impl<'a> DirectoryEditor for WrapDirectoryEditor<'a> {
     }
 
     fn absent_file(&mut self, path: &str) -> Result<(), crate::Error> {
-        let mut scratch_pool = self.1.pool().subpool();
+        let scratch_pool = self.1.pool().subpool();
         let err = unsafe {
             ((*(*self.0)).absent_file.unwrap())(
                 path.as_ptr() as *const i8,
@@ -243,7 +244,7 @@ impl<'a> FileEditor for WrapFileEditor<'a> {
         base_checksum: Option<&str>,
     ) -> Result<Box<dyn for<'b> Fn(&'b mut TxDeltaWindow) -> Result<(), crate::Error>>, crate::Error>
     {
-        let mut pool = self.1.pool().subpool();
+        let pool = self.1.pool().subpool();
         let mut handler = None;
         let mut baton = std::ptr::null_mut();
         let err = unsafe {
@@ -269,7 +270,7 @@ impl<'a> FileEditor for WrapFileEditor<'a> {
     }
 
     fn change_prop(&mut self, name: &str, value: &[u8]) -> Result<(), crate::Error> {
-        let mut scratch_pool = self.1.pool().subpool();
+        let scratch_pool = self.1.pool().subpool();
         let value: crate::string::String = value.into();
         let err = unsafe {
             ((*(*self.0)).change_file_prop.unwrap())(
@@ -284,7 +285,7 @@ impl<'a> FileEditor for WrapFileEditor<'a> {
     }
 
     fn close(&mut self, text_checksum: Option<&str>) -> Result<(), crate::Error> {
-        let mut pool = self.1.pool().subpool();
+        let pool = self.1.pool().subpool();
         let err = unsafe {
             ((*(*self.0)).close_file.unwrap())(
                 self.1.as_mut_ptr(),
@@ -372,6 +373,7 @@ pub trait FileEditor {
 }
 
 pub struct TxDeltaWindow(apr::pool::PooledPtr<crate::generated::svn_txdelta_window_t>);
+unsafe impl Send for TxDeltaWindow {}
 
 impl TxDeltaWindow {
     pub fn as_ptr(&self) -> *const crate::generated::svn_txdelta_window_t {
@@ -427,6 +429,18 @@ impl TxDeltaWindow {
             );
         }
         Ok(())
+    }
+
+    pub fn dup(&self) -> Self {
+        Self(
+            apr::pool::PooledPtr::initialize(|pool| unsafe {
+                Ok::<_, crate::Error>(crate::generated::svn_txdelta_window_dup(
+                    self.0.as_ptr(),
+                    pool.as_mut_ptr(),
+                ))
+            })
+            .unwrap(),
+        )
     }
 }
 

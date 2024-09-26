@@ -41,7 +41,7 @@ impl Fs {
 
     pub fn path(&mut self) -> std::path::PathBuf {
         unsafe {
-            let mut pool = apr::pool::Pool::new();
+            let pool = apr::pool::Pool::new();
             let path = crate::generated::svn_fs_path(self.0.as_mut_ptr(), pool.as_mut_ptr());
             std::ffi::CStr::from_ptr(path)
                 .to_string_lossy()
@@ -52,7 +52,7 @@ impl Fs {
 
     pub fn youngest_revision(&mut self) -> Result<Revnum, Error> {
         unsafe {
-            let mut pool = apr::pool::Pool::new();
+            let pool = apr::pool::Pool::new();
             let mut youngest = 0;
             let err = crate::generated::svn_fs_youngest_rev(
                 &mut youngest,
@@ -68,7 +68,7 @@ impl Fs {
         &mut self,
         rev: Revnum,
     ) -> Result<std::collections::HashMap<String, Vec<u8>>, Error> {
-        let mut pool = apr::pool::Pool::new();
+        let pool = apr::pool::Pool::new();
         let mut props = std::ptr::null_mut();
         let err = unsafe {
             crate::generated::svn_fs_revision_proplist(
@@ -117,7 +117,7 @@ impl Fs {
 
     pub fn get_uuid(&mut self) -> Result<String, Error> {
         unsafe {
-            let mut pool = apr::pool::Pool::new();
+            let pool = apr::pool::Pool::new();
             let mut uuid = std::ptr::null();
             let err = crate::generated::svn_fs_get_uuid(
                 self.0.as_mut_ptr(),
@@ -169,7 +169,7 @@ impl Fs {
 pub fn fs_type(path: &std::path::Path) -> Result<String, Error> {
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     unsafe {
-        let mut pool = apr::pool::Pool::new();
+        let pool = apr::pool::Pool::new();
         let mut fs_type = std::ptr::null();
         let err = crate::generated::svn_fs_type(&mut fs_type, path.as_ptr(), pool.as_mut_ptr());
         Error::from_raw(err)?;

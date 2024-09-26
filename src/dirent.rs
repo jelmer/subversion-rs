@@ -29,7 +29,7 @@ impl<'a> Dirent<'a> {
     pub fn pooled(s: &str) -> Pooled<Self> {
         Pooled::initialize(|pool| {
             Ok::<_, crate::Error>(Self(
-                apr::strings::pstrdup(s, pool),
+                apr::strings::pstrdup(s, pool).as_ptr() as *const i8,
                 std::marker::PhantomData,
             ))
         })
@@ -74,7 +74,7 @@ impl<'a> Dirent<'a> {
     pub fn canonicalize_safe(
         &self,
     ) -> Result<(Pooled<Canonical<Self>>, Pooled<Self>), crate::Error> {
-        let mut pool = apr::pool::Pool::new();
+        let pool = apr::pool::Pool::new();
         unsafe {
             let mut canonical = std::ptr::null();
             let mut non_canonical = std::ptr::null();
@@ -147,7 +147,7 @@ impl<'a> Dirent<'a> {
     }
 
     pub fn split(&self) -> (Pooled<Self>, Pooled<Self>) {
-        let mut pool = apr::pool::Pool::new();
+        let pool = apr::pool::Pool::new();
         unsafe {
             let mut dirname = std::ptr::null();
             let mut basename = std::ptr::null();
