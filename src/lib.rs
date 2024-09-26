@@ -33,6 +33,42 @@ impl From<Revnum> for generated::svn_revnum_t {
     }
 }
 
+impl From<usize> for Revnum {
+    fn from(revnum: usize) -> Self {
+        Self(revnum as _)
+    }
+}
+
+impl From<u32> for Revnum {
+    fn from(revnum: u32) -> Self {
+        Self(revnum as _)
+    }
+}
+
+impl From<u64> for Revnum {
+    fn from(revnum: u64) -> Self {
+        Self(revnum as _)
+    }
+}
+
+impl From<Revnum> for usize {
+    fn from(revnum: Revnum) -> Self {
+        revnum.0 as _
+    }
+}
+
+impl From<Revnum> for u32 {
+    fn from(revnum: Revnum) -> Self {
+        revnum.0 as _
+    }
+}
+
+impl From<Revnum> for u64 {
+    fn from(revnum: Revnum) -> Self {
+        revnum.0 as _
+    }
+}
+
 impl apr::hash::IntoHashKey<'_> for &Revnum {
     fn into_hash_key(self) -> &'static [u8] {
         unsafe {
@@ -263,6 +299,7 @@ impl pyo3::FromPyObject<'_> for Depth {
 }
 
 pub struct CommitInfo(PooledPtr<generated::svn_commit_info_t>);
+unsafe impl Send for CommitInfo {}
 
 impl CommitInfo {
     pub fn revision(&self) -> Revnum {

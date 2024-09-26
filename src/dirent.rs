@@ -29,7 +29,7 @@ impl<'a> Dirent<'a> {
     pub fn pooled(s: &str) -> Pooled<Self> {
         Pooled::initialize(|pool| {
             Ok::<_, crate::Error>(Self(
-                apr::strings::pstrdup(s, pool),
+                apr::strings::pstrdup(s, pool).as_ptr() as *const i8,
                 std::marker::PhantomData,
             ))
         })
