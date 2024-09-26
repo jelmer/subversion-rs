@@ -396,18 +396,14 @@ impl Session {
         &mut self,
         path: &str,
         rev: Revnum,
+        dirent_fields: crate::DirentField,
     ) -> Result<(Revnum, HashMap<String, Dirent>, HashMap<String, Vec<u8>>), Error> {
         let path = std::ffi::CString::new(path).unwrap();
         let pool = Pool::new();
         let mut props = std::ptr::null_mut();
         let mut fetched_rev = 0;
         let mut dirents = std::ptr::null_mut();
-        let dirent_fields = crate::generated::SVN_DIRENT_KIND
-            | crate::generated::SVN_DIRENT_SIZE
-            | crate::generated::SVN_DIRENT_HAS_PROPS
-            | crate::generated::SVN_DIRENT_CREATED_REV
-            | crate::generated::SVN_DIRENT_TIME
-            | crate::generated::SVN_DIRENT_LAST_AUTHOR;
+        let dirent_fields = dirent_fields.bits();
         let err = unsafe {
             crate::generated::svn_ra_get_dir2(
                 self.0.as_mut_ptr(),
@@ -459,6 +455,7 @@ impl Session {
         rev: Revnum,
         patterns: Option<&[&str]>,
         depth: Depth,
+        dirent_fields: crate::DirentField,
         dirent_receiver: impl Fn(&str, &Dirent) -> Result<(), crate::Error>,
     ) -> Result<(), Error> {
         let path = std::ffi::CString::new(path).unwrap();
@@ -470,12 +467,7 @@ impl Session {
                     .map(|pattern| pattern.as_ptr() as _)
                     .collect()
             });
-        let dirent_fields = crate::generated::SVN_DIRENT_KIND
-            | crate::generated::SVN_DIRENT_SIZE
-            | crate::generated::SVN_DIRENT_HAS_PROPS
-            | crate::generated::SVN_DIRENT_CREATED_REV
-            | crate::generated::SVN_DIRENT_TIME
-            | crate::generated::SVN_DIRENT_LAST_AUTHOR;
+        let dirent_fields = dirent_fields.bits();
         let err = unsafe {
             crate::generated::svn_ra_list(
                 self.0.as_mut_ptr(),
