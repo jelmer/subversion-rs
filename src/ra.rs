@@ -1002,7 +1002,7 @@ impl Session {
             Revnum,
             &dyn crate::delta::Editor,
             &HashMap<String, Vec<u8>>,
-        ) -> Result<Box<dyn crate::delta::Editor>, Error>,
+        ) -> Result<(), Error>,
     ) -> Result<(), Error> {
         extern "C" fn wrap_replay_revstart_callback(
             revision: crate::generated::svn_revnum_t,

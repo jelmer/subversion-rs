@@ -1,6 +1,6 @@
 [package]
 name = "subversion"
-version = "0.0.7"
+version = "0.0.8"
 edition = "2021"
 authors = ["Jelmer Vernooĳ <jelmer@apache.org>"]
 repository = "https://github.com/jelmer/subversion-rs.git"
