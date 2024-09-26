@@ -48,6 +48,10 @@ impl Error {
         }
     }
 
+    pub fn location(&self) -> Option<(&str, i64)> {
+        self.file().map(|f| (f, self.line()))
+    }
+
     pub fn child(&self) -> Option<Self> {
         unsafe {
             let child = (*self.0).child;
@@ -91,6 +95,37 @@ impl Error {
         let err = self.0;
         std::mem::forget(self);
         err
+    }
+
+    pub fn best_message(&self) -> String {
+        let mut buf = [0; 1024];
+        unsafe {
+            let ret = generated::svn_err_best_message(self.0, buf.as_mut_ptr(), buf.len());
+            std::ffi::CStr::from_ptr(ret).to_string_lossy().into_owned()
+        }
+    }
+}
+
+pub fn symbolic_name(status: apr::Status) -> Option<&'static str> {
+    unsafe {
+        let name = crate::generated::svn_error_symbolic_name(status as i32);
+        if name.is_null() {
+            None
+        } else {
+            Some(std::ffi::CStr::from_ptr(name).to_str().unwrap())
+        }
+    }
+}
+
+pub fn strerror(status: apr::Status) -> Option<&'static str> {
+    let mut buf = [0; 1024];
+    unsafe {
+        let name = crate::generated::svn_strerror(status as i32, buf.as_mut_ptr(), buf.len());
+        if name.is_null() {
+            None
+        } else {
+            Some(std::ffi::CStr::from_ptr(name).to_str().unwrap())
+        }
     }
 }
 

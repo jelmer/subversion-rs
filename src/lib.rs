@@ -9,12 +9,14 @@ mod generated;
 pub mod io;
 pub mod mergeinfo;
 pub mod props;
+#[cfg(feature = "ra")]
 pub mod ra;
 pub mod repos;
 pub mod string;
 pub mod time;
 pub mod uri;
 pub mod version;
+#[cfg(feature = "wc")]
 pub mod wc;
 use crate::generated::{svn_opt_revision_t, svn_opt_revision_value_t};
 use apr::pool::PooledPtr;

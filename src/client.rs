@@ -1178,6 +1178,7 @@ impl Context {
         }
     }
 
+    #[cfg(feature = "ra")]
     pub fn open_raw_session(
         &mut self,
         url: &str,
