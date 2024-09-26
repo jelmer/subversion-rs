@@ -22,9 +22,21 @@ pub mod version;
 pub mod wc;
 use crate::generated::{svn_opt_revision_t, svn_opt_revision_value_t};
 use apr::pool::PooledPtr;
+use bitflags::bitflags;
 use std::str::FromStr;
 
 pub use version::Version;
+
+bitflags! {
+    pub struct DirentField: u32 {
+        const Kind = crate::generated::SVN_DIRENT_KIND;
+        const Size = crate::generated::SVN_DIRENT_SIZE;
+        const HasProps = crate::generated::SVN_DIRENT_HAS_PROPS;
+        const CreatedRevision = crate::generated::SVN_DIRENT_CREATED_REV;
+        const Time = crate::generated::SVN_DIRENT_TIME;
+        const LastAuthor = crate::generated::SVN_DIRENT_LAST_AUTHOR;
+    }
+}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
 pub struct Revnum(generated::svn_revnum_t);
