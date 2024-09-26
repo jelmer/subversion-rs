@@ -1,6 +1,8 @@
 pub mod auth;
+#[cfg(feature = "client")]
 pub mod client;
 pub mod config;
+#[cfg(feature = "delta")]
 pub mod delta;
 pub mod dirent;
 pub mod error;
@@ -658,6 +660,47 @@ impl LocationSegment {
         unsafe {
             let path = self.0.path;
             std::ffi::CStr::from_ptr(path).to_str().unwrap()
+        }
+    }
+}
+
+#[cfg(any(feature = "ra", feature = "client"))]
+pub(crate) extern "C" fn wrap_commit_callback2(
+    commit_info: *const crate::generated::svn_commit_info_t,
+    baton: *mut std::ffi::c_void,
+    pool: *mut apr::apr_pool_t,
+) -> *mut crate::generated::svn_error_t {
+    unsafe {
+        let callback = baton as *mut &mut dyn FnMut(&crate::CommitInfo) -> Result<(), Error>;
+        let mut callback = Box::from_raw(callback);
+        match callback(&crate::CommitInfo(PooledPtr::in_pool(
+            std::rc::Rc::new(apr::pool::Pool::from_raw(pool)),
+            commit_info as *mut crate::generated::svn_commit_info_t,
+        ))) {
+            Ok(()) => std::ptr::null_mut(),
+            Err(mut err) => err.as_mut_ptr(),
+        }
+    }
+}
+
+#[cfg(any(feature = "ra", feature = "client"))]
+pub(crate) extern "C" fn wrap_log_entry_receiver(
+    baton: *mut std::ffi::c_void,
+    log_entry: *mut crate::generated::svn_log_entry_t,
+    pool: *mut apr::apr_pool_t,
+) -> *mut crate::generated::svn_error_t {
+    unsafe {
+        let callback = baton as *mut &mut dyn FnMut(&LogEntry) -> Result<(), Error>;
+        let mut callback = Box::from_raw(callback);
+        let pool = apr::pool::Pool::from_raw(pool);
+        let ret = callback(&LogEntry(apr::pool::PooledPtr::in_pool(
+            std::rc::Rc::new(pool),
+            log_entry,
+        )));
+        if let Err(mut err) = ret {
+            err.as_mut_ptr()
+        } else {
+            std::ptr::null_mut()
         }
     }
 }

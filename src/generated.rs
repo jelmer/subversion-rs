@@ -6,6 +6,7 @@
 #![allow(clippy::upper_case_acronyms)]
 include!(concat!(env!("OUT_DIR"), "/subversion.rs"));
 
+#[allow(unused_imports)]
 use apr::apr_byte_t;
 use apr::apr_file_t;
 use apr::apr_finfo_t;
