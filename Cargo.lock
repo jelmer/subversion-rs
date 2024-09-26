@@ -461,10 +461,11 @@ checksum = "3c5e1a9a646d36c3599cd173a41282daf47c44583ad367b8e6837255952e5c67"
 
 [[package]]
 name = "subversion"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "apr",
  "bindgen",
+ "bitflags",
  "ctor",
  "lazy_static",
  "pyo3",
