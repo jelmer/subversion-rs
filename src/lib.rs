@@ -585,7 +585,9 @@ impl Lock {
     pub fn dup(&self) -> Self {
         Self(
             apr::pool::PooledPtr::initialize(|pool| {
-                Ok::<_, Error>(unsafe { crate::generated::svn_lock_dup(self.0.as_ptr(), pool.as_mut_ptr()) })
+                Ok::<_, Error>(unsafe {
+                    crate::generated::svn_lock_dup(self.0.as_ptr(), pool.as_mut_ptr())
+                })
             })
             .unwrap(),
         )
