@@ -53,7 +53,7 @@ impl AuthBaton {
         let realm = std::ffi::CString::new(realm).unwrap();
         let mut cred = std::ptr::null_mut();
         let mut state = std::ptr::null_mut();
-        let mut pool = apr::pool::Pool::new();
+        let pool = apr::pool::Pool::new();
         unsafe {
             let err = crate::generated::svn_auth_first_credentials(
                 &mut cred,
@@ -85,7 +85,7 @@ impl AuthBaton {
             .map(|s| std::ffi::CString::new(s).unwrap())
             .map_or_else(std::ptr::null, |p| p.as_ptr());
         let err = std::ptr::null_mut();
-        let mut pool = apr::pool::Pool::new();
+        let pool = apr::pool::Pool::new();
         unsafe {
             crate::generated::svn_auth_forget_credentials(
                 self.0.as_mut_ptr(),
@@ -136,7 +136,7 @@ pub struct IterState<C: Credentials>(PooledPtr<crate::generated::svn_auth_iterst
 
 impl<C: Credentials> IterState<C> {
     pub fn save_credentials(&mut self) -> Result<(), Error> {
-        let mut pool = apr::pool::Pool::new();
+        let pool = apr::pool::Pool::new();
         let err = unsafe {
             crate::generated::svn_auth_save_credentials(self.0.as_mut_ptr(), pool.as_mut_ptr())
         };
@@ -146,7 +146,7 @@ impl<C: Credentials> IterState<C> {
 
     fn next_credentials(&mut self) -> Result<Option<C>, Error> {
         let mut cred = std::ptr::null_mut();
-        let mut pool = apr::pool::Pool::new();
+        let pool = apr::pool::Pool::new();
         unsafe {
             let err = crate::generated::svn_auth_next_credentials(
                 &mut cred,
@@ -186,6 +186,7 @@ pub trait AsAuthProvider {
 
 #[allow(dead_code)]
 pub struct AuthProviderObject(PooledPtr<crate::generated::svn_auth_provider_object_t>);
+unsafe impl Send for AuthProviderObject {}
 
 pub fn get_username_provider() -> AuthProviderObject {
     let mut auth_provider = std::ptr::null_mut();
@@ -229,26 +230,45 @@ pub fn get_ssl_client_cert_file_provider() -> AuthProviderObject {
     )
 }
 
+pub struct SslClientCertCredentials(crate::generated::svn_auth_cred_ssl_client_cert_t);
+unsafe impl Send for SslClientCertCredentials {}
+
+extern "C" fn wrap_client_cert_prompt_fn(cred: *mut *mut crate::generated::svn_auth_cred_ssl_client_cert_t, baton: *mut std::ffi::c_void, realmstring: *const std::ffi::c_char, may_save: crate::generated::svn_boolean_t, _pool: *mut apr::apr_pool_t) -> *mut crate::generated::svn_error_t {
+    let f = unsafe { &*(baton as *const &dyn Fn(&str, bool) -> Result<SslClientCertCredentials, crate::Error>) };
+    let realm = unsafe { std::ffi::CStr::from_ptr(realmstring).to_str().unwrap() };
+    f(realm, may_save != 0)
+        .map(|creds| {
+            unsafe { *cred = Box::into_raw(Box::new(creds.0)) };
+            std::ptr::null_mut()
+        })
+        .unwrap_or_else(|e| unsafe { e.into_raw() })
+}
+
+pub fn get_ssl_client_cert_prompt_provider(
+    prompt_fn: &impl Fn(&str, bool) -> Result<SslClientCertCredentials, crate::Error>,
+    retry_limit: usize,
+) -> AuthProviderObject {
+    let mut auth_provider = std::ptr::null_mut();
+
+    AuthProviderObject(
+        PooledPtr::initialize(|pool| unsafe {
+            crate::generated::svn_auth_get_ssl_client_cert_prompt_provider(
+                &mut auth_provider,
+                Some(wrap_client_cert_prompt_fn),
+                prompt_fn as *const _ as *mut std::ffi::c_void,
+                retry_limit.try_into().unwrap(),
+                pool.as_mut_ptr(),
+            );
+            Ok::<_, Error>(auth_provider)
+        })
+        .unwrap(),
+    )
+}
+
 pub fn get_ssl_client_cert_pw_file_provider(
     prompt_fn: &impl Fn(&str) -> Result<bool, crate::Error>,
 ) -> AuthProviderObject {
     let mut auth_provider = std::ptr::null_mut();
-
-    extern "C" fn wrap_plaintext_passphrase_prompt(
-        may_save_plaintext: *mut crate::generated::svn_boolean_t,
-        realmstring: *const std::ffi::c_char,
-        baton: *mut std::ffi::c_void,
-        _pool: *mut apr::apr_pool_t,
-    ) -> *mut crate::generated::svn_error_t {
-        let f = unsafe { &*(baton as *const &dyn Fn(&str) -> Result<bool, crate::Error>) };
-        let realm = unsafe { std::ffi::CStr::from_ptr(realmstring).to_str().unwrap() };
-        f(realm)
-            .map(|b| {
-                unsafe { *may_save_plaintext = if b { 1 } else { 0 } };
-                std::ptr::null_mut()
-            })
-            .unwrap_or_else(|e| unsafe { e.into_raw() })
-    }
 
     AuthProviderObject(
         PooledPtr::initialize(|pool| unsafe {
@@ -263,6 +283,8 @@ pub fn get_ssl_client_cert_pw_file_provider(
         .unwrap(),
     )
 }
+
+
 
 pub fn get_simple_prompt_provider(
     prompt_fn: &impl Fn(&str, &str, bool) -> Result<SimpleCredentials, crate::Error>,
@@ -349,12 +371,7 @@ pub fn get_username_prompt_provider(
     )
 }
 
-pub fn get_simple_provider(
-    plaintext_prompt_func: &impl Fn(&str) -> Result<bool, crate::Error>,
-) -> AuthProviderObject {
-    let mut auth_provider = std::ptr::null_mut();
-
-    extern "C" fn wrap_plaintext_prompt(
+    extern "C" fn wrap_plaintext_passphrase_prompt(
         may_save_plaintext: *mut crate::generated::svn_boolean_t,
         realmstring: *const std::ffi::c_char,
         baton: *mut std::ffi::c_void,
@@ -370,11 +387,18 @@ pub fn get_simple_provider(
             .unwrap_or_else(|e| unsafe { e.into_raw() })
     }
 
+
+
+pub fn get_simple_provider(
+    plaintext_prompt_func: &impl Fn(&str) -> Result<bool, crate::Error>,
+) -> AuthProviderObject {
+    let mut auth_provider = std::ptr::null_mut();
+
     AuthProviderObject(
         PooledPtr::initialize(|pool| unsafe {
             crate::generated::svn_auth_get_simple_provider2(
                 &mut auth_provider,
-                Some(wrap_plaintext_prompt),
+                Some(wrap_plaintext_passphrase_prompt),
                 plaintext_prompt_func as *const _ as *mut std::ffi::c_void,
                 pool.as_mut_ptr(),
             );
@@ -391,7 +415,7 @@ pub fn get_platform_specific_provider(
     let mut auth_provider = std::ptr::null_mut();
     let provider_name = std::ffi::CString::new(provider_name).unwrap();
     let provider_type = std::ffi::CString::new(provider_type).unwrap();
-    let mut pool = apr::pool::Pool::new();
+    let pool = apr::pool::Pool::new();
     let err = unsafe {
         crate::generated::svn_auth_get_platform_specific_provider(
             &mut auth_provider,
@@ -405,4 +429,23 @@ pub fn get_platform_specific_provider(
     Ok(AuthProviderObject(unsafe {
         PooledPtr::in_pool(pool, auth_provider)
     }))
+}
+
+pub fn get_platform_specific_client_providers() -> Result<Vec<AuthProviderObject>, Error> {
+    let pool = std::rc::Rc::new(apr::pool::Pool::new());
+    let mut providers = std::ptr::null_mut();
+    let err = unsafe {
+        crate::generated::svn_auth_get_platform_specific_client_providers(
+            &mut providers,
+            // TODO: pass in config
+            std::ptr::null_mut(),
+            pool.as_mut_ptr(),
+        )
+    };
+    Error::from_raw(err)?;
+    let providers = unsafe { apr::tables::ArrayHeader::<*mut crate::generated::svn_auth_provider_object_t>::from_raw_parts(&pool, providers) };
+    Ok(providers
+        .iter()
+        .map(|p| AuthProviderObject(unsafe { PooledPtr::in_pool(pool.clone(), p) }))
+        .collect())
 }
