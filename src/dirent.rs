@@ -3,11 +3,11 @@ use crate::Canonical;
 use crate::Error;
 use apr::pool::Pooled;
 
-pub struct Dirent<'a>(*const i8, std::marker::PhantomData<&'a ()>);
+pub struct Dirent<'a>(*const std::ffi::c_char, std::marker::PhantomData<&'a ()>);
 
-impl ToString for Dirent<'_> {
-    fn to_string(&self) -> String {
-        self.as_str().to_string()
+impl std::fmt::Display for Dirent<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.as_str().fmt(f)
     }
 }
 
@@ -281,6 +281,40 @@ impl<'a> From<Dirent<'a>> for std::path::PathBuf {
     }
 }
 
+pub trait AsCanonicalDirent<'a> {
+    fn as_canonical_dirent(self, scratch_pool: &mut apr::pool::Pool) -> Canonical<Dirent<'a>>;
+}
+
+impl<'a> AsCanonicalDirent<'a> for &str {
+    fn as_canonical_dirent(self, scratch_pool: &mut apr::pool::Pool) -> Canonical<Dirent<'a>> {
+        Dirent::pooled(self).canonicalize_in(scratch_pool)
+    }
+}
+
+impl<'a> AsCanonicalDirent<'a> for &std::path::PathBuf {
+    fn as_canonical_dirent(self, scratch_pool: &mut apr::pool::Pool) -> Canonical<Dirent<'a>> {
+        Dirent::pooled(self.to_str().unwrap()).canonicalize_in(scratch_pool)
+    }
+}
+
+impl<'a> AsCanonicalDirent<'a> for Dirent<'a> {
+    fn as_canonical_dirent(self, scratch_pool: &mut apr::pool::Pool) -> Canonical<Dirent<'a>> {
+        self.canonicalize_in(scratch_pool)
+    }
+}
+
+impl<'a> AsCanonicalDirent<'a> for Canonical<Dirent<'a>> {
+    fn as_canonical_dirent(self, _scratch_pool: &mut apr::pool::Pool) -> Canonical<Dirent<'a>> {
+        self
+    }
+}
+
+impl<'a> AsCanonicalDirent<'a> for &'a std::path::Path {
+    fn as_canonical_dirent(self, scratch_pool: &mut apr::pool::Pool) -> Canonical<Dirent<'a>> {
+        Dirent::pooled(self.to_str().unwrap()).canonicalize_in(scratch_pool)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -313,39 +347,5 @@ mod tests {
         let result_path = child.is_under_root(&root).unwrap();
         assert!(result_path.is_some());
         assert_eq!(*super::Dirent::pooled("/foo/bar"), **result_path.unwrap());
-    }
-}
-
-pub trait AsCanonicalDirent<'a> {
-    fn as_canonical_dirent(self, scratch_pool: &mut apr::pool::Pool) -> Canonical<Dirent<'a>>;
-}
-
-impl<'a> AsCanonicalDirent<'a> for &str {
-    fn as_canonical_dirent(self, scratch_pool: &mut apr::pool::Pool) -> Canonical<Dirent<'a>> {
-        Dirent::pooled(self).canonicalize_in(scratch_pool)
-    }
-}
-
-impl<'a> AsCanonicalDirent<'a> for &std::path::PathBuf {
-    fn as_canonical_dirent(self, scratch_pool: &mut apr::pool::Pool) -> Canonical<Dirent<'a>> {
-        Dirent::pooled(self.to_str().unwrap()).canonicalize_in(scratch_pool)
-    }
-}
-
-impl<'a> AsCanonicalDirent<'a> for Dirent<'a> {
-    fn as_canonical_dirent(self, scratch_pool: &mut apr::pool::Pool) -> Canonical<Dirent<'a>> {
-        self.canonicalize_in(scratch_pool)
-    }
-}
-
-impl<'a> AsCanonicalDirent<'a> for Canonical<Dirent<'a>> {
-    fn as_canonical_dirent(self, _scratch_pool: &mut apr::pool::Pool) -> Canonical<Dirent<'a>> {
-        self
-    }
-}
-
-impl<'a> AsCanonicalDirent<'a> for &'a std::path::Path {
-    fn as_canonical_dirent(self, scratch_pool: &mut apr::pool::Pool) -> Canonical<Dirent<'a>> {
-        Dirent::pooled(self.to_str().unwrap()).canonicalize_in(scratch_pool)
     }
 }
