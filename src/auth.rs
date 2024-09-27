@@ -465,7 +465,7 @@ pub fn get_ssl_client_cert_prompt_provider(
 }
 
 pub fn get_ssl_client_cert_pw_file_provider(
-    prompt_fn: &impl Fn(&str) -> Result<bool, crate::Error>,
+    prompt_fn: Option<&impl Fn(&str) -> Result<bool, crate::Error>>,
 ) -> AuthProvider {
     let mut auth_provider = std::ptr::null_mut();
 
@@ -473,8 +473,16 @@ pub fn get_ssl_client_cert_pw_file_provider(
         PooledPtr::initialize(|pool| unsafe {
             crate::generated::svn_auth_get_ssl_client_cert_pw_file_provider2(
                 &mut auth_provider,
-                Some(wrap_plaintext_passphrase_prompt),
-                prompt_fn as *const _ as *mut std::ffi::c_void,
+                if prompt_fn.is_some() {
+                    Some(wrap_plaintext_passphrase_prompt)
+                } else {
+                    None
+                },
+                if let Some(f) = prompt_fn {
+                    f as *const _ as *mut std::ffi::c_void
+                } else {
+                    std::ptr::null_mut()
+                },
                 pool.as_mut_ptr(),
             );
             Ok::<_, Error>(auth_provider)
@@ -594,7 +602,7 @@ extern "C" fn wrap_plaintext_passphrase_prompt(
 }
 
 pub fn get_simple_provider(
-    plaintext_prompt_func: &impl Fn(&str) -> Result<bool, crate::Error>,
+    plaintext_prompt_func: Option<&impl Fn(&str) -> Result<bool, crate::Error>>,
 ) -> AuthProvider {
     let mut auth_provider = std::ptr::null_mut();
 
@@ -602,8 +610,16 @@ pub fn get_simple_provider(
         PooledPtr::initialize(|pool| unsafe {
             crate::generated::svn_auth_get_simple_provider2(
                 &mut auth_provider,
-                Some(wrap_plaintext_passphrase_prompt),
-                plaintext_prompt_func as *const _ as *mut std::ffi::c_void,
+                if plaintext_prompt_func.is_some() {
+                    Some(wrap_plaintext_passphrase_prompt)
+                } else {
+                    None
+                },
+                if let Some(f) = plaintext_prompt_func {
+                    f as *const _ as *mut std::ffi::c_void
+                } else {
+                    std::ptr::null_mut()
+                },
                 pool.as_mut_ptr(),
             );
             Ok::<_, Error>(auth_provider)
