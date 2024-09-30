@@ -14,6 +14,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+    - name: Update apt
+      run: sudo apt update
     - name: Install apr
       run: sudo apt install -y libapr1-dev libaprutil1-dev libsvn-dev pkg-config libutf8proc-dev libsqlite3-dev subversion
       # Work around https://bugs.debian.org/1055242
