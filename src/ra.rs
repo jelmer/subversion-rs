@@ -874,7 +874,7 @@ impl Session {
     pub fn lock(
         &mut self,
         path_revs: &HashMap<String, Revnum>,
-        commnt: &str,
+        comment: &str,
         steal_lock: bool,
         mut lock_func: impl Fn(&str, bool, &crate::Lock, Option<&Error>) -> Result<(), Error>,
     ) -> Result<(), Error> {
@@ -885,12 +885,12 @@ impl Session {
         for (k, v) in path_revs.iter() {
             hash.set(k, &v.0);
         }
-        let commnt = std::ffi::CString::new(commnt).unwrap();
+        let comment = std::ffi::CString::new(comment).unwrap();
         let err = unsafe {
             crate::generated::svn_ra_lock(
                 self.0.as_mut_ptr(),
                 hash.as_mut_ptr(),
-                commnt.as_ptr(),
+                comment.as_ptr(),
                 steal_lock.into(),
                 Some(wrap_lock_func),
                 &mut lock_func as *mut _ as *mut std::ffi::c_void,
