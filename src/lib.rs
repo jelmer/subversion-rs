@@ -159,7 +159,7 @@ impl pyo3::FromPyObject<'_> for Revision {
             return Revision::from_str(&rev).map_err(|e| {
                 pyo3::exceptions::PyValueError::new_err(format!("Invalid revision: {}", e))
             });
-        } else if ob.is_instance_of::<pyo3::types::PyLong>() {
+        } else if ob.is_instance_of::<pyo3::types::PyInt>() {
             let rev = ob.extract::<i64>()?;
             return Ok(Revision::Number(Revnum::from_raw(rev).unwrap()));
         } else {
