@@ -262,15 +262,9 @@ impl From<Dirent<'_>> for &str {
     }
 }
 
-impl<'a> From<&'a str> for Dirent<'a> {
-    fn from(s: &'a str) -> Self {
+impl<'a> From<&'a std::ffi::CStr> for Dirent<'a> {
+    fn from(s: &'a std::ffi::CStr) -> Self {
         Self(s.as_ptr() as *const i8, std::marker::PhantomData)
-    }
-}
-
-impl<'a> From<&'a std::path::Path> for Dirent<'a> {
-    fn from(path: &'a std::path::Path) -> Self {
-        Self::from(path.to_str().unwrap())
     }
 }
 
