@@ -1445,7 +1445,8 @@ mod tests {
         let mut repos = crate::repos::Repos::create(&repo_path).unwrap();
         assert_eq!(repos.path(), td.path().join("repo"));
         let mut ctx = Context::new().unwrap();
-        let dirent = crate::dirent::Dirent::from(repo_path.to_str().unwrap());
+        let repo_path = std::ffi::CString::new(repo_path.to_str().unwrap()).unwrap();
+        let dirent = crate::dirent::Dirent::from(repo_path.as_c_str());
         let url = dirent.canonicalize().to_file_url().unwrap();
         let revnum = ctx
             .checkout(
