@@ -35,7 +35,7 @@ bindgen = "0.71"
 system-deps = "7.0"
 
 [dev-dependencies]
-tempfile = "3.16.0"
+tempfile = "3.17.0"
 
 [package.metadata.system-deps]
 libsvn_client = { version = ">=1.14", feature = "client" }
