@@ -1,6 +1,7 @@
+---
 name: Rust
 
-on:
+"on":
   push:
   pull_request:
 
@@ -13,25 +14,27 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
-    - name: Update apt
-      run: sudo apt update
-    - name: Install apr
-      run: sudo apt install -y libapr1-dev libaprutil1-dev libsvn-dev pkg-config libutf8proc-dev libsqlite3-dev subversion
-      # Work around https://bugs.debian.org/1055242
-    - name: "Fix up Version: field in Subversion .pc files"
-      run: |
-        svnversion=$(svn --version | grep -oP 'svn, version \K\d+\.\d+\.\d+')
-        sudo sed -i "s/^Version: \$/Version: $svnversion/" /usr/lib/*/pkgconfig/libsvn_*.pc
-    - name: Install cargo-all-features
-      run: cargo install cargo-all-features
-    - name: Build
-      run: cargo build-all-features --verbose
-      env:
-        RUSTFLAGS: -Dwarnings
-    - name: Run tests
-      run: cargo test-all-features --verbose
-      env:
-        RUSTFLAGS: -Dwarnings
-    - name: Check formatting
-      run: cargo fmt -- --check
+      - uses: actions/checkout@v4
+      - name: Update apt
+        run: sudo apt update
+      - name: Install apr
+        run: sudo apt install -y libapr1-dev libaprutil1-dev libsvn-dev \
+          pkg-config libutf8proc-dev libsqlite3-dev subversion
+        # Work around https://bugs.debian.org/1055242
+      - name: "Fix up Version: field in Subversion .pc files"
+        run: |
+          svnversion=$(svn --version | grep -oP 'svn, version \K\d+\.\d+\.\d+')
+          sudo sed -i "s/^Version: \$/Version: $svnversion/" \
+            /usr/lib/*/pkgconfig/libsvn_*.pc
+      - name: Install cargo-all-features
+        run: cargo install cargo-all-features
+      - name: Build
+        run: cargo build-all-features --verbose
+        env:
+          RUSTFLAGS: -Dwarnings
+      - name: Run tests
+        run: cargo test-all-features --verbose
+        env:
+          RUSTFLAGS: -Dwarnings
+      - name: Check formatting
+        run: cargo fmt -- --check
