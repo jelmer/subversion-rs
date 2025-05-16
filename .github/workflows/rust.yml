@@ -17,7 +17,9 @@ jobs:
     - name: Update apt
       run: sudo apt update
     - name: Install apr
-      run: sudo apt install -y libapr1-dev libaprutil1-dev libsvn-dev pkg-config libutf8proc-dev libsqlite3-dev subversion
+      run: |
+        sudo apt update -y
+        sudo apt install -y libapr1-dev libaprutil1-dev libsvn-dev pkg-config libutf8proc-dev libsqlite3-dev subversion
       # Work around https://bugs.debian.org/1055242
     - name: "Fix up Version: field in Subversion .pc files"
       run: |
