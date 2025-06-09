@@ -31,7 +31,7 @@ wc = ["delta"]
 delta = []
 
 [build-dependencies]
-bindgen = "0.71"
+bindgen = "0.72"
 system-deps = "7.0"
 
 [dev-dependencies]
