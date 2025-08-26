@@ -46,7 +46,7 @@ impl<'a> Uri<'a> {
     }
 
     pub fn is_root(&self, length: usize) -> bool {
-        unsafe { crate::generated::svn_uri_is_root(self.as_ptr(), length) != 0 }
+        unsafe { subversion_sys::svn_uri_is_root(self.as_ptr(), length) != 0 }
     }
 
     pub fn as_ptr(&self) -> *const i8 {
@@ -56,7 +56,7 @@ impl<'a> Uri<'a> {
     pub fn dirname(&self) -> Pooled<Self> {
         Pooled::initialize(|pool| unsafe {
             Ok::<_, crate::Error>(Self(
-                crate::generated::svn_uri_dirname(self.as_ptr(), pool.as_mut_ptr()) as *const i8,
+                subversion_sys::svn_uri_dirname(self.as_ptr(), pool.as_mut_ptr()) as *const i8,
                 std::marker::PhantomData,
             ))
         })
@@ -66,7 +66,7 @@ impl<'a> Uri<'a> {
     pub fn basename(&self) -> Pooled<Self> {
         Pooled::initialize(|pool| unsafe {
             Ok::<_, crate::Error>(Self(
-                crate::generated::svn_uri_basename(self.as_ptr(), pool.as_mut_ptr()),
+                subversion_sys::svn_uri_basename(self.as_ptr(), pool.as_mut_ptr()),
                 std::marker::PhantomData,
             ))
         })
@@ -78,7 +78,7 @@ impl<'a> Uri<'a> {
         unsafe {
             let mut dirname = std::ptr::null();
             let mut basename = std::ptr::null();
-            crate::generated::svn_uri_split(
+            subversion_sys::svn_uri_split(
                 &mut dirname,
                 &mut basename,
                 self.as_ptr(),
@@ -95,7 +95,7 @@ impl<'a> Uri<'a> {
     pub fn canonicalize(&self) -> Pooled<Canonical<Self>> {
         Pooled::initialize(|pool| unsafe {
             Ok::<_, crate::Error>(Canonical(Self(
-                crate::generated::svn_uri_canonicalize(self.as_ptr(), pool.as_mut_ptr()),
+                subversion_sys::svn_uri_canonicalize(self.as_ptr(), pool.as_mut_ptr()),
                 std::marker::PhantomData,
             )))
         })
@@ -107,7 +107,7 @@ impl<'a> Uri<'a> {
         'a: 'b,
     {
         Canonical(Self(
-            unsafe { crate::generated::svn_uri_canonicalize(self.as_ptr(), pool.as_mut_ptr()) },
+            unsafe { subversion_sys::svn_uri_canonicalize(self.as_ptr(), pool.as_mut_ptr()) },
             std::marker::PhantomData,
         ))
     }
@@ -119,7 +119,7 @@ impl<'a> Uri<'a> {
         unsafe {
             let mut canonical = std::ptr::null();
             let mut non_canonical = std::ptr::null();
-            let err = crate::generated::svn_uri_canonicalize_safe(
+            let err = subversion_sys::svn_uri_canonicalize_safe(
                 &mut canonical,
                 &mut non_canonical,
                 self.as_ptr(),
@@ -140,10 +140,8 @@ impl<'a> Uri<'a> {
 
     pub fn is_canonical(&self) -> bool {
         unsafe {
-            crate::generated::svn_uri_is_canonical(
-                self.as_ptr(),
-                apr::pool::Pool::new().as_mut_ptr(),
-            ) != 0
+            subversion_sys::svn_uri_is_canonical(self.as_ptr(), apr::pool::Pool::new().as_mut_ptr())
+                != 0
         }
     }
 
@@ -158,7 +156,7 @@ impl<'a> Uri<'a> {
     fn to_dirent<'b>(&self) -> Result<Pooled<Dirent<'b>>, crate::Error> {
         Pooled::initialize(|pool| unsafe {
             let mut dirent = std::ptr::null();
-            let err = crate::generated::svn_uri_get_dirent_from_file_url(
+            let err = subversion_sys::svn_uri_get_dirent_from_file_url(
                 &mut dirent,
                 self.as_ptr(),
                 pool.as_mut_ptr(),

@@ -6,6 +6,9 @@ fn create_svn_bindings(
     include_paths: &[&std::path::Path],
 ) {
     let client_feature_enabled = std::env::var("CARGO_FEATURE_CLIENT").is_ok();
+    let delta_feature_enabled = std::env::var("CARGO_FEATURE_DELTA").is_ok();
+    let ra_feature_enabled = std::env::var("CARGO_FEATURE_RA").is_ok();
+    let wc_feature_enabled = std::env::var("CARGO_FEATURE_WC").is_ok();
 
     let mut builder = bindgen::Builder::default()
         .header(svn_path.join("svn_dirent_uri.h").to_str().unwrap())
@@ -16,11 +19,35 @@ fn create_svn_bindings(
         .header(svn_path.join("svn_time.h").to_str().unwrap())
         .header(svn_path.join("svn_types.h").to_str().unwrap())
         .header(svn_path.join("svn_types_impl.h").to_str().unwrap())
-        .header(svn_path.join("svn_wc.h").to_str().unwrap())
         .header(svn_path.join("svn_props.h").to_str().unwrap())
+        .header(svn_path.join("svn_fs.h").to_str().unwrap())
+        .header(svn_path.join("svn_auth.h").to_str().unwrap())
+        .header(svn_path.join("svn_config.h").to_str().unwrap())
+        .header(svn_path.join("svn_mergeinfo.h").to_str().unwrap())
+        .header(svn_path.join("svn_io.h").to_str().unwrap())
         .allowlist_file(".*/svn_.*.h")
         .blocklist_type("apr_.*")
         .derive_default(true)
+        .raw_line("use apr::apr_file_t;")
+        .raw_line("use apr::apr_finfo_t;")
+        .raw_line("use apr::apr_getopt_t;")
+        .raw_line("use apr::apr_int64_t;")
+        .raw_line("use apr::apr_off_t;")
+        .raw_line("use apr::apr_pool_t;")
+        .raw_line("use apr::apr_size_t;")
+        .raw_line("use apr::apr_status_t;")
+        .raw_line("use apr::apr_time_t;")
+        .raw_line("use apr::apr_int32_t;")
+        .raw_line("use apr::apr_uint32_t;")
+        .raw_line("use apr::apr_fileperms_t;")
+        .raw_line("use apr::apr_proc_t;")
+        .raw_line("use apr::apr_uint64_t;")
+        .raw_line("use apr::apr_dir_t;")
+        .raw_line("use apr::hash::apr_hash_t;")
+        .raw_line("use apr::tables::apr_array_header_t;")
+        .raw_line("use apr::apr_getopt_option_t;")
+        .raw_line("use apr::apr_exit_why_e;")
+        .raw_line("use apr::apr_seek_where_t;")
         .clang_args(
             include_paths
                 .iter()
@@ -31,11 +58,23 @@ fn create_svn_bindings(
         builder = builder.header(svn_path.join("svn_client.h").to_str().unwrap());
     }
 
+    if wc_feature_enabled {
+        builder = builder.header(svn_path.join("svn_wc.h").to_str().unwrap());
+    }
+
+    if ra_feature_enabled {
+        builder = builder.header(svn_path.join("svn_ra.h").to_str().unwrap());
+    }
+
+    if delta_feature_enabled {
+        builder = builder.header(svn_path.join("svn_delta.h").to_str().unwrap());
+    }
+
     // Generate bindings using bindgen
     let svn_bindings = builder.generate().expect("Failed to generate bindings");
 
     svn_bindings
-        .write_to_file(out_path.join("subversion.rs"))
+        .write_to_file(out_path.join("bindings.rs"))
         .expect("Failed to write bindings");
 }
 

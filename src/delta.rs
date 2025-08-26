@@ -2,11 +2,11 @@ use crate::Revnum;
 use apr::pool::Pool;
 
 pub fn version() -> crate::Version {
-    crate::Version(unsafe { crate::generated::svn_delta_version() })
+    crate::Version(unsafe { subversion_sys::svn_delta_version() })
 }
 
 pub struct WrapEditor(
-    pub(crate) *const crate::generated::svn_delta_editor_t,
+    pub(crate) *const subversion_sys::svn_delta_editor_t,
     pub(crate) apr::pool::PooledPtr<std::ffi::c_void>,
 );
 unsafe impl Send for WrapEditor {}
@@ -63,7 +63,7 @@ impl Editor for WrapEditor {
 }
 
 pub struct WrapDirectoryEditor<'a>(
-    pub(crate) &'a *const crate::generated::svn_delta_editor_t,
+    pub(crate) &'a *const subversion_sys::svn_delta_editor_t,
     pub(crate) apr::pool::PooledPtr<std::ffi::c_void>,
 );
 
@@ -228,13 +228,13 @@ impl<'a> DirectoryEditor for WrapDirectoryEditor<'a> {
 }
 
 pub struct WrapFileEditor<'a>(
-    &'a *const crate::generated::svn_delta_editor_t,
+    &'a *const subversion_sys::svn_delta_editor_t,
     apr::pool::PooledPtr<std::ffi::c_void>,
 );
 
 #[allow(dead_code)]
 pub struct WrapTxdeltaWindowHandler(
-    apr::pool::PooledPtr<crate::generated::svn_txdelta_window_handler_t>,
+    apr::pool::PooledPtr<subversion_sys::svn_txdelta_window_handler_t>,
     apr::pool::PooledPtr<std::ffi::c_void>,
 );
 
@@ -353,7 +353,7 @@ pub trait DirectoryEditor {
 
 pub fn noop_window_handler(window: &mut TxDeltaWindow) -> Result<(), crate::Error> {
     let err = unsafe {
-        crate::generated::svn_delta_noop_window_handler(window.as_mut_ptr(), std::ptr::null_mut())
+        subversion_sys::svn_delta_noop_window_handler(window.as_mut_ptr(), std::ptr::null_mut())
     };
     crate::Error::from_raw(err)?;
     Ok(())
@@ -372,15 +372,15 @@ pub trait FileEditor {
     fn close(&mut self, text_checksum: Option<&str>) -> Result<(), crate::Error>;
 }
 
-pub struct TxDeltaWindow(apr::pool::PooledPtr<crate::generated::svn_txdelta_window_t>);
+pub struct TxDeltaWindow(apr::pool::PooledPtr<subversion_sys::svn_txdelta_window_t>);
 unsafe impl Send for TxDeltaWindow {}
 
 impl TxDeltaWindow {
-    pub fn as_ptr(&self) -> *const crate::generated::svn_txdelta_window_t {
+    pub fn as_ptr(&self) -> *const subversion_sys::svn_txdelta_window_t {
         self.0.as_ptr()
     }
 
-    pub fn as_mut_ptr(&mut self) -> *mut crate::generated::svn_txdelta_window_t {
+    pub fn as_mut_ptr(&mut self) -> *mut subversion_sys::svn_txdelta_window_t {
         self.0.as_mut_ptr()
     }
 
@@ -403,7 +403,7 @@ impl TxDeltaWindow {
     pub fn compose(a: &Self, b: &Self) -> Self {
         Self(
             apr::pool::PooledPtr::initialize(|pool| unsafe {
-                Ok::<_, crate::Error>(crate::generated::svn_txdelta_compose_windows(
+                Ok::<_, crate::Error>(subversion_sys::svn_txdelta_compose_windows(
                     a.0.as_ptr(),
                     b.0.as_ptr(),
                     pool.as_mut_ptr(),
@@ -421,7 +421,7 @@ impl TxDeltaWindow {
         unsafe {
             target.resize(self.tview_len(), 0);
             let mut tlen = target.len() as apr::apr_size_t;
-            crate::generated::svn_txdelta_apply_instructions(
+            subversion_sys::svn_txdelta_apply_instructions(
                 self.0.as_mut_ptr(),
                 source.as_ptr() as *mut i8,
                 target.as_mut_ptr() as *mut i8,
@@ -434,7 +434,7 @@ impl TxDeltaWindow {
     pub fn dup(&self) -> Self {
         Self(
             apr::pool::PooledPtr::initialize(|pool| unsafe {
-                Ok::<_, crate::Error>(crate::generated::svn_txdelta_window_dup(
+                Ok::<_, crate::Error>(subversion_sys::svn_txdelta_window_dup(
                     self.0.as_ptr(),
                     pool.as_mut_ptr(),
                 ))
@@ -446,10 +446,10 @@ impl TxDeltaWindow {
 
 extern "C" fn wrap_editor_open_root(
     edit_baton: *mut std::ffi::c_void,
-    base_revision: crate::generated::svn_revnum_t,
+    base_revision: subversion_sys::svn_revnum_t,
     _pool: *mut apr::apr_pool_t,
     root_baton: *mut *mut std::ffi::c_void,
-) -> *mut crate::generated::svn_error_t {
+) -> *mut subversion_sys::svn_error_t {
     let editor: &mut dyn Editor = unsafe { *(edit_baton as *mut &mut dyn Editor) };
     match editor.open_root(Revnum::from_raw(base_revision).unwrap()) {
         Ok(mut root) => {
@@ -464,10 +464,10 @@ extern "C" fn wrap_editor_open_root(
 
 extern "C" fn wrap_editor_delete_entry(
     path: *const std::ffi::c_char,
-    revision: crate::generated::svn_revnum_t,
+    revision: subversion_sys::svn_revnum_t,
     parent_baton: *mut std::ffi::c_void,
     _pool: *mut apr::apr_pool_t,
-) -> *mut crate::generated::svn_error_t {
+) -> *mut subversion_sys::svn_error_t {
     let path = unsafe { std::ffi::CStr::from_ptr(path) };
     let parent: &mut dyn DirectoryEditor =
         unsafe { *(parent_baton as *mut &mut dyn DirectoryEditor) };
@@ -481,10 +481,10 @@ extern "C" fn wrap_editor_add_directory(
     path: *const std::ffi::c_char,
     parent_baton: *mut std::ffi::c_void,
     copyfrom_path: *const std::ffi::c_char,
-    copyfrom_revision: crate::generated::svn_revnum_t,
+    copyfrom_revision: subversion_sys::svn_revnum_t,
     _pool: *mut apr::apr_pool_t,
     child_baton: *mut *mut std::ffi::c_void,
-) -> *mut crate::generated::svn_error_t {
+) -> *mut subversion_sys::svn_error_t {
     let path = unsafe { std::ffi::CStr::from_ptr(path) };
     let copyfrom_path = if copyfrom_path.is_null() {
         None
@@ -514,10 +514,10 @@ extern "C" fn wrap_editor_add_directory(
 extern "C" fn wrap_editor_open_directory(
     path: *const std::ffi::c_char,
     parent_baton: *mut std::ffi::c_void,
-    base_revision: crate::generated::svn_revnum_t,
+    base_revision: subversion_sys::svn_revnum_t,
     _pool: *mut apr::apr_pool_t,
     child_baton: *mut *mut std::ffi::c_void,
-) -> *mut crate::generated::svn_error_t {
+) -> *mut subversion_sys::svn_error_t {
     let path = unsafe { std::ffi::CStr::from_ptr(path) };
     let parent: &mut dyn DirectoryEditor =
         unsafe { *(parent_baton as *mut &mut dyn DirectoryEditor) };
@@ -535,9 +535,9 @@ extern "C" fn wrap_editor_open_directory(
 extern "C" fn wrap_editor_change_dir_prop(
     baton: *mut std::ffi::c_void,
     name: *const std::ffi::c_char,
-    value: *const crate::generated::svn_string_t,
+    value: *const subversion_sys::svn_string_t,
     _pool: *mut apr::apr_pool_t,
-) -> *mut crate::generated::svn_error_t {
+) -> *mut subversion_sys::svn_error_t {
     let name = unsafe { std::ffi::CStr::from_ptr(name) };
     let value =
         unsafe { std::slice::from_raw_parts((*value).data as *const u8, (*value).len as usize) };
@@ -551,7 +551,7 @@ extern "C" fn wrap_editor_change_dir_prop(
 extern "C" fn wrap_editor_close_directory(
     baton: *mut std::ffi::c_void,
     _pool: *mut apr::apr_pool_t,
-) -> *mut crate::generated::svn_error_t {
+) -> *mut subversion_sys::svn_error_t {
     let editor: &mut dyn DirectoryEditor = unsafe { *(baton as *mut &mut dyn DirectoryEditor) };
     match editor.close() {
         Ok(()) => std::ptr::null_mut(),
@@ -563,7 +563,7 @@ extern "C" fn wrap_editor_absent_directory(
     path: *const std::ffi::c_char,
     parent_baton: *mut std::ffi::c_void,
     _pool: *mut apr::apr_pool_t,
-) -> *mut crate::generated::svn_error_t {
+) -> *mut subversion_sys::svn_error_t {
     let path = unsafe { std::ffi::CStr::from_ptr(path) };
     let parent: &mut dyn DirectoryEditor =
         unsafe { *(parent_baton as *mut &mut dyn DirectoryEditor) };
@@ -577,10 +577,10 @@ extern "C" fn wrap_editor_add_file(
     path: *const std::ffi::c_char,
     parent_baton: *mut std::ffi::c_void,
     copyfrom_path: *const std::ffi::c_char,
-    copyfrom_revision: crate::generated::svn_revnum_t,
+    copyfrom_revision: subversion_sys::svn_revnum_t,
     _pool: *mut apr::apr_pool_t,
     file_baton: *mut *mut std::ffi::c_void,
-) -> *mut crate::generated::svn_error_t {
+) -> *mut subversion_sys::svn_error_t {
     let path = unsafe { std::ffi::CStr::from_ptr(path) };
     let copyfrom_path = if copyfrom_path.is_null() {
         None
@@ -608,10 +608,10 @@ extern "C" fn wrap_editor_add_file(
 extern "C" fn wrap_editor_open_file(
     path: *const std::ffi::c_char,
     parent_baton: *mut std::ffi::c_void,
-    base_revision: crate::generated::svn_revnum_t,
+    base_revision: subversion_sys::svn_revnum_t,
     _pool: *mut apr::apr_pool_t,
     file_baton: *mut *mut std::ffi::c_void,
-) -> *mut crate::generated::svn_error_t {
+) -> *mut subversion_sys::svn_error_t {
     let path = unsafe { std::ffi::CStr::from_ptr(path) };
     let parent: &mut dyn DirectoryEditor =
         unsafe { *(parent_baton as *mut &mut dyn DirectoryEditor) };
@@ -628,9 +628,9 @@ extern "C" fn wrap_editor_apply_textdelta(
     file_baton: *mut std::ffi::c_void,
     base_checksum: *const std::ffi::c_char,
     _result_pool: *mut apr::apr_pool_t,
-    _handler: *mut crate::generated::svn_txdelta_window_handler_t,
+    _handler: *mut subversion_sys::svn_txdelta_window_handler_t,
     _baton: *mut *mut std::ffi::c_void,
-) -> *mut crate::generated::svn_error_t {
+) -> *mut subversion_sys::svn_error_t {
     let base_checksum = if base_checksum.is_null() {
         None
     } else {
@@ -648,9 +648,9 @@ extern "C" fn wrap_editor_apply_textdelta(
 extern "C" fn wrap_editor_change_file_prop(
     baton: *mut std::ffi::c_void,
     name: *const std::ffi::c_char,
-    value: *const crate::generated::svn_string_t,
+    value: *const subversion_sys::svn_string_t,
     _pool: *mut apr::apr_pool_t,
-) -> *mut crate::generated::svn_error_t {
+) -> *mut subversion_sys::svn_error_t {
     let name = unsafe { std::ffi::CStr::from_ptr(name) };
     let value =
         unsafe { std::slice::from_raw_parts((*value).data as *const u8, (*value).len as usize) };
@@ -665,7 +665,7 @@ extern "C" fn wrap_editor_close_file(
     baton: *mut std::ffi::c_void,
     text_checksum: *const std::ffi::c_char,
     _pool: *mut apr::apr_pool_t,
-) -> *mut crate::generated::svn_error_t {
+) -> *mut subversion_sys::svn_error_t {
     let text_checksum = if text_checksum.is_null() {
         None
     } else {
@@ -682,7 +682,7 @@ extern "C" fn wrap_editor_absent_file(
     text_checksum: *const std::ffi::c_char,
     file_baton: *mut std::ffi::c_void,
     _pooll: *mut apr::apr_pool_t,
-) -> *mut crate::generated::svn_error_t {
+) -> *mut subversion_sys::svn_error_t {
     let text_checksum = if text_checksum.is_null() {
         None
     } else {
@@ -698,7 +698,7 @@ extern "C" fn wrap_editor_absent_file(
 extern "C" fn wrap_editor_close_edit(
     edit_baton: *mut std::ffi::c_void,
     _pool: *mut apr::apr_pool_t,
-) -> *mut crate::generated::svn_error_t {
+) -> *mut subversion_sys::svn_error_t {
     let editor: &mut dyn Editor = unsafe { *(edit_baton as *mut &mut dyn Editor) };
     match editor.close() {
         Ok(()) => std::ptr::null_mut(),
@@ -709,7 +709,7 @@ extern "C" fn wrap_editor_close_edit(
 extern "C" fn wrap_editor_abort_edit(
     edit_baton: *mut std::ffi::c_void,
     _pool: *mut apr::apr_pool_t,
-) -> *mut crate::generated::svn_error_t {
+) -> *mut subversion_sys::svn_error_t {
     let editor: &mut dyn Editor = unsafe { *(edit_baton as *mut &mut dyn Editor) };
     match editor.abort() {
         Ok(()) => std::ptr::null_mut(),
@@ -719,9 +719,9 @@ extern "C" fn wrap_editor_abort_edit(
 
 extern "C" fn wrap_editor_set_target_revision(
     edit_baton: *mut std::ffi::c_void,
-    revision: crate::generated::svn_revnum_t,
+    revision: subversion_sys::svn_revnum_t,
     _pool: *mut apr::apr_pool_t,
-) -> *mut crate::generated::svn_error_t {
+) -> *mut subversion_sys::svn_error_t {
     let editor: &mut dyn Editor = unsafe { *(edit_baton as *mut &mut dyn Editor) };
     match editor.set_target_revision(Revnum::from_raw(revision).unwrap()) {
         Ok(()) => std::ptr::null_mut(),
@@ -730,8 +730,8 @@ extern "C" fn wrap_editor_set_target_revision(
 }
 
 #[no_mangle]
-pub(crate) static WRAP_EDITOR: crate::generated::svn_delta_editor_t =
-    crate::generated::svn_delta_editor_t {
+pub(crate) static WRAP_EDITOR: subversion_sys::svn_delta_editor_t =
+    subversion_sys::svn_delta_editor_t {
         open_root: Some(wrap_editor_open_root),
         delete_entry: Some(wrap_editor_delete_entry),
         add_directory: Some(wrap_editor_add_directory),

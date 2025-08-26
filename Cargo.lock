@@ -641,14 +641,22 @@ name = "subversion"
 version = "0.0.8"
 dependencies = [
  "apr",
- "bindgen",
  "bitflags",
  "ctor 0.5.0",
  "lazy_static",
  "pyo3",
- "system-deps",
+ "subversion-sys",
  "tempfile",
  "url",
+]
+
+[[package]]
+name = "subversion-sys"
+version = "0.0.8"
+dependencies = [
+ "apr",
+ "bindgen",
+ "system-deps",
 ]
 
 [[package]]

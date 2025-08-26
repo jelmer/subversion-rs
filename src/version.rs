@@ -1,17 +1,14 @@
-use crate::generated::svn_version_t;
+use subversion_sys::svn_version_t;
 pub struct Version(pub(crate) *const svn_version_t);
 
 impl Version {
     fn equal(&self, other: &Version) -> bool {
-        !matches!(
-            unsafe { crate::generated::svn_ver_equal(self.0, other.0) },
-            0
-        )
+        !matches!(unsafe { subversion_sys::svn_ver_equal(self.0, other.0) }, 0)
     }
 
     pub fn compatible(&self, other: &Version) -> bool {
         !matches!(
-            unsafe { crate::generated::svn_ver_compatible(self.0, other.0) },
+            unsafe { subversion_sys::svn_ver_compatible(self.0, other.0) },
             0
         )
     }

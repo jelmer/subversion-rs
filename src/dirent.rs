@@ -53,7 +53,7 @@ impl<'a> Dirent<'a> {
     pub fn canonicalize(&'_ self) -> Pooled<Canonical<Self>> {
         Pooled::initialize(|pool| unsafe {
             Ok::<_, crate::Error>(Canonical(Self(
-                crate::generated::svn_dirent_canonicalize(self.as_ptr(), pool.as_mut_ptr()),
+                subversion_sys::svn_dirent_canonicalize(self.as_ptr(), pool.as_mut_ptr()),
                 std::marker::PhantomData,
             )))
         })
@@ -66,7 +66,7 @@ impl<'a> Dirent<'a> {
     {
         unsafe {
             let canonical =
-                crate::generated::svn_dirent_canonicalize(self.as_ptr(), pool.as_mut_ptr());
+                subversion_sys::svn_dirent_canonicalize(self.as_ptr(), pool.as_mut_ptr());
             Canonical(Self(canonical, std::marker::PhantomData))
         }
     }
@@ -78,7 +78,7 @@ impl<'a> Dirent<'a> {
         unsafe {
             let mut canonical = std::ptr::null();
             let mut non_canonical = std::ptr::null();
-            let err = crate::generated::svn_dirent_canonicalize_safe(
+            let err = subversion_sys::svn_dirent_canonicalize_safe(
                 &mut canonical,
                 &mut non_canonical,
                 self.as_ptr(),
@@ -103,7 +103,7 @@ impl<'a> Dirent<'a> {
 
     pub fn is_canonical(&self) -> bool {
         unsafe {
-            crate::generated::svn_dirent_is_canonical(
+            subversion_sys::svn_dirent_is_canonical(
                 self.as_ptr(),
                 apr::pool::Pool::new().as_mut_ptr(),
             ) != 0
@@ -119,17 +119,17 @@ impl<'a> Dirent<'a> {
     }
 
     pub fn is_root(&self, length: usize) -> bool {
-        unsafe { crate::generated::svn_dirent_is_root(self.as_ptr(), length) != 0 }
+        unsafe { subversion_sys::svn_dirent_is_root(self.as_ptr(), length) != 0 }
     }
 
     pub fn is_absolute(&self) -> bool {
-        unsafe { crate::generated::svn_dirent_is_absolute(self.as_ptr()) != 0 }
+        unsafe { subversion_sys::svn_dirent_is_absolute(self.as_ptr()) != 0 }
     }
 
     pub fn dirname(&self) -> Pooled<Self> {
         Pooled::initialize(|pool| unsafe {
             Ok::<_, crate::Error>(Self(
-                crate::generated::svn_dirent_dirname(self.as_ptr(), pool.as_mut_ptr()) as *const i8,
+                subversion_sys::svn_dirent_dirname(self.as_ptr(), pool.as_mut_ptr()) as *const i8,
                 std::marker::PhantomData,
             ))
         })
@@ -139,7 +139,7 @@ impl<'a> Dirent<'a> {
     pub fn basename(&self) -> Pooled<Self> {
         Pooled::initialize(|pool| unsafe {
             Ok::<_, crate::Error>(Self(
-                crate::generated::svn_dirent_basename(self.as_ptr(), pool.as_mut_ptr()),
+                subversion_sys::svn_dirent_basename(self.as_ptr(), pool.as_mut_ptr()),
                 std::marker::PhantomData,
             ))
         })
@@ -151,7 +151,7 @@ impl<'a> Dirent<'a> {
         unsafe {
             let mut dirname = std::ptr::null();
             let mut basename = std::ptr::null();
-            crate::generated::svn_dirent_split(
+            subversion_sys::svn_dirent_split(
                 &mut dirname,
                 &mut basename,
                 self.as_ptr(),
@@ -166,12 +166,12 @@ impl<'a> Dirent<'a> {
     }
 
     pub fn is_ancestor(&self, other: &Self) -> bool {
-        unsafe { crate::generated::svn_dirent_is_ancestor(self.as_ptr(), other.as_ptr()) != 0 }
+        unsafe { subversion_sys::svn_dirent_is_ancestor(self.as_ptr(), other.as_ptr()) != 0 }
     }
 
     pub fn skip_ancestor(&self, child: &Pooled<Self>) -> Option<Pooled<Self>> {
         unsafe {
-            let result = crate::generated::svn_dirent_skip_ancestor(self.as_ptr(), child.as_ptr());
+            let result = subversion_sys::svn_dirent_skip_ancestor(self.as_ptr(), child.as_ptr());
             if result.is_null() {
                 Some(Pooled::in_pool(
                     child.pool(),
@@ -192,7 +192,7 @@ impl<'a> Dirent<'a> {
 
         unsafe {
             let result_path = Pooled::initialize(|pool| {
-                let err = crate::generated::svn_dirent_is_under_root(
+                let err = subversion_sys::svn_dirent_is_under_root(
                     &mut under_root,
                     &mut result_path,
                     root.as_ptr(),
@@ -213,7 +213,7 @@ impl<'a> Dirent<'a> {
     pub fn absolute(&self) -> Result<Pooled<Self>, crate::Error> {
         Pooled::initialize(|pool| unsafe {
             let mut result = std::ptr::null();
-            let err = crate::generated::svn_dirent_get_absolute(
+            let err = subversion_sys::svn_dirent_get_absolute(
                 &mut result,
                 self.as_ptr(),
                 pool.as_mut_ptr(),
@@ -229,7 +229,7 @@ impl<'a> Canonical<Dirent<'a>> {
         assert!(self.is_canonical());
         Pooled::initialize(|pool| unsafe {
             let mut url = std::ptr::null();
-            let err = crate::generated::svn_uri_get_file_url_from_dirent(
+            let err = subversion_sys::svn_uri_get_file_url_from_dirent(
                 &mut url,
                 self.as_ptr(),
                 pool.as_mut_ptr(),
