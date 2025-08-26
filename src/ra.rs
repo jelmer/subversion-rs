@@ -1,19 +1,19 @@
 use crate::config::Config;
 use crate::delta::Editor;
-use crate::generated::svn_ra_session_t;
 use crate::{Depth, Error, Revnum};
 use apr::pool::{Pool, PooledPtr};
 use std::collections::HashMap;
+use subversion_sys::svn_ra_session_t;
 
 pub struct Session(PooledPtr<svn_ra_session_t>);
 unsafe impl Send for Session {}
 
 pub(crate) extern "C" fn wrap_dirent_receiver(
     rel_path: *const std::os::raw::c_char,
-    dirent: *mut crate::generated::svn_dirent_t,
+    dirent: *mut subversion_sys::svn_dirent_t,
     baton: *mut std::os::raw::c_void,
     pool: *mut apr::apr_pool_t,
-) -> *mut crate::generated::svn_error_t {
+) -> *mut subversion_sys::svn_error_t {
     let rel_path = unsafe { std::ffi::CStr::from_ptr(rel_path) };
     let baton = unsafe {
         &*(baton as *const _ as *const &dyn Fn(&str, &Dirent) -> Result<(), crate::Error>)
@@ -29,10 +29,10 @@ pub(crate) extern "C" fn wrap_dirent_receiver(
 }
 
 extern "C" fn wrap_location_segment_receiver(
-    svn_location_segment: *mut crate::generated::svn_location_segment_t,
+    svn_location_segment: *mut subversion_sys::svn_location_segment_t,
     baton: *mut std::os::raw::c_void,
     pool: *mut apr::apr_pool_t,
-) -> *mut crate::generated::svn_error_t {
+) -> *mut subversion_sys::svn_error_t {
     let baton = unsafe {
         &*(baton as *const _ as *const &dyn Fn(&crate::LocationSegment) -> Result<(), crate::Error>)
     };
@@ -49,10 +49,10 @@ extern "C" fn wrap_lock_func(
     lock_baton: *mut std::os::raw::c_void,
     path: *const std::os::raw::c_char,
     do_lock: i32,
-    lock: *const crate::generated::svn_lock_t,
-    error: *mut crate::generated::svn_error_t,
+    lock: *const subversion_sys::svn_lock_t,
+    error: *mut subversion_sys::svn_error_t,
     pool: *mut apr::apr_pool_t,
-) -> *mut crate::generated::svn_error_t {
+) -> *mut subversion_sys::svn_error_t {
     let lock_baton = unsafe {
         &mut *(lock_baton
             as *mut &mut dyn Fn(&str, bool, &crate::Lock, Option<&Error>) -> Result<(), Error>)
@@ -85,7 +85,7 @@ impl Session {
         let mut session = std::ptr::null_mut();
         let uuid = uuid.map(|uuid| std::ffi::CString::new(uuid).unwrap());
         let err = unsafe {
-            crate::generated::svn_ra_open5(
+            subversion_sys::svn_ra_open5(
                 &mut session,
                 &mut corrected_url,
                 &mut redirect_url,
@@ -139,7 +139,7 @@ impl Session {
         let url = std::ffi::CString::new(url).unwrap();
         let pool = Pool::new();
         let err = unsafe {
-            crate::generated::svn_ra_reparent(self.0.as_mut_ptr(), url.as_ptr(), pool.as_mut_ptr())
+            subversion_sys::svn_ra_reparent(self.0.as_mut_ptr(), url.as_ptr(), pool.as_mut_ptr())
         };
         Error::from_raw(err)?;
         Ok(())
@@ -153,11 +153,7 @@ impl Session {
         let pool = Pool::new();
         let mut url = std::ptr::null();
         let err = unsafe {
-            crate::generated::svn_ra_get_session_url(
-                self.0.as_mut_ptr(),
-                &mut url,
-                pool.as_mut_ptr(),
-            )
+            subversion_sys::svn_ra_get_session_url(self.0.as_mut_ptr(), &mut url, pool.as_mut_ptr())
         };
         Error::from_raw(err)?;
         let url = unsafe { std::ffi::CStr::from_ptr(url) };
@@ -169,7 +165,7 @@ impl Session {
         let pool = Pool::new();
         let mut path = std::ptr::null();
         let err = unsafe {
-            crate::generated::svn_ra_get_path_relative_to_session(
+            subversion_sys::svn_ra_get_path_relative_to_session(
                 self.0.as_mut_ptr(),
                 &mut path,
                 url.as_ptr(),
@@ -186,7 +182,7 @@ impl Session {
         let pool = Pool::new();
         let mut path = std::ptr::null();
         unsafe {
-            crate::generated::svn_ra_get_path_relative_to_root(
+            subversion_sys::svn_ra_get_path_relative_to_root(
                 self.0.as_mut_ptr(),
                 &mut path,
                 url.as_ptr(),
@@ -201,7 +197,7 @@ impl Session {
         let pool = Pool::new();
         let mut revnum = 0;
         let err = unsafe {
-            crate::generated::svn_ra_get_latest_revnum(
+            subversion_sys::svn_ra_get_latest_revnum(
                 self.0.as_mut_ptr(),
                 &mut revnum,
                 pool.as_mut_ptr(),
@@ -215,7 +211,7 @@ impl Session {
         let pool = Pool::new();
         let mut revnum = 0;
         let err = unsafe {
-            crate::generated::svn_ra_get_dated_revision(
+            subversion_sys::svn_ra_get_dated_revision(
                 self.0.as_mut_ptr(),
                 &mut revnum,
                 tm.as_apr_time().into(),
@@ -235,16 +231,16 @@ impl Session {
     ) -> Result<(), Error> {
         let name = std::ffi::CString::new(name).unwrap();
         let pool = Pool::new();
-        let new_value = crate::generated::svn_string_t {
+        let new_value = subversion_sys::svn_string_t {
             data: new_value.as_ptr() as *mut _,
             len: new_value.len(),
         };
-        let old_value = old_value.map(|v| crate::generated::svn_string_t {
+        let old_value = old_value.map(|v| subversion_sys::svn_string_t {
             data: v.as_ptr() as *mut _,
             len: v.len(),
         });
         let err = unsafe {
-            crate::generated::svn_ra_change_rev_prop2(
+            subversion_sys::svn_ra_change_rev_prop2(
                 self.0.as_mut_ptr(),
                 rev.into(),
                 name.as_ptr(),
@@ -261,7 +257,7 @@ impl Session {
         let pool = Pool::new();
         let mut props = std::ptr::null_mut();
         let err = unsafe {
-            crate::generated::svn_ra_rev_proplist(
+            subversion_sys::svn_ra_rev_proplist(
                 self.0.as_mut_ptr(),
                 rev.into(),
                 &mut props,
@@ -269,7 +265,7 @@ impl Session {
             )
         };
         let mut hash =
-            apr::hash::Hash::<&str, *const crate::generated::svn_string_t>::from_raw(unsafe {
+            apr::hash::Hash::<&str, *const subversion_sys::svn_string_t>::from_raw(unsafe {
                 PooledPtr::in_pool(std::rc::Rc::new(pool), props)
             });
         Error::from_raw(err)?;
@@ -291,7 +287,7 @@ impl Session {
         let pool = Pool::new();
         let mut value = std::ptr::null_mut();
         let err = unsafe {
-            crate::generated::svn_ra_rev_prop(
+            subversion_sys::svn_ra_rev_prop(
                 self.0.as_mut_ptr(),
                 rev.into(),
                 name.as_ptr(),
@@ -321,7 +317,7 @@ impl Session {
         let mut editor = std::ptr::null();
         let mut edit_baton = std::ptr::null_mut();
         let mut hash_revprop_table =
-            apr::hash::Hash::<&str, *const crate::generated::svn_string_t>::in_pool(&pool);
+            apr::hash::Hash::<&str, *const subversion_sys::svn_string_t>::in_pool(&pool);
         for (k, v) in revprop_table.iter() {
             let v: crate::string::String = v.as_slice().into();
             hash_revprop_table.set(k, &v.as_ptr());
@@ -333,7 +329,7 @@ impl Session {
         }
         let result_pool = Pool::new();
         let err = unsafe {
-            crate::generated::svn_ra_get_commit_editor3(
+            subversion_sys::svn_ra_get_commit_editor3(
                 self.0.as_mut_ptr(),
                 &mut editor,
                 &mut edit_baton,
@@ -362,7 +358,7 @@ impl Session {
         let mut props = std::ptr::null_mut();
         let mut fetched_rev = 0;
         let err = unsafe {
-            crate::generated::svn_ra_get_file(
+            subversion_sys::svn_ra_get_file(
                 self.0.as_mut_ptr(),
                 path.as_ptr(),
                 rev.into(),
@@ -374,7 +370,7 @@ impl Session {
         };
         crate::Error::from_raw(err)?;
         let mut hash =
-            apr::hash::Hash::<&str, *const crate::generated::svn_string_t>::from_raw(unsafe {
+            apr::hash::Hash::<&str, *const subversion_sys::svn_string_t>::from_raw(unsafe {
                 PooledPtr::in_pool(std::rc::Rc::new(pool), props)
             });
         Ok((
@@ -405,7 +401,7 @@ impl Session {
         let mut dirents = std::ptr::null_mut();
         let dirent_fields = dirent_fields.bits();
         let err = unsafe {
-            crate::generated::svn_ra_get_dir2(
+            subversion_sys::svn_ra_get_dir2(
                 self.0.as_mut_ptr(),
                 &mut dirents,
                 &mut fetched_rev,
@@ -419,11 +415,11 @@ impl Session {
         let pool = std::rc::Rc::new(pool);
         crate::Error::from_raw(err)?;
         let mut props_hash =
-            apr::hash::Hash::<&str, *const crate::generated::svn_string_t>::from_raw(unsafe {
+            apr::hash::Hash::<&str, *const subversion_sys::svn_string_t>::from_raw(unsafe {
                 PooledPtr::in_pool(pool.clone(), props)
             });
         let mut dirents_hash =
-            apr::hash::Hash::<&str, *mut crate::generated::svn_dirent_t>::from_raw(unsafe {
+            apr::hash::Hash::<&str, *mut subversion_sys::svn_dirent_t>::from_raw(unsafe {
                 PooledPtr::in_pool(pool.clone(), dirents)
             });
         let props = props_hash
@@ -469,7 +465,7 @@ impl Session {
             });
         let dirent_fields = dirent_fields.bits();
         let err = unsafe {
-            crate::generated::svn_ra_list(
+            subversion_sys::svn_ra_list(
                 self.0.as_mut_ptr(),
                 path.as_ptr(),
                 rev.into(),
@@ -501,7 +497,7 @@ impl Session {
         let pool = Pool::new();
         let mut mergeinfo = std::ptr::null_mut();
         let err = unsafe {
-            crate::generated::svn_ra_get_mergeinfo(
+            subversion_sys::svn_ra_get_mergeinfo(
                 self.0.as_mut_ptr(),
                 &mut mergeinfo,
                 paths.as_ptr(),
@@ -514,7 +510,7 @@ impl Session {
         Error::from_raw(err)?;
         let pool = std::rc::Rc::new(pool);
         let mut mergeinfo =
-            apr::hash::Hash::<&[u8], *mut crate::generated::svn_mergeinfo_t>::from_raw(unsafe {
+            apr::hash::Hash::<&[u8], *mut subversion_sys::svn_mergeinfo_t>::from_raw(unsafe {
                 PooledPtr::in_pool(pool.clone(), mergeinfo)
             });
         Ok(mergeinfo
@@ -542,7 +538,7 @@ impl Session {
         let mut reporter = std::ptr::null();
         let mut report_baton = std::ptr::null_mut();
         let err = unsafe {
-            crate::generated::svn_ra_do_update3(
+            subversion_sys::svn_ra_do_update3(
                 self.0.as_mut_ptr(),
                 &mut reporter,
                 &mut report_baton,
@@ -579,7 +575,7 @@ impl Session {
         let mut reporter = std::ptr::null();
         let mut report_baton = std::ptr::null_mut();
         let err = unsafe {
-            crate::generated::svn_ra_do_switch3(
+            subversion_sys::svn_ra_do_switch3(
                 self.0.as_mut_ptr(),
                 &mut reporter,
                 &mut report_baton,
@@ -606,7 +602,7 @@ impl Session {
         let mut kind = 0;
         let pool = Pool::new();
         let err = unsafe {
-            crate::generated::svn_ra_check_path(
+            subversion_sys::svn_ra_check_path(
                 self.0.as_mut_ptr(),
                 path.as_ptr(),
                 rev.into(),
@@ -630,7 +626,7 @@ impl Session {
         let mut reporter = std::ptr::null();
         let mut report_baton = std::ptr::null_mut();
         let err = unsafe {
-            crate::generated::svn_ra_do_status2(
+            subversion_sys::svn_ra_do_status2(
                 self.0.as_mut_ptr(),
                 &mut reporter,
                 &mut report_baton,
@@ -651,7 +647,7 @@ impl Session {
         let mut dirent = std::ptr::null_mut();
         let pool = Pool::new();
         let err = unsafe {
-            crate::generated::svn_ra_stat(
+            subversion_sys::svn_ra_stat(
                 self.0.as_mut_ptr(),
                 path.as_ptr(),
                 rev.into(),
@@ -669,7 +665,7 @@ impl Session {
         let pool = Pool::new();
         let mut uuid = std::ptr::null();
         let err = unsafe {
-            crate::generated::svn_ra_get_uuid2(self.0.as_mut_ptr(), &mut uuid, pool.as_mut_ptr())
+            subversion_sys::svn_ra_get_uuid2(self.0.as_mut_ptr(), &mut uuid, pool.as_mut_ptr())
         };
         Error::from_raw(err)?;
         let uuid = unsafe { std::ffi::CStr::from_ptr(uuid) };
@@ -680,11 +676,7 @@ impl Session {
         let pool = Pool::new();
         let mut url = std::ptr::null();
         let err = unsafe {
-            crate::generated::svn_ra_get_repos_root2(
-                self.0.as_mut_ptr(),
-                &mut url,
-                pool.as_mut_ptr(),
-            )
+            subversion_sys::svn_ra_get_repos_root2(self.0.as_mut_ptr(), &mut url, pool.as_mut_ptr())
         };
         Error::from_raw(err)?;
         let url = unsafe { std::ffi::CStr::from_ptr(url) };
@@ -701,7 +693,7 @@ impl Session {
         let mut rev = 0;
         let pool = Pool::new();
         let err = unsafe {
-            crate::generated::svn_ra_get_deleted_rev(
+            subversion_sys::svn_ra_get_deleted_rev(
                 self.0.as_mut_ptr(),
                 path.as_ptr(),
                 peg_revision.into(),
@@ -719,7 +711,7 @@ impl Session {
         let mut has = 0;
         let pool = Pool::new();
         let err = unsafe {
-            crate::generated::svn_ra_has_capability(
+            subversion_sys::svn_ra_has_capability(
                 self.0.as_mut_ptr(),
                 &mut has,
                 capability.as_ptr(),
@@ -746,7 +738,7 @@ impl Session {
         let mut reporter = std::ptr::null();
         let mut report_baton = std::ptr::null_mut();
         let err = unsafe {
-            crate::generated::svn_ra_do_diff3(
+            subversion_sys::svn_ra_do_diff3(
                 self.0.as_mut_ptr(),
                 &mut reporter,
                 &mut report_baton,
@@ -788,7 +780,7 @@ impl Session {
         let pool = Pool::new();
         let log_receiver = Box::new(log_receiver);
         let err = unsafe {
-            crate::generated::svn_ra_get_log2(
+            subversion_sys::svn_ra_get_log2(
                 self.0.as_mut_ptr(),
                 paths.as_ptr(),
                 start.into(),
@@ -814,12 +806,12 @@ impl Session {
         location_revisions: &[Revnum],
     ) -> Result<HashMap<Revnum, String>, Error> {
         let path = std::ffi::CString::new(path).unwrap();
-        let location_revisions: apr::tables::ArrayHeader<crate::generated::svn_revnum_t> =
+        let location_revisions: apr::tables::ArrayHeader<subversion_sys::svn_revnum_t> =
             location_revisions.iter().map(|rev| (*rev).into()).collect();
         let pool = Pool::new();
         let mut locations = std::ptr::null_mut();
         let err = unsafe {
-            crate::generated::svn_ra_get_locations(
+            subversion_sys::svn_ra_get_locations(
                 self.0.as_mut_ptr(),
                 &mut locations,
                 path.as_ptr(),
@@ -856,7 +848,7 @@ impl Session {
         let path = std::ffi::CString::new(path).unwrap();
         let pool = Pool::new();
         let err = unsafe {
-            crate::generated::svn_ra_get_location_segments(
+            subversion_sys::svn_ra_get_location_segments(
                 self.0.as_mut_ptr(),
                 path.as_ptr(),
                 peg_revision.into(),
@@ -881,13 +873,13 @@ impl Session {
         let pool = Pool::new();
         let scratch_pool = std::rc::Rc::new(Pool::new());
         let mut hash =
-            apr::hash::Hash::<&str, crate::generated::svn_revnum_t>::in_pool(&scratch_pool);
+            apr::hash::Hash::<&str, subversion_sys::svn_revnum_t>::in_pool(&scratch_pool);
         for (k, v) in path_revs.iter() {
             hash.set(k, &v.0);
         }
         let comment = std::ffi::CString::new(comment).unwrap();
         let err = unsafe {
-            crate::generated::svn_ra_lock(
+            subversion_sys::svn_ra_lock(
                 self.0.as_mut_ptr(),
                 hash.as_mut_ptr(),
                 comment.as_ptr(),
@@ -914,7 +906,7 @@ impl Session {
             hash.set(k, &(v.as_ptr() as *const _));
         }
         let err = unsafe {
-            crate::generated::svn_ra_unlock(
+            subversion_sys::svn_ra_unlock(
                 self.0.as_mut_ptr(),
                 hash.as_mut_ptr(),
                 break_lock.into(),
@@ -932,7 +924,7 @@ impl Session {
         let mut lock = std::ptr::null_mut();
         let pool = Pool::new();
         let err = unsafe {
-            crate::generated::svn_ra_get_lock(
+            subversion_sys::svn_ra_get_lock(
                 self.0.as_mut_ptr(),
                 &mut lock,
                 path.as_ptr(),
@@ -954,7 +946,7 @@ impl Session {
         let mut locks = std::ptr::null_mut();
         let pool = Pool::new();
         let err = unsafe {
-            crate::generated::svn_ra_get_locks2(
+            subversion_sys::svn_ra_get_locks2(
                 self.0.as_mut_ptr(),
                 &mut locks,
                 path.as_ptr(),
@@ -964,10 +956,9 @@ impl Session {
         };
         Error::from_raw(err)?;
         let pool = std::rc::Rc::new(pool);
-        let mut hash =
-            apr::hash::Hash::<&str, *mut crate::generated::svn_lock_t>::from_raw(unsafe {
-                PooledPtr::in_pool(pool.clone(), locks)
-            });
+        let mut hash = apr::hash::Hash::<&str, *mut subversion_sys::svn_lock_t>::from_raw(unsafe {
+            PooledPtr::in_pool(pool.clone(), locks)
+        });
         Ok(hash
             .iter()
             .map(|(k, v)| {
@@ -997,13 +988,13 @@ impl Session {
         ) -> Result<(), Error>,
     ) -> Result<(), Error> {
         extern "C" fn wrap_replay_revstart_callback(
-            revision: crate::generated::svn_revnum_t,
+            revision: subversion_sys::svn_revnum_t,
             replay_baton: *mut std::ffi::c_void,
-            editor: *mut *const crate::generated::svn_delta_editor_t,
+            editor: *mut *const subversion_sys::svn_delta_editor_t,
             edit_baton: *mut *mut std::ffi::c_void,
             rev_props: *mut apr::hash::apr_hash_t,
             pool: *mut apr::apr_pool_t,
-        ) -> *mut crate::generated::svn_error_t {
+        ) -> *mut subversion_sys::svn_error_t {
             let baton = unsafe {
                 (replay_baton
                     as *mut (
@@ -1022,7 +1013,7 @@ impl Session {
                     .unwrap()
             };
             let mut revprops =
-                apr::hash::Hash::<&str, *const crate::generated::svn_string_t>::from_raw(unsafe {
+                apr::hash::Hash::<&str, *const subversion_sys::svn_string_t>::from_raw(unsafe {
                     PooledPtr::in_pool(std::rc::Rc::new(Pool::from_raw(pool)), rev_props)
                 });
 
@@ -1049,13 +1040,13 @@ impl Session {
         }
 
         extern "C" fn wrap_replay_revend_callback(
-            revision: crate::generated::svn_revnum_t,
+            revision: subversion_sys::svn_revnum_t,
             replay_baton: *mut std::ffi::c_void,
-            editor: *const crate::generated::svn_delta_editor_t,
+            editor: *const subversion_sys::svn_delta_editor_t,
             edit_baton: *mut std::ffi::c_void,
             rev_props: *mut apr::hash::apr_hash_t,
             pool: *mut apr::apr_pool_t,
-        ) -> *mut crate::generated::svn_error_t {
+        ) -> *mut subversion_sys::svn_error_t {
             let baton = unsafe {
                 (replay_baton
                     as *mut (
@@ -1079,7 +1070,7 @@ impl Session {
             });
 
             let mut revprops =
-                apr::hash::Hash::<&str, *const crate::generated::svn_string_t>::from_raw(unsafe {
+                apr::hash::Hash::<&str, *const subversion_sys::svn_string_t>::from_raw(unsafe {
                     PooledPtr::in_pool(std::rc::Rc::new(Pool::from_raw(pool)), rev_props)
                 });
 
@@ -1103,7 +1094,7 @@ impl Session {
 
         let pool = Pool::new();
         let err = unsafe {
-            crate::generated::svn_ra_replay_range(
+            subversion_sys::svn_ra_replay_range(
                 self.0.as_mut_ptr(),
                 start_revision.into(),
                 end_revision.into(),
@@ -1128,7 +1119,7 @@ impl Session {
     ) -> Result<(), Error> {
         let pool = Pool::new();
         let err = unsafe {
-            crate::generated::svn_ra_replay(
+            subversion_sys::svn_ra_replay(
                 self.0.as_mut_ptr(),
                 revision.into(),
                 low_water_mark.into(),
@@ -1146,13 +1137,13 @@ impl Session {
 pub fn modules() -> Result<String, Error> {
     let pool = Pool::new();
     let buf = unsafe {
-        crate::generated::svn_stringbuf_create(
+        subversion_sys::svn_stringbuf_create(
             std::ffi::CStr::from_bytes_with_nul(b"").unwrap().as_ptr(),
             pool.as_mut_ptr(),
         )
     };
 
-    let err = unsafe { crate::generated::svn_ra_print_modules(buf, pool.as_mut_ptr()) };
+    let err = unsafe { subversion_sys::svn_ra_print_modules(buf, pool.as_mut_ptr()) };
 
     Error::from_raw(err)?;
 
@@ -1164,7 +1155,7 @@ pub fn modules() -> Result<String, Error> {
 }
 
 pub struct WrapReporter(
-    *const crate::generated::svn_ra_reporter3_t,
+    *const subversion_sys::svn_ra_reporter3_t,
     PooledPtr<std::ffi::c_void>,
 );
 
@@ -1254,11 +1245,11 @@ impl Reporter for WrapReporter {
 }
 
 #[allow(dead_code)]
-pub struct Dirent(PooledPtr<crate::generated::svn_dirent_t>);
+pub struct Dirent(PooledPtr<subversion_sys::svn_dirent_t>);
 unsafe impl Send for Dirent {}
 
 pub fn version() -> crate::Version {
-    unsafe { crate::Version(crate::generated::svn_ra_version()) }
+    unsafe { crate::Version(subversion_sys::svn_ra_version()) }
 }
 
 pub trait Reporter {
@@ -1288,7 +1279,7 @@ pub trait Reporter {
     fn abort_report(&mut self) -> Result<(), Error>;
 }
 
-pub struct Callbacks(PooledPtr<crate::generated::svn_ra_callbacks2_t>);
+pub struct Callbacks(PooledPtr<subversion_sys::svn_ra_callbacks2_t>);
 
 impl Default for Callbacks {
     fn default() -> Self {
@@ -1300,13 +1291,13 @@ impl Callbacks {
     pub fn new() -> Result<Callbacks, crate::Error> {
         Ok(Callbacks(PooledPtr::initialize(|pool| unsafe {
             let mut callbacks = std::ptr::null_mut();
-            let err = crate::generated::svn_ra_create_callbacks(&mut callbacks, pool.as_mut_ptr());
+            let err = subversion_sys::svn_ra_create_callbacks(&mut callbacks, pool.as_mut_ptr());
             Error::from_raw(err)?;
             Ok::<_, crate::Error>(callbacks)
         })?))
     }
 
-    fn as_mut_ptr(&mut self) -> *mut crate::generated::svn_ra_callbacks2_t {
+    fn as_mut_ptr(&mut self) -> *mut subversion_sys::svn_ra_callbacks2_t {
         self.0.as_mut_ptr()
     }
 }

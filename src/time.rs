@@ -1,6 +1,6 @@
-use crate::generated::{svn_time_from_cstring, svn_time_to_cstring, svn_time_to_human_cstring};
 use crate::Error;
 use apr::time::Time;
+use subversion_sys::{svn_time_from_cstring, svn_time_to_cstring, svn_time_to_human_cstring};
 
 pub fn to_cstring(time: Time) -> String {
     let x = unsafe { svn_time_to_cstring(time.into(), apr::pool::Pool::new().as_mut_ptr()) };
@@ -28,7 +28,7 @@ pub fn parse_date(now: Time, date: &str) -> Result<(bool, Time), crate::Error> {
     let mut matched: i32 = 0;
     let date = std::ffi::CString::new(date).unwrap();
     let err = unsafe {
-        crate::generated::svn_parse_date(
+        subversion_sys::svn_parse_date(
             &mut matched,
             &mut t,
             date.as_ptr(),
