@@ -7,7 +7,6 @@ pub mod delta;
 pub mod dirent;
 pub mod error;
 pub mod fs;
-mod generated;
 pub mod io;
 pub mod mergeinfo;
 pub mod props;
@@ -20,28 +19,28 @@ pub mod uri;
 pub mod version;
 #[cfg(feature = "wc")]
 pub mod wc;
-use crate::generated::{svn_opt_revision_t, svn_opt_revision_value_t};
 use apr::pool::PooledPtr;
 use bitflags::bitflags;
 use std::str::FromStr;
+use subversion_sys::{svn_opt_revision_t, svn_opt_revision_value_t};
 
 pub use version::Version;
 
 bitflags! {
     pub struct DirentField: u32 {
-        const Kind = crate::generated::SVN_DIRENT_KIND;
-        const Size = crate::generated::SVN_DIRENT_SIZE;
-        const HasProps = crate::generated::SVN_DIRENT_HAS_PROPS;
-        const CreatedRevision = crate::generated::SVN_DIRENT_CREATED_REV;
-        const Time = crate::generated::SVN_DIRENT_TIME;
-        const LastAuthor = crate::generated::SVN_DIRENT_LAST_AUTHOR;
+        const Kind = subversion_sys::SVN_DIRENT_KIND;
+        const Size = subversion_sys::SVN_DIRENT_SIZE;
+        const HasProps = subversion_sys::SVN_DIRENT_HAS_PROPS;
+        const CreatedRevision = subversion_sys::SVN_DIRENT_CREATED_REV;
+        const Time = subversion_sys::SVN_DIRENT_TIME;
+        const LastAuthor = subversion_sys::SVN_DIRENT_LAST_AUTHOR;
     }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
-pub struct Revnum(generated::svn_revnum_t);
+pub struct Revnum(subversion_sys::svn_revnum_t);
 
-impl From<Revnum> for generated::svn_revnum_t {
+impl From<Revnum> for subversion_sys::svn_revnum_t {
     fn from(revnum: Revnum) -> Self {
         revnum.0
     }
@@ -88,14 +87,14 @@ impl apr::hash::IntoHashKey<'_> for &Revnum {
         unsafe {
             std::slice::from_raw_parts(
                 &self.0 as *const _ as *const u8,
-                std::mem::size_of::<generated::svn_revnum_t>(),
+                std::mem::size_of::<subversion_sys::svn_revnum_t>(),
             )
         }
     }
 }
 
 impl Revnum {
-    fn from_raw(raw: generated::svn_revnum_t) -> Option<Self> {
+    fn from_raw(raw: subversion_sys::svn_revnum_t) -> Option<Self> {
         if raw < 0 {
             None
         } else {
@@ -137,7 +136,7 @@ impl FromStr for Revision {
             Ok(Revision::Head)
         } else if let Some(rest) = rev.strip_prefix("number:") {
             Ok(Revision::Number(Revnum(
-                rest.parse::<crate::generated::svn_revnum_t>()
+                rest.parse::<subversion_sys::svn_revnum_t>()
                     .map_err(|e| e.to_string())?,
             )))
         } else if let Some(rest) = rev.strip_prefix("date:") {
@@ -181,17 +180,17 @@ impl From<Revision> for svn_opt_revision_t {
     fn from(revision: Revision) -> Self {
         match revision {
             Revision::Unspecified => svn_opt_revision_t {
-                kind: generated::svn_opt_revision_kind_svn_opt_revision_unspecified,
+                kind: subversion_sys::svn_opt_revision_kind_svn_opt_revision_unspecified,
                 value: svn_opt_revision_value_t::default(),
             },
             Revision::Number(revnum) => {
-                let mut uf = crate::generated::__BindgenUnionField::<i64>::new();
+                let mut uf = subversion_sys::__BindgenUnionField::<i64>::new();
                 unsafe {
                     *uf.as_mut() = revnum.0;
                 }
 
                 svn_opt_revision_t {
-                    kind: generated::svn_opt_revision_kind_svn_opt_revision_number,
+                    kind: subversion_sys::svn_opt_revision_kind_svn_opt_revision_number,
                     value: svn_opt_revision_value_t {
                         number: uf,
                         ..Default::default()
@@ -199,14 +198,14 @@ impl From<Revision> for svn_opt_revision_t {
                 }
             }
             Revision::Date(date) => {
-                let mut uf = crate::generated::__BindgenUnionField::<i64>::new();
+                let mut uf = subversion_sys::__BindgenUnionField::<i64>::new();
 
                 unsafe {
                     *uf.as_mut() = date;
                 }
 
                 svn_opt_revision_t {
-                    kind: generated::svn_opt_revision_kind_svn_opt_revision_date,
+                    kind: subversion_sys::svn_opt_revision_kind_svn_opt_revision_date,
                     value: svn_opt_revision_value_t {
                         date: uf,
                         ..Default::default()
@@ -214,23 +213,23 @@ impl From<Revision> for svn_opt_revision_t {
                 }
             }
             Revision::Committed => svn_opt_revision_t {
-                kind: generated::svn_opt_revision_kind_svn_opt_revision_committed,
+                kind: subversion_sys::svn_opt_revision_kind_svn_opt_revision_committed,
                 value: svn_opt_revision_value_t::default(),
             },
             Revision::Previous => svn_opt_revision_t {
-                kind: generated::svn_opt_revision_kind_svn_opt_revision_previous,
+                kind: subversion_sys::svn_opt_revision_kind_svn_opt_revision_previous,
                 value: svn_opt_revision_value_t::default(),
             },
             Revision::Base => svn_opt_revision_t {
-                kind: generated::svn_opt_revision_kind_svn_opt_revision_base,
+                kind: subversion_sys::svn_opt_revision_kind_svn_opt_revision_base,
                 value: svn_opt_revision_value_t::default(),
             },
             Revision::Working => svn_opt_revision_t {
-                kind: generated::svn_opt_revision_kind_svn_opt_revision_working,
+                kind: subversion_sys::svn_opt_revision_kind_svn_opt_revision_working,
                 value: svn_opt_revision_value_t::default(),
             },
             Revision::Head => svn_opt_revision_t {
-                kind: generated::svn_opt_revision_kind_svn_opt_revision_head,
+                kind: subversion_sys::svn_opt_revision_kind_svn_opt_revision_head,
                 value: svn_opt_revision_value_t::default(),
             },
         }
@@ -248,28 +247,28 @@ pub enum Depth {
     Infinity,
 }
 
-impl From<Depth> for generated::svn_depth_t {
+impl From<Depth> for subversion_sys::svn_depth_t {
     fn from(depth: Depth) -> Self {
         match depth {
-            Depth::Unknown => generated::svn_depth_t_svn_depth_unknown,
-            Depth::Exclude => generated::svn_depth_t_svn_depth_exclude,
-            Depth::Empty => generated::svn_depth_t_svn_depth_empty,
-            Depth::Files => generated::svn_depth_t_svn_depth_files,
-            Depth::Immediates => generated::svn_depth_t_svn_depth_immediates,
-            Depth::Infinity => generated::svn_depth_t_svn_depth_infinity,
+            Depth::Unknown => subversion_sys::svn_depth_t_svn_depth_unknown,
+            Depth::Exclude => subversion_sys::svn_depth_t_svn_depth_exclude,
+            Depth::Empty => subversion_sys::svn_depth_t_svn_depth_empty,
+            Depth::Files => subversion_sys::svn_depth_t_svn_depth_files,
+            Depth::Immediates => subversion_sys::svn_depth_t_svn_depth_immediates,
+            Depth::Infinity => subversion_sys::svn_depth_t_svn_depth_infinity,
         }
     }
 }
 
-impl From<generated::svn_depth_t> for Depth {
-    fn from(depth: generated::svn_depth_t) -> Self {
+impl From<subversion_sys::svn_depth_t> for Depth {
+    fn from(depth: subversion_sys::svn_depth_t) -> Self {
         match depth {
-            generated::svn_depth_t_svn_depth_unknown => Depth::Unknown,
-            generated::svn_depth_t_svn_depth_exclude => Depth::Exclude,
-            generated::svn_depth_t_svn_depth_empty => Depth::Empty,
-            generated::svn_depth_t_svn_depth_files => Depth::Files,
-            generated::svn_depth_t_svn_depth_immediates => Depth::Immediates,
-            generated::svn_depth_t_svn_depth_infinity => Depth::Infinity,
+            subversion_sys::svn_depth_t_svn_depth_unknown => Depth::Unknown,
+            subversion_sys::svn_depth_t_svn_depth_exclude => Depth::Exclude,
+            subversion_sys::svn_depth_t_svn_depth_empty => Depth::Empty,
+            subversion_sys::svn_depth_t_svn_depth_files => Depth::Files,
+            subversion_sys::svn_depth_t_svn_depth_immediates => Depth::Immediates,
+            subversion_sys::svn_depth_t_svn_depth_infinity => Depth::Infinity,
             n => panic!("Unknown depth: {:?}", n),
         }
     }
@@ -312,7 +311,7 @@ impl pyo3::FromPyObject<'_> for Depth {
     }
 }
 
-pub struct CommitInfo(PooledPtr<generated::svn_commit_info_t>);
+pub struct CommitInfo(PooledPtr<subversion_sys::svn_commit_info_t>);
 unsafe impl Send for CommitInfo {}
 
 impl CommitInfo {
@@ -356,7 +355,7 @@ impl Clone for CommitInfo {
         unsafe {
             Self(
                 PooledPtr::initialize(|pool| {
-                    Ok::<_, Error>(crate::generated::svn_commit_info_dup(
+                    Ok::<_, Error>(subversion_sys::svn_commit_info_dup(
                         self.0.as_ptr(),
                         pool.as_mut_ptr(),
                     ))
@@ -373,7 +372,7 @@ pub struct RevisionRange {
     pub end: Revision,
 }
 
-impl From<&RevisionRange> for generated::svn_opt_revision_range_t {
+impl From<&RevisionRange> for subversion_sys::svn_opt_revision_range_t {
     fn from(range: &RevisionRange) -> Self {
         Self {
             start: range.start.into(),
@@ -383,14 +382,17 @@ impl From<&RevisionRange> for generated::svn_opt_revision_range_t {
 }
 
 impl RevisionRange {
-    pub unsafe fn to_c(&self, pool: &mut apr::Pool) -> *mut generated::svn_opt_revision_range_t {
-        let range = pool.calloc::<generated::svn_opt_revision_range_t>();
+    pub unsafe fn to_c(
+        &self,
+        pool: &mut apr::Pool,
+    ) -> *mut subversion_sys::svn_opt_revision_range_t {
+        let range = pool.calloc::<subversion_sys::svn_opt_revision_range_t>();
         *range = self.into();
         range
     }
 }
 
-pub struct LogEntry(apr::pool::PooledPtr<generated::svn_log_entry_t>);
+pub struct LogEntry(apr::pool::PooledPtr<subversion_sys::svn_log_entry_t>);
 unsafe impl Send for LogEntry {}
 
 impl Clone for LogEntry {
@@ -398,7 +400,7 @@ impl Clone for LogEntry {
         Self(
             apr::pool::PooledPtr::initialize(|pool| {
                 Ok::<_, Error>(unsafe {
-                    crate::generated::svn_log_entry_dup(self.0.as_ptr(), pool.as_mut_ptr())
+                    subversion_sys::svn_log_entry_dup(self.0.as_ptr(), pool.as_mut_ptr())
                 })
             })
             .unwrap(),
@@ -406,7 +408,7 @@ impl Clone for LogEntry {
     }
 }
 
-pub type FileSize = crate::generated::svn_filesize_t;
+pub type FileSize = subversion_sys::svn_filesize_t;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub enum NativeEOL {
@@ -427,7 +429,7 @@ impl TryFrom<Option<&str>> for NativeEOL {
             Some("CRLF") => Ok(NativeEOL::CRLF),
             Some("CR") => Ok(NativeEOL::CR),
             _ => Err(crate::Error::new(
-                crate::generated::svn_errno_t_SVN_ERR_IO_UNKNOWN_EOL.into(),
+                subversion_sys::svn_errno_t_SVN_ERR_IO_UNKNOWN_EOL.into(),
                 None,
                 "Unknown eol marker",
             )),
@@ -446,10 +448,10 @@ impl From<NativeEOL> for Option<&str> {
     }
 }
 
-pub struct InheritedItem(apr::pool::PooledPtr<generated::svn_prop_inherited_item_t>);
+pub struct InheritedItem(apr::pool::PooledPtr<subversion_sys::svn_prop_inherited_item_t>);
 
 impl InheritedItem {
-    pub fn from_raw(ptr: apr::pool::PooledPtr<generated::svn_prop_inherited_item_t>) -> Self {
+    pub fn from_raw(ptr: apr::pool::PooledPtr<subversion_sys::svn_prop_inherited_item_t>) -> Self {
         Self(ptr)
     }
 
@@ -497,27 +499,27 @@ pub enum NodeKind {
     Symlink,
 }
 
-impl From<generated::svn_node_kind_t> for NodeKind {
-    fn from(kind: generated::svn_node_kind_t) -> Self {
+impl From<subversion_sys::svn_node_kind_t> for NodeKind {
+    fn from(kind: subversion_sys::svn_node_kind_t) -> Self {
         match kind {
-            generated::svn_node_kind_t_svn_node_none => NodeKind::None,
-            generated::svn_node_kind_t_svn_node_file => NodeKind::File,
-            generated::svn_node_kind_t_svn_node_dir => NodeKind::Dir,
-            generated::svn_node_kind_t_svn_node_unknown => NodeKind::Unknown,
-            generated::svn_node_kind_t_svn_node_symlink => NodeKind::Symlink,
+            subversion_sys::svn_node_kind_t_svn_node_none => NodeKind::None,
+            subversion_sys::svn_node_kind_t_svn_node_file => NodeKind::File,
+            subversion_sys::svn_node_kind_t_svn_node_dir => NodeKind::Dir,
+            subversion_sys::svn_node_kind_t_svn_node_unknown => NodeKind::Unknown,
+            subversion_sys::svn_node_kind_t_svn_node_symlink => NodeKind::Symlink,
             n => panic!("Unknown node kind: {:?}", n),
         }
     }
 }
 
-impl From<NodeKind> for generated::svn_node_kind_t {
+impl From<NodeKind> for subversion_sys::svn_node_kind_t {
     fn from(kind: NodeKind) -> Self {
         match kind {
-            NodeKind::None => generated::svn_node_kind_t_svn_node_none,
-            NodeKind::File => generated::svn_node_kind_t_svn_node_file,
-            NodeKind::Dir => generated::svn_node_kind_t_svn_node_dir,
-            NodeKind::Unknown => generated::svn_node_kind_t_svn_node_unknown,
-            NodeKind::Symlink => generated::svn_node_kind_t_svn_node_symlink,
+            NodeKind::None => subversion_sys::svn_node_kind_t_svn_node_none,
+            NodeKind::File => subversion_sys::svn_node_kind_t_svn_node_file,
+            NodeKind::Dir => subversion_sys::svn_node_kind_t_svn_node_dir,
+            NodeKind::Unknown => subversion_sys::svn_node_kind_t_svn_node_unknown,
+            NodeKind::Symlink => subversion_sys::svn_node_kind_t_svn_node_symlink,
         }
     }
 }
@@ -540,50 +542,50 @@ pub enum StatusKind {
     Incomplete,
 }
 
-impl From<generated::svn_wc_status_kind> for StatusKind {
-    fn from(kind: generated::svn_wc_status_kind) -> Self {
+impl From<subversion_sys::svn_wc_status_kind> for StatusKind {
+    fn from(kind: subversion_sys::svn_wc_status_kind) -> Self {
         match kind {
-            generated::svn_wc_status_kind_svn_wc_status_none => StatusKind::None,
-            generated::svn_wc_status_kind_svn_wc_status_unversioned => StatusKind::Unversioned,
-            generated::svn_wc_status_kind_svn_wc_status_normal => StatusKind::Normal,
-            generated::svn_wc_status_kind_svn_wc_status_added => StatusKind::Added,
-            generated::svn_wc_status_kind_svn_wc_status_missing => StatusKind::Missing,
-            generated::svn_wc_status_kind_svn_wc_status_deleted => StatusKind::Deleted,
-            generated::svn_wc_status_kind_svn_wc_status_replaced => StatusKind::Replaced,
-            generated::svn_wc_status_kind_svn_wc_status_modified => StatusKind::Modified,
-            generated::svn_wc_status_kind_svn_wc_status_merged => StatusKind::Merged,
-            generated::svn_wc_status_kind_svn_wc_status_conflicted => StatusKind::Conflicted,
-            generated::svn_wc_status_kind_svn_wc_status_ignored => StatusKind::Ignored,
-            generated::svn_wc_status_kind_svn_wc_status_obstructed => StatusKind::Obstructed,
-            generated::svn_wc_status_kind_svn_wc_status_external => StatusKind::External,
-            generated::svn_wc_status_kind_svn_wc_status_incomplete => StatusKind::Incomplete,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_none => StatusKind::None,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_unversioned => StatusKind::Unversioned,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_normal => StatusKind::Normal,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_added => StatusKind::Added,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_missing => StatusKind::Missing,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_deleted => StatusKind::Deleted,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_replaced => StatusKind::Replaced,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_modified => StatusKind::Modified,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_merged => StatusKind::Merged,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_conflicted => StatusKind::Conflicted,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_ignored => StatusKind::Ignored,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_obstructed => StatusKind::Obstructed,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_external => StatusKind::External,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_incomplete => StatusKind::Incomplete,
             n => panic!("Unknown status kind: {:?}", n),
         }
     }
 }
 
-impl From<StatusKind> for generated::svn_wc_status_kind {
+impl From<StatusKind> for subversion_sys::svn_wc_status_kind {
     fn from(kind: StatusKind) -> Self {
         match kind {
-            StatusKind::None => generated::svn_wc_status_kind_svn_wc_status_none,
-            StatusKind::Unversioned => generated::svn_wc_status_kind_svn_wc_status_unversioned,
-            StatusKind::Normal => generated::svn_wc_status_kind_svn_wc_status_normal,
-            StatusKind::Added => generated::svn_wc_status_kind_svn_wc_status_added,
-            StatusKind::Missing => generated::svn_wc_status_kind_svn_wc_status_missing,
-            StatusKind::Deleted => generated::svn_wc_status_kind_svn_wc_status_deleted,
-            StatusKind::Replaced => generated::svn_wc_status_kind_svn_wc_status_replaced,
-            StatusKind::Modified => generated::svn_wc_status_kind_svn_wc_status_modified,
-            StatusKind::Merged => generated::svn_wc_status_kind_svn_wc_status_merged,
-            StatusKind::Conflicted => generated::svn_wc_status_kind_svn_wc_status_conflicted,
-            StatusKind::Ignored => generated::svn_wc_status_kind_svn_wc_status_ignored,
-            StatusKind::Obstructed => generated::svn_wc_status_kind_svn_wc_status_obstructed,
-            StatusKind::External => generated::svn_wc_status_kind_svn_wc_status_external,
-            StatusKind::Incomplete => generated::svn_wc_status_kind_svn_wc_status_incomplete,
+            StatusKind::None => subversion_sys::svn_wc_status_kind_svn_wc_status_none,
+            StatusKind::Unversioned => subversion_sys::svn_wc_status_kind_svn_wc_status_unversioned,
+            StatusKind::Normal => subversion_sys::svn_wc_status_kind_svn_wc_status_normal,
+            StatusKind::Added => subversion_sys::svn_wc_status_kind_svn_wc_status_added,
+            StatusKind::Missing => subversion_sys::svn_wc_status_kind_svn_wc_status_missing,
+            StatusKind::Deleted => subversion_sys::svn_wc_status_kind_svn_wc_status_deleted,
+            StatusKind::Replaced => subversion_sys::svn_wc_status_kind_svn_wc_status_replaced,
+            StatusKind::Modified => subversion_sys::svn_wc_status_kind_svn_wc_status_modified,
+            StatusKind::Merged => subversion_sys::svn_wc_status_kind_svn_wc_status_merged,
+            StatusKind::Conflicted => subversion_sys::svn_wc_status_kind_svn_wc_status_conflicted,
+            StatusKind::Ignored => subversion_sys::svn_wc_status_kind_svn_wc_status_ignored,
+            StatusKind::Obstructed => subversion_sys::svn_wc_status_kind_svn_wc_status_obstructed,
+            StatusKind::External => subversion_sys::svn_wc_status_kind_svn_wc_status_external,
+            StatusKind::Incomplete => subversion_sys::svn_wc_status_kind_svn_wc_status_incomplete,
         }
     }
 }
 
-pub struct Lock(PooledPtr<generated::svn_lock_t>);
+pub struct Lock(PooledPtr<subversion_sys::svn_lock_t>);
 unsafe impl Send for Lock {}
 
 impl Lock {
@@ -598,7 +600,7 @@ impl Lock {
         Self(
             apr::pool::PooledPtr::initialize(|pool| {
                 Ok::<_, Error>(unsafe {
-                    crate::generated::svn_lock_dup(self.0.as_ptr(), pool.as_mut_ptr())
+                    subversion_sys::svn_lock_dup(self.0.as_ptr(), pool.as_mut_ptr())
                 })
             })
             .unwrap(),
@@ -641,7 +643,7 @@ impl Lock {
     pub fn create() -> Self {
         Self(
             apr::pool::PooledPtr::initialize(|pool| {
-                Ok::<_, Error>(unsafe { crate::generated::svn_lock_create(pool.as_mut_ptr()) })
+                Ok::<_, Error>(unsafe { subversion_sys::svn_lock_create(pool.as_mut_ptr()) })
             })
             .unwrap(),
         )
@@ -655,34 +657,30 @@ pub enum ChecksumKind {
     Fnv1a32x4,
 }
 
-impl From<crate::generated::svn_checksum_kind_t> for ChecksumKind {
-    fn from(kind: crate::generated::svn_checksum_kind_t) -> Self {
+impl From<subversion_sys::svn_checksum_kind_t> for ChecksumKind {
+    fn from(kind: subversion_sys::svn_checksum_kind_t) -> Self {
         match kind {
-            crate::generated::svn_checksum_kind_t_svn_checksum_md5 => ChecksumKind::MD5,
-            crate::generated::svn_checksum_kind_t_svn_checksum_sha1 => ChecksumKind::SHA1,
-            crate::generated::svn_checksum_kind_t_svn_checksum_fnv1a_32 => ChecksumKind::Fnv1a32,
-            crate::generated::svn_checksum_kind_t_svn_checksum_fnv1a_32x4 => {
-                ChecksumKind::Fnv1a32x4
-            }
+            subversion_sys::svn_checksum_kind_t_svn_checksum_md5 => ChecksumKind::MD5,
+            subversion_sys::svn_checksum_kind_t_svn_checksum_sha1 => ChecksumKind::SHA1,
+            subversion_sys::svn_checksum_kind_t_svn_checksum_fnv1a_32 => ChecksumKind::Fnv1a32,
+            subversion_sys::svn_checksum_kind_t_svn_checksum_fnv1a_32x4 => ChecksumKind::Fnv1a32x4,
             n => panic!("Unknown checksum kind: {:?}", n),
         }
     }
 }
 
-impl From<ChecksumKind> for crate::generated::svn_checksum_kind_t {
+impl From<ChecksumKind> for subversion_sys::svn_checksum_kind_t {
     fn from(kind: ChecksumKind) -> Self {
         match kind {
-            ChecksumKind::MD5 => crate::generated::svn_checksum_kind_t_svn_checksum_md5,
-            ChecksumKind::SHA1 => crate::generated::svn_checksum_kind_t_svn_checksum_sha1,
-            ChecksumKind::Fnv1a32 => crate::generated::svn_checksum_kind_t_svn_checksum_fnv1a_32,
-            ChecksumKind::Fnv1a32x4 => {
-                crate::generated::svn_checksum_kind_t_svn_checksum_fnv1a_32x4
-            }
+            ChecksumKind::MD5 => subversion_sys::svn_checksum_kind_t_svn_checksum_md5,
+            ChecksumKind::SHA1 => subversion_sys::svn_checksum_kind_t_svn_checksum_sha1,
+            ChecksumKind::Fnv1a32 => subversion_sys::svn_checksum_kind_t_svn_checksum_fnv1a_32,
+            ChecksumKind::Fnv1a32x4 => subversion_sys::svn_checksum_kind_t_svn_checksum_fnv1a_32x4,
         }
     }
 }
 
-pub struct LocationSegment(PooledPtr<generated::svn_location_segment_t>);
+pub struct LocationSegment(PooledPtr<subversion_sys::svn_location_segment_t>);
 unsafe impl Send for LocationSegment {}
 
 impl LocationSegment {
@@ -690,7 +688,7 @@ impl LocationSegment {
         Self(
             apr::pool::PooledPtr::initialize(|pool| {
                 Ok::<_, Error>(unsafe {
-                    crate::generated::svn_location_segment_dup(self.0.as_ptr(), pool.as_mut_ptr())
+                    subversion_sys::svn_location_segment_dup(self.0.as_ptr(), pool.as_mut_ptr())
                 })
             })
             .unwrap(),
@@ -711,16 +709,16 @@ impl LocationSegment {
 
 #[cfg(any(feature = "ra", feature = "client"))]
 pub(crate) extern "C" fn wrap_commit_callback2(
-    commit_info: *const crate::generated::svn_commit_info_t,
+    commit_info: *const subversion_sys::svn_commit_info_t,
     baton: *mut std::ffi::c_void,
     pool: *mut apr::apr_pool_t,
-) -> *mut crate::generated::svn_error_t {
+) -> *mut subversion_sys::svn_error_t {
     unsafe {
         let callback = baton as *mut &mut dyn FnMut(&crate::CommitInfo) -> Result<(), Error>;
         let mut callback = Box::from_raw(callback);
         match callback(&crate::CommitInfo(PooledPtr::in_pool(
             std::rc::Rc::new(apr::pool::Pool::from_raw(pool)),
-            commit_info as *mut crate::generated::svn_commit_info_t,
+            commit_info as *mut subversion_sys::svn_commit_info_t,
         ))) {
             Ok(()) => std::ptr::null_mut(),
             Err(mut err) => err.as_mut_ptr(),
@@ -731,9 +729,9 @@ pub(crate) extern "C" fn wrap_commit_callback2(
 #[cfg(any(feature = "ra", feature = "client"))]
 pub(crate) extern "C" fn wrap_log_entry_receiver(
     baton: *mut std::ffi::c_void,
-    log_entry: *mut crate::generated::svn_log_entry_t,
+    log_entry: *mut subversion_sys::svn_log_entry_t,
     pool: *mut apr::apr_pool_t,
-) -> *mut crate::generated::svn_error_t {
+) -> *mut subversion_sys::svn_error_t {
     unsafe {
         let callback = baton as *mut &mut dyn FnMut(&LogEntry) -> Result<(), Error>;
         let mut callback = Box::from_raw(callback);
@@ -752,7 +750,7 @@ pub(crate) extern "C" fn wrap_log_entry_receiver(
 
 extern "C" fn wrap_cancel_func(
     cancel_baton: *mut std::ffi::c_void,
-) -> *mut crate::generated::svn_error_t {
+) -> *mut subversion_sys::svn_error_t {
     let cancel_check = unsafe { &*(cancel_baton as *const Box<dyn Fn() -> Result<(), Error>>) };
     match cancel_check() {
         Ok(()) => std::ptr::null_mut(),
@@ -760,7 +758,7 @@ extern "C" fn wrap_cancel_func(
     }
 }
 
-pub struct Checksum(PooledPtr<crate::generated::svn_checksum_t>);
+pub struct Checksum(PooledPtr<subversion_sys::svn_checksum_t>);
 
 impl Checksum {
     pub fn kind(&self) -> ChecksumKind {
@@ -768,11 +766,11 @@ impl Checksum {
     }
 
     pub fn size(&self) -> usize {
-        unsafe { crate::generated::svn_checksum_size(self.0.as_ptr()) }
+        unsafe { subversion_sys::svn_checksum_size(self.0.as_ptr()) }
     }
 
     pub fn is_empty(&mut self) -> bool {
-        unsafe { crate::generated::svn_checksum_is_empty_checksum(self.0.as_mut_ptr()) == 1 }
+        unsafe { subversion_sys::svn_checksum_is_empty_checksum(self.0.as_mut_ptr()) == 1 }
     }
 
     pub fn digest(&self) -> &[u8] {
@@ -788,7 +786,7 @@ impl Checksum {
         let hex = std::ffi::CString::new(hex).unwrap();
         let pool = apr::pool::Pool::new();
         unsafe {
-            Error::from_raw(crate::generated::svn_checksum_parse_hex(
+            Error::from_raw(subversion_sys::svn_checksum_parse_hex(
                 &mut checksum,
                 kind,
                 hex.as_ptr(),
@@ -802,33 +800,33 @@ impl Checksum {
         let kind = kind.into();
         let pool = apr::pool::Pool::new();
         unsafe {
-            let checksum = crate::generated::svn_checksum_empty_checksum(kind, pool.as_mut_ptr());
+            let checksum = subversion_sys::svn_checksum_empty_checksum(kind, pool.as_mut_ptr());
             Ok(Self(PooledPtr::in_pool(std::rc::Rc::new(pool), checksum)))
         }
     }
 }
 
-pub struct ChecksumContext(PooledPtr<crate::generated::svn_checksum_ctx_t>);
+pub struct ChecksumContext(PooledPtr<subversion_sys::svn_checksum_ctx_t>);
 
 impl ChecksumContext {
     pub fn new(kind: ChecksumKind) -> Result<Self, Error> {
         let kind = kind.into();
         let pool = apr::pool::Pool::new();
         unsafe {
-            let cc = crate::generated::svn_checksum_ctx_create(kind, pool.as_mut_ptr());
+            let cc = subversion_sys::svn_checksum_ctx_create(kind, pool.as_mut_ptr());
             Ok(Self(PooledPtr::in_pool(std::rc::Rc::new(pool), cc)))
         }
     }
 
     pub fn reset(&mut self) -> Result<(), Error> {
-        let err = unsafe { crate::generated::svn_checksum_ctx_reset(self.0.as_mut_ptr()) };
+        let err = unsafe { subversion_sys::svn_checksum_ctx_reset(self.0.as_mut_ptr()) };
         Error::from_raw(err)?;
         Ok(())
     }
 
     pub fn update(&mut self, data: &[u8]) -> Result<(), Error> {
         let err = unsafe {
-            crate::generated::svn_checksum_update(
+            subversion_sys::svn_checksum_update(
                 self.0.as_mut_ptr(),
                 data.as_ptr() as *const std::ffi::c_void,
                 data.len(),
@@ -842,7 +840,7 @@ impl ChecksumContext {
         let mut checksum = std::ptr::null_mut();
         let pool = apr::pool::Pool::new();
         unsafe {
-            Error::from_raw(crate::generated::svn_checksum_final(
+            Error::from_raw(subversion_sys::svn_checksum_final(
                 &mut checksum,
                 self.0.as_ptr(),
                 pool.as_mut_ptr(),
@@ -860,7 +858,7 @@ pub fn checksum(kind: ChecksumKind, data: &[u8]) -> Result<Checksum, Error> {
     let kind = kind.into();
     let pool = apr::pool::Pool::new();
     unsafe {
-        Error::from_raw(crate::generated::svn_checksum(
+        Error::from_raw(subversion_sys::svn_checksum(
             &mut checksum,
             kind,
             data.as_ptr() as *const std::ffi::c_void,

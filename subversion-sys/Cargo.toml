@@ -1,0 +1,33 @@
+[package]
+name = "subversion-sys"
+version = "0.0.8"
+edition = "2021"
+authors = ["Jelmer Vernooĳ <jelmer@apache.org>"]
+repository = "https://github.com/jelmer/subversion-rs.git"
+homepage = "https://github.com/jelmer/subversion-rs"
+license = "Apache-2.0"
+description = "Low-level FFI bindings for Subversion"
+documentation = "https://docs.rs/subversion-sys"
+
+[dependencies]
+apr = { version = ">=0.1.14" }
+
+[build-dependencies]
+bindgen = "0.72"
+system-deps = "7.0"
+
+[features]
+default = ["ra", "wc", "client", "delta"]
+client = []
+ra = ["delta"]
+wc = ["delta"]
+delta = []
+
+[package.metadata.system-deps]
+libsvn_client = { version = ">=1.14", feature = "client" }
+libsvn_delta = { version = ">=1.14", feature = "delta" }
+libsvn_subr = ">=1.14"
+libsvn_repos = ">=1.14"
+libsvn_fs = ">=1.14"
+libsvn_wc = { version = ">=1.14", feature = "wc" }
+libsvn_ra = { version = ">=1.14", feature = "ra" }

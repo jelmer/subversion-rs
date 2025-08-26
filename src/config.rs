@@ -1,4 +1,4 @@
-pub struct Config<'pool>(apr::hash::Hash<'pool, &'pool str, *mut crate::generated::svn_config_t>);
+pub struct Config<'pool>(apr::hash::Hash<'pool, &'pool str, *mut subversion_sys::svn_config_t>);
 use apr::hash::apr_hash_t;
 
 impl<'pool> Config<'pool> {

@@ -1,6 +1,6 @@
-use crate::generated::{svn_repos_create, svn_repos_find_root_path, svn_repos_t};
 use crate::{Error, Revnum};
 use apr::pool::PooledPtr;
+use subversion_sys::{svn_repos_create, svn_repos_find_root_path, svn_repos_t};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LoadUUID {
@@ -15,23 +15,23 @@ pub enum LoadUUID {
     Force,
 }
 
-impl From<crate::generated::svn_repos_load_uuid> for LoadUUID {
-    fn from(load_uuid: crate::generated::svn_repos_load_uuid) -> Self {
+impl From<subversion_sys::svn_repos_load_uuid> for LoadUUID {
+    fn from(load_uuid: subversion_sys::svn_repos_load_uuid) -> Self {
         match load_uuid {
-            crate::generated::svn_repos_load_uuid_svn_repos_load_uuid_default => Self::Default,
-            crate::generated::svn_repos_load_uuid_svn_repos_load_uuid_ignore => Self::Ignore,
-            crate::generated::svn_repos_load_uuid_svn_repos_load_uuid_force => Self::Force,
+            subversion_sys::svn_repos_load_uuid_svn_repos_load_uuid_default => Self::Default,
+            subversion_sys::svn_repos_load_uuid_svn_repos_load_uuid_ignore => Self::Ignore,
+            subversion_sys::svn_repos_load_uuid_svn_repos_load_uuid_force => Self::Force,
             _ => unreachable!(),
         }
     }
 }
 
-impl From<LoadUUID> for crate::generated::svn_repos_load_uuid {
+impl From<LoadUUID> for subversion_sys::svn_repos_load_uuid {
     fn from(load_uuid: LoadUUID) -> Self {
         match load_uuid {
-            LoadUUID::Default => crate::generated::svn_repos_load_uuid_svn_repos_load_uuid_default,
-            LoadUUID::Ignore => crate::generated::svn_repos_load_uuid_svn_repos_load_uuid_ignore,
-            LoadUUID::Force => crate::generated::svn_repos_load_uuid_svn_repos_load_uuid_force,
+            LoadUUID::Default => subversion_sys::svn_repos_load_uuid_svn_repos_load_uuid_default,
+            LoadUUID::Ignore => subversion_sys::svn_repos_load_uuid_svn_repos_load_uuid_ignore,
+            LoadUUID::Force => subversion_sys::svn_repos_load_uuid_svn_repos_load_uuid_force,
         }
     }
 }
@@ -77,7 +77,7 @@ impl Repos {
         Ok(Self(PooledPtr::initialize(|pool| {
             let mut repos: *mut svn_repos_t = std::ptr::null_mut();
             let ret = unsafe {
-                crate::generated::svn_repos_open(&mut repos, path.as_ptr(), pool.as_mut_ptr())
+                subversion_sys::svn_repos_open(&mut repos, path.as_ptr(), pool.as_mut_ptr())
             };
             Error::from_raw(ret)?;
             Ok::<_, Error>(repos)
@@ -90,7 +90,7 @@ impl Repos {
                 let mut capabilities: *mut apr::hash::apr_hash_t = std::ptr::null_mut();
                 let scratch_pool = apr::Pool::new();
                 let ret = unsafe {
-                    crate::generated::svn_repos_capabilities(
+                    subversion_sys::svn_repos_capabilities(
                         &mut capabilities,
                         self.0.as_mut_ptr(),
                         pool.as_mut_ptr(),
@@ -111,8 +111,8 @@ impl Repos {
         let capability = std::ffi::CString::new(capability).unwrap();
         let pool = apr::Pool::new();
         unsafe {
-            let mut has: crate::generated::svn_boolean_t = 0;
-            let ret = crate::generated::svn_repos_has_capability(
+            let mut has: subversion_sys::svn_boolean_t = 0;
+            let ret = subversion_sys::svn_repos_has_capability(
                 self.0.as_mut_ptr(),
                 &mut has,
                 capability.as_ptr(),
@@ -133,7 +133,7 @@ impl Repos {
             .map(|c| c.as_ptr())
             .collect::<apr::tables::ArrayHeader<_>>();
         let ret = unsafe {
-            crate::generated::svn_repos_remember_client_capabilities(
+            subversion_sys::svn_repos_remember_client_capabilities(
                 self.0.as_mut_ptr(),
                 capabilities_array.as_ptr(),
             )
@@ -143,7 +143,7 @@ impl Repos {
     }
 
     pub fn fs(&mut self) -> Option<crate::fs::Fs> {
-        let fs = unsafe { crate::generated::svn_repos_fs(self.0.as_mut_ptr()) };
+        let fs = unsafe { subversion_sys::svn_repos_fs(self.0.as_mut_ptr()) };
 
         if fs.is_null() {
             None
@@ -157,15 +157,14 @@ impl Repos {
     pub fn fs_type(&mut self) -> String {
         let pool = apr::Pool::new();
         let ret =
-            unsafe { crate::generated::svn_repos_fs_type(self.0.as_mut_ptr(), pool.as_mut_ptr()) };
+            unsafe { subversion_sys::svn_repos_fs_type(self.0.as_mut_ptr(), pool.as_mut_ptr()) };
         let fs_type = unsafe { std::ffi::CStr::from_ptr(ret) };
         fs_type.to_str().unwrap().to_string()
     }
 
     pub fn path(&mut self) -> std::path::PathBuf {
         let pool = apr::Pool::new();
-        let ret =
-            unsafe { crate::generated::svn_repos_path(self.0.as_mut_ptr(), pool.as_mut_ptr()) };
+        let ret = unsafe { subversion_sys::svn_repos_path(self.0.as_mut_ptr(), pool.as_mut_ptr()) };
         let path = unsafe { std::ffi::CStr::from_ptr(ret) };
         std::path::PathBuf::from(path.to_str().unwrap())
     }
@@ -173,7 +172,7 @@ impl Repos {
     pub fn db_env(&mut self) -> std::path::PathBuf {
         let pool = apr::Pool::new();
         let ret =
-            unsafe { crate::generated::svn_repos_db_env(self.0.as_mut_ptr(), pool.as_mut_ptr()) };
+            unsafe { subversion_sys::svn_repos_db_env(self.0.as_mut_ptr(), pool.as_mut_ptr()) };
         let db_env = unsafe { std::ffi::CStr::from_ptr(ret) };
         std::path::PathBuf::from(db_env.to_str().unwrap())
     }
@@ -181,7 +180,7 @@ impl Repos {
     pub fn conf_dir(&mut self) -> std::path::PathBuf {
         let pool = apr::Pool::new();
         let ret =
-            unsafe { crate::generated::svn_repos_conf_dir(self.0.as_mut_ptr(), pool.as_mut_ptr()) };
+            unsafe { subversion_sys::svn_repos_conf_dir(self.0.as_mut_ptr(), pool.as_mut_ptr()) };
         let conf_dir = unsafe { std::ffi::CStr::from_ptr(ret) };
         std::path::PathBuf::from(conf_dir.to_str().unwrap())
     }
@@ -189,7 +188,7 @@ impl Repos {
     pub fn svnserve_conf(&mut self) -> std::path::PathBuf {
         let pool = apr::Pool::new();
         let ret = unsafe {
-            crate::generated::svn_repos_svnserve_conf(self.0.as_mut_ptr(), pool.as_mut_ptr())
+            subversion_sys::svn_repos_svnserve_conf(self.0.as_mut_ptr(), pool.as_mut_ptr())
         };
         let svnserve_conf = unsafe { std::ffi::CStr::from_ptr(ret) };
         std::path::PathBuf::from(svnserve_conf.to_str().unwrap())
@@ -198,7 +197,7 @@ impl Repos {
     pub fn lock_dir(&mut self) -> std::path::PathBuf {
         let pool = apr::Pool::new();
         let ret =
-            unsafe { crate::generated::svn_repos_lock_dir(self.0.as_mut_ptr(), pool.as_mut_ptr()) };
+            unsafe { subversion_sys::svn_repos_lock_dir(self.0.as_mut_ptr(), pool.as_mut_ptr()) };
         let lock_dir = unsafe { std::ffi::CStr::from_ptr(ret) };
         std::path::PathBuf::from(lock_dir.to_str().unwrap())
     }
@@ -206,7 +205,7 @@ impl Repos {
     pub fn db_lockfile(&mut self) -> std::path::PathBuf {
         let pool = apr::Pool::new();
         let ret = unsafe {
-            crate::generated::svn_repos_db_lockfile(self.0.as_mut_ptr(), pool.as_mut_ptr())
+            subversion_sys::svn_repos_db_lockfile(self.0.as_mut_ptr(), pool.as_mut_ptr())
         };
         let db_lockfile = unsafe { std::ffi::CStr::from_ptr(ret) };
         std::path::PathBuf::from(db_lockfile.to_str().unwrap())
@@ -215,7 +214,7 @@ impl Repos {
     pub fn db_logs_lockfile(&mut self) -> std::path::PathBuf {
         let pool = apr::Pool::new();
         let ret = unsafe {
-            crate::generated::svn_repos_db_logs_lockfile(self.0.as_mut_ptr(), pool.as_mut_ptr())
+            subversion_sys::svn_repos_db_logs_lockfile(self.0.as_mut_ptr(), pool.as_mut_ptr())
         };
         let logs_lockfile = unsafe { std::ffi::CStr::from_ptr(ret) };
         std::path::PathBuf::from(logs_lockfile.to_str().unwrap())
@@ -224,7 +223,7 @@ impl Repos {
     pub fn hook_dir(&mut self) -> std::path::PathBuf {
         let pool = apr::Pool::new();
         let ret =
-            unsafe { crate::generated::svn_repos_hook_dir(self.0.as_mut_ptr(), pool.as_mut_ptr()) };
+            unsafe { subversion_sys::svn_repos_hook_dir(self.0.as_mut_ptr(), pool.as_mut_ptr()) };
         let hook_dir = unsafe { std::ffi::CStr::from_ptr(ret) };
         std::path::PathBuf::from(hook_dir.to_str().unwrap())
     }
@@ -246,7 +245,7 @@ impl Repos {
     ) -> Result<(), Error> {
         let pool = apr::Pool::new();
         let ret = unsafe {
-            crate::generated::svn_repos_load_fs6(
+            subversion_sys::svn_repos_load_fs6(
                 self.0.as_mut_ptr(),
                 dumpstream.as_mut_ptr(),
                 start_rev.0,
@@ -297,10 +296,10 @@ impl Repos {
     ) -> Result<(), Error> {
         extern "C" fn verify_callback(
             baton: *mut std::ffi::c_void,
-            revision: crate::generated::svn_revnum_t,
-            verify_err: *mut crate::generated::svn_error_t,
+            revision: subversion_sys::svn_revnum_t,
+            verify_err: *mut subversion_sys::svn_error_t,
             _pool: *mut apr::apr_pool_t,
-        ) -> *mut crate::generated::svn_error_t {
+        ) -> *mut subversion_sys::svn_error_t {
             let baton = unsafe {
                 &mut *(baton as *mut Box<dyn FnMut(Revnum, &Error) -> Result<(), Error>>)
             };
@@ -312,7 +311,7 @@ impl Repos {
         }
         let pool = apr::Pool::new();
         let ret = unsafe {
-            crate::generated::svn_repos_verify_fs3(
+            subversion_sys::svn_repos_verify_fs3(
                 self.0.as_mut_ptr(),
                 start_rev.0,
                 end_rev.0,
@@ -354,7 +353,7 @@ impl Repos {
     ) -> Result<(), Error> {
         let pool = apr::Pool::new();
         let ret = unsafe {
-            crate::generated::svn_repos_fs_pack2(
+            subversion_sys::svn_repos_fs_pack2(
                 self.0.as_mut_ptr(),
                 if notify_func.is_some() {
                     Some(wrap_notify_func)
@@ -393,7 +392,7 @@ pub fn recover(
     let path = std::ffi::CString::new(path).unwrap();
     let pool = apr::Pool::new();
     let ret = unsafe {
-        crate::generated::svn_repos_recover4(
+        subversion_sys::svn_repos_recover4(
             path.as_ptr(),
             nonblocking.into(),
             if notify_func.is_some() {
@@ -422,7 +421,7 @@ pub fn recover(
 extern "C" fn wrap_freeze_func(
     baton: *mut std::ffi::c_void,
     _pool: *mut apr::apr_pool_t,
-) -> *mut crate::generated::svn_error_t {
+) -> *mut subversion_sys::svn_error_t {
     let freeze_func = unsafe { &*(baton as *const Box<dyn Fn() -> Result<(), Error>>) };
     match freeze_func() {
         Ok(()) => std::ptr::null_mut(),
@@ -444,7 +443,7 @@ pub fn freeze(
         .collect::<apr::tables::ArrayHeader<_>>();
     let pool = apr::Pool::new();
     let ret = unsafe {
-        crate::generated::svn_repos_freeze(
+        subversion_sys::svn_repos_freeze(
             paths_array.as_ptr(),
             if freeze_func.is_some() {
                 Some(wrap_freeze_func)
@@ -462,11 +461,11 @@ pub fn freeze(
 }
 
 #[allow(dead_code)]
-pub struct Notify(PooledPtr<crate::generated::svn_repos_notify_t>);
+pub struct Notify(PooledPtr<subversion_sys::svn_repos_notify_t>);
 
 extern "C" fn wrap_notify_func(
     baton: *mut std::ffi::c_void,
-    notify: *const crate::generated::svn_repos_notify_t,
+    notify: *const subversion_sys::svn_repos_notify_t,
     pool: *mut apr::apr_pool_t,
 ) {
     let pool = apr::Pool::from_raw(pool);
@@ -490,7 +489,7 @@ pub fn upgrade(
     let notify_baton = Box::into_raw(Box::new(notify_func)).cast();
     let pool = apr::Pool::new();
     let ret = unsafe {
-        crate::generated::svn_repos_upgrade2(
+        subversion_sys::svn_repos_upgrade2(
             path.as_ptr(),
             nonblocking as i32,
             notify_func,
@@ -505,13 +504,13 @@ pub fn upgrade(
 pub fn delete(path: &std::path::Path) -> Result<(), Error> {
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     let pool = apr::Pool::new();
-    let ret = unsafe { crate::generated::svn_repos_delete(path.as_ptr(), pool.as_mut_ptr()) };
+    let ret = unsafe { subversion_sys::svn_repos_delete(path.as_ptr(), pool.as_mut_ptr()) };
     Error::from_raw(ret)?;
     Ok(())
 }
 
 pub fn version() -> crate::Version {
-    unsafe { crate::Version(crate::generated::svn_repos_version()) }
+    unsafe { crate::Version(subversion_sys::svn_repos_version()) }
 }
 
 pub fn hotcopy(
@@ -526,7 +525,7 @@ pub fn hotcopy(
     let dst_path = std::ffi::CString::new(dst_path).unwrap();
     let pool = apr::Pool::new();
     let ret = unsafe {
-        crate::generated::svn_repos_hotcopy3(
+        subversion_sys::svn_repos_hotcopy3(
             src_path.as_ptr(),
             dst_path.as_ptr(),
             clean_logs.into(),
