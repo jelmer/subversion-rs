@@ -1,7 +1,7 @@
 use crate::dirent::Dirent;
 use crate::Canonical;
 use crate::Error;
-use apr::pool::Pooled;
+use apr::pool::PooledPtr;
 
 pub struct Uri<'a>(*const i8, std::marker::PhantomData<&'a ()>);
 
@@ -35,12 +35,14 @@ impl<'a> Uri<'a> {
         Self(cstr.as_ptr(), std::marker::PhantomData)
     }
 
-    pub fn pooled(s: &str) -> Pooled<Self> {
-        Pooled::initialize(|pool| {
-            Ok::<_, crate::Error>(Self(
-                apr::strings::pstrdup(s, pool).as_ptr() as *const i8,
-                std::marker::PhantomData,
-            ))
+    pub fn pooled(s: &str) -> PooledPtr<Self> {
+        PooledPtr::initialize(|pool| {
+            let ptr = apr::strings::pstrdup(s, pool).as_ptr() as *const i8;
+            let uri: *mut Self = pool.calloc();
+            unsafe {
+                *uri = Self(ptr, std::marker::PhantomData);
+            }
+            Ok::<*mut Self, crate::Error>(uri)
         })
         .unwrap()
     }
@@ -53,27 +55,28 @@ impl<'a> Uri<'a> {
         self.0
     }
 
-    pub fn dirname(&self) -> Pooled<Self> {
-        Pooled::initialize(|pool| unsafe {
-            Ok::<_, crate::Error>(Self(
-                crate::generated::svn_uri_dirname(self.as_ptr(), pool.as_mut_ptr()) as *const i8,
-                std::marker::PhantomData,
-            ))
+    pub fn dirname(&self) -> PooledPtr<Self> {
+        PooledPtr::initialize(|pool| unsafe {
+            let dirname =
+                crate::generated::svn_uri_dirname(self.as_ptr(), pool.as_mut_ptr()) as *const i8;
+            let uri: *mut Self = pool.calloc();
+            *uri = Self(dirname, std::marker::PhantomData);
+            Ok::<*mut Self, crate::Error>(uri)
         })
         .unwrap()
     }
 
-    pub fn basename(&self) -> Pooled<Self> {
-        Pooled::initialize(|pool| unsafe {
-            Ok::<_, crate::Error>(Self(
-                crate::generated::svn_uri_basename(self.as_ptr(), pool.as_mut_ptr()),
-                std::marker::PhantomData,
-            ))
+    pub fn basename(&self) -> PooledPtr<Self> {
+        PooledPtr::initialize(|pool| unsafe {
+            let basename = crate::generated::svn_uri_basename(self.as_ptr(), pool.as_mut_ptr());
+            let uri: *mut Self = pool.calloc();
+            *uri = Self(basename, std::marker::PhantomData);
+            Ok::<*mut Self, crate::Error>(uri)
         })
         .unwrap()
     }
 
-    pub fn split(&self) -> (Pooled<Self>, Pooled<Self>) {
+    pub fn split(&self) -> (PooledPtr<Self>, PooledPtr<Self>) {
         let pool = apr::pool::Pool::new();
         unsafe {
             let mut dirname = std::ptr::null();
@@ -85,19 +88,26 @@ impl<'a> Uri<'a> {
                 pool.as_mut_ptr(),
             );
             let pool = std::rc::Rc::new(pool);
+            let dirname_uri: *mut Self =
+                apr::pool::Pool::from_raw(std::rc::Rc::as_ptr(&pool) as *mut _).calloc();
+            let basename_uri: *mut Self =
+                apr::pool::Pool::from_raw(std::rc::Rc::as_ptr(&pool) as *mut _).calloc();
+            *dirname_uri = Self(dirname, std::marker::PhantomData);
+            *basename_uri = Self(basename, std::marker::PhantomData);
             (
-                Pooled::in_pool(pool.clone(), Self(dirname, std::marker::PhantomData)),
-                Pooled::in_pool(pool, Self(basename, std::marker::PhantomData)),
+                PooledPtr::in_pool(pool.clone(), dirname_uri),
+                PooledPtr::in_pool(pool, basename_uri),
             )
         }
     }
 
-    pub fn canonicalize(&self) -> Pooled<Canonical<Self>> {
-        Pooled::initialize(|pool| unsafe {
-            Ok::<_, crate::Error>(Canonical(Self(
-                crate::generated::svn_uri_canonicalize(self.as_ptr(), pool.as_mut_ptr()),
-                std::marker::PhantomData,
-            )))
+    pub fn canonicalize(&self) -> PooledPtr<Canonical<Self>> {
+        PooledPtr::initialize(|pool| unsafe {
+            let canonical =
+                crate::generated::svn_uri_canonicalize(self.as_ptr(), pool.as_mut_ptr());
+            let canonical_uri: *mut Canonical<Self> = pool.calloc();
+            *canonical_uri = Canonical(Self(canonical, std::marker::PhantomData));
+            Ok::<*mut Canonical<Self>, crate::Error>(canonical_uri)
         })
         .unwrap()
     }
@@ -114,7 +124,7 @@ impl<'a> Uri<'a> {
 
     pub fn canonicalize_safe(
         &self,
-    ) -> Result<(Pooled<Canonical<Self>>, Pooled<Self>), crate::Error> {
+    ) -> Result<(PooledPtr<Canonical<Self>>, PooledPtr<Self>), crate::Error> {
         let pool = apr::pool::Pool::new();
         unsafe {
             let mut canonical = std::ptr::null();
@@ -128,12 +138,15 @@ impl<'a> Uri<'a> {
             );
             Error::from_raw(err)?;
             let pool = std::rc::Rc::new(pool);
+            let canonical_uri: *mut Canonical<Self> =
+                apr::pool::Pool::from_raw(std::rc::Rc::as_ptr(&pool) as *mut _).calloc();
+            let non_canonical_uri: *mut Self =
+                apr::pool::Pool::from_raw(std::rc::Rc::as_ptr(&pool) as *mut _).calloc();
+            *canonical_uri = Canonical(Self(canonical, std::marker::PhantomData));
+            *non_canonical_uri = Self(non_canonical, std::marker::PhantomData);
             Ok((
-                Pooled::in_pool(
-                    pool.clone(),
-                    Canonical(Self(canonical, std::marker::PhantomData)),
-                ),
-                Pooled::in_pool(pool, Self(non_canonical, std::marker::PhantomData)),
+                PooledPtr::in_pool(pool.clone(), canonical_uri),
+                PooledPtr::in_pool(pool, non_canonical_uri),
             ))
         }
     }
@@ -155,8 +168,8 @@ impl<'a> Uri<'a> {
         }
     }
 
-    fn to_dirent<'b>(&self) -> Result<Pooled<Dirent<'b>>, crate::Error> {
-        Pooled::initialize(|pool| unsafe {
+    fn to_dirent<'b>(&self) -> Result<PooledPtr<Dirent<'b>>, crate::Error> {
+        PooledPtr::initialize(|pool| unsafe {
             let mut dirent = std::ptr::null();
             let err = crate::generated::svn_uri_get_dirent_from_file_url(
                 &mut dirent,
@@ -164,15 +177,17 @@ impl<'a> Uri<'a> {
                 pool.as_mut_ptr(),
             );
             Error::from_raw(err)?;
-            Ok::<_, Error>(Dirent::from_raw(dirent))
+            let dirent_ptr: *mut Dirent = pool.calloc();
+            *dirent_ptr = Dirent::from_raw(dirent);
+            Ok::<*mut Dirent, Error>(dirent_ptr)
         })
     }
 }
 
-impl<'a, 'b> TryFrom<Canonical<Uri<'a>>> for Pooled<Dirent<'b>> {
+impl<'a, 'b> TryFrom<Canonical<Uri<'a>>> for PooledPtr<Dirent<'b>> {
     type Error = crate::Error;
 
-    fn try_from(uri: Canonical<Uri<'a>>) -> Result<Pooled<Dirent<'b>>, Self::Error> {
+    fn try_from(uri: Canonical<Uri<'a>>) -> Result<PooledPtr<Dirent<'b>>, Self::Error> {
         uri.to_dirent()
     }
 }
@@ -239,13 +254,13 @@ impl<'a> AsCanonicalUri<'a> for &'a str {
     }
 }
 
-impl<'a> AsCanonicalUri<'a> for Pooled<Uri<'a>> {
+impl<'a> AsCanonicalUri<'a> for PooledPtr<Uri<'a>> {
     fn as_canonical_uri(self, scratch_pool: &mut apr::pool::Pool) -> Canonical<Uri<'a>> {
         self.canonicalize_in(scratch_pool)
     }
 }
 
-impl<'a> AsCanonicalUri<'a> for Pooled<Canonical<Uri<'a>>> {
+impl<'a> AsCanonicalUri<'a> for PooledPtr<Canonical<Uri<'a>>> {
     fn as_canonical_uri(self, _scratch_pool: &mut apr::pool::Pool) -> Canonical<Uri<'a>> {
         Canonical(Uri(self.0 .0, std::marker::PhantomData))
     }

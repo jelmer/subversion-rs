@@ -1,6 +1,5 @@
 use crate::generated::{svn_wc_context_t, svn_wc_version};
 use crate::Error;
-use apr::pool::PooledPtr;
 pub fn version() -> crate::Version {
     unsafe { crate::Version(svn_wc_version()) }
 }
@@ -9,19 +8,20 @@ pub struct Context(apr::pool::PooledPtr<svn_wc_context_t>);
 
 impl Context {
     pub fn new() -> Result<Self, crate::Error> {
-        Ok(Self(PooledPtr::initialize(|pool| {
-            let mut ctx = std::ptr::null_mut();
-            let err = unsafe {
-                crate::generated::svn_wc_context_create(
-                    &mut ctx,
-                    std::ptr::null_mut(),
-                    pool.as_mut_ptr(),
-                    apr::pool::Pool::new().as_mut_ptr(),
-                )
-            };
-            Error::from_raw(err)?;
-            Ok::<_, Error>(ctx)
-        })?))
+        let pool = apr::pool::Pool::new();
+        let mut ctx = std::ptr::null_mut();
+        let err = unsafe {
+            crate::generated::svn_wc_context_create(
+                &mut ctx,
+                std::ptr::null_mut(),
+                pool.as_mut_ptr(),
+                apr::pool::Pool::new().as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        Ok(Self(unsafe {
+            apr::pool::PooledPtr::in_pool(std::rc::Rc::new(pool), ctx)
+        }))
     }
 
     pub fn check_wc(&mut self, path: &str) -> Result<i32, crate::Error> {

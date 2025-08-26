@@ -13,7 +13,7 @@ documentation = "https://docs.rs/subversion"
 doctest = false
 
 [dependencies]
-apr = { version = ">=0.1.14" }
+apr = { version = ">=0.1.14, <0.2" }
 bitflags = "2.9.3"
 #apr = { path = "../apr-rs" }
 ctor = "0.5.0"
