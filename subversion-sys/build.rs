@@ -55,7 +55,9 @@ fn create_svn_bindings(
         );
 
     if client_feature_enabled {
-        builder = builder.header(svn_path.join("svn_client.h").to_str().unwrap());
+        builder = builder
+            .header(svn_path.join("svn_client.h").to_str().unwrap())
+            .raw_line("use apr::apr_byte_t;");
     }
 
     if wc_feature_enabled {

@@ -542,6 +542,7 @@ pub enum StatusKind {
     Incomplete,
 }
 
+#[cfg(feature = "wc")]
 impl From<subversion_sys::svn_wc_status_kind> for StatusKind {
     fn from(kind: subversion_sys::svn_wc_status_kind) -> Self {
         match kind {
@@ -564,6 +565,7 @@ impl From<subversion_sys::svn_wc_status_kind> for StatusKind {
     }
 }
 
+#[cfg(feature = "wc")]
 impl From<StatusKind> for subversion_sys::svn_wc_status_kind {
     fn from(kind: StatusKind) -> Self {
         match kind {
