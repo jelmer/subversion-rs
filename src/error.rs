@@ -1,5 +1,4 @@
-use crate::generated;
-use generated::svn_error_t;
+use subversion_sys::svn_error_t;
 
 // Errors are a bit special; they own their own pool, so don't need to use PooledPtr
 pub struct Error(*mut svn_error_t);
@@ -9,7 +8,7 @@ impl Error {
     pub fn new(status: apr::Status, child: Option<Error>, msg: &str) -> Self {
         let msg = std::ffi::CString::new(msg).unwrap();
         let child = child.map(|e| e.0).unwrap_or(std::ptr::null_mut());
-        let err = unsafe { generated::svn_error_create(status as i32, child, msg.as_ptr()) };
+        let err = unsafe { subversion_sys::svn_error_create(status as i32, child, msg.as_ptr()) };
         Self(err)
     }
 
@@ -72,7 +71,7 @@ impl Error {
 
     pub fn find_cause(&self, status: apr::Status) -> Option<Error> {
         unsafe {
-            let err = generated::svn_error_find_cause(self.0, status as i32);
+            let err = subversion_sys::svn_error_find_cause(self.0, status as i32);
             if err.is_null() {
                 None
             } else {
@@ -82,7 +81,7 @@ impl Error {
     }
 
     pub fn purge_tracing(&self) -> Self {
-        unsafe { Self(generated::svn_error_purge_tracing(self.0)) }
+        unsafe { Self(subversion_sys::svn_error_purge_tracing(self.0)) }
     }
 
     pub unsafe fn detach(&mut self) -> *mut svn_error_t {
@@ -100,7 +99,7 @@ impl Error {
     pub fn best_message(&self) -> String {
         let mut buf = [0; 1024];
         unsafe {
-            let ret = generated::svn_err_best_message(self.0, buf.as_mut_ptr(), buf.len());
+            let ret = subversion_sys::svn_err_best_message(self.0, buf.as_mut_ptr(), buf.len());
             std::ffi::CStr::from_ptr(ret).to_string_lossy().into_owned()
         }
     }
@@ -108,7 +107,7 @@ impl Error {
 
 pub fn symbolic_name(status: apr::Status) -> Option<&'static str> {
     unsafe {
-        let name = crate::generated::svn_error_symbolic_name(status as i32);
+        let name = subversion_sys::svn_error_symbolic_name(status as i32);
         if name.is_null() {
             None
         } else {
@@ -120,7 +119,7 @@ pub fn symbolic_name(status: apr::Status) -> Option<&'static str> {
 pub fn strerror(status: apr::Status) -> Option<&'static str> {
     let mut buf = [0; 1024];
     unsafe {
-        let name = crate::generated::svn_strerror(status as i32, buf.as_mut_ptr(), buf.len());
+        let name = subversion_sys::svn_strerror(status as i32, buf.as_mut_ptr(), buf.len());
         if name.is_null() {
             None
         } else {
@@ -131,13 +130,13 @@ pub fn strerror(status: apr::Status) -> Option<&'static str> {
 
 impl Clone for Error {
     fn clone(&self) -> Self {
-        unsafe { Self(generated::svn_error_dup(self.0)) }
+        unsafe { Self(subversion_sys::svn_error_dup(self.0)) }
     }
 }
 
 impl Drop for Error {
     fn drop(&mut self) {
-        unsafe { generated::svn_error_clear(self.0) }
+        unsafe { subversion_sys::svn_error_clear(self.0) }
     }
 }
 
