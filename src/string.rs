@@ -1,5 +1,5 @@
-use crate::generated::svn_string_t;
 use apr::pool::PooledPtr;
+use subversion_sys::svn_string_t;
 
 pub struct String(PooledPtr<svn_string_t>);
 
@@ -37,7 +37,7 @@ impl From<&str> for String {
             let cstr = s.as_ptr();
             let len = s.len();
             let ptr = unsafe {
-                crate::generated::svn_string_ncreate(cstr as *const i8, len, pool.as_mut_ptr())
+                subversion_sys::svn_string_ncreate(cstr as *const i8, len, pool.as_mut_ptr())
             };
             Ok::<_, crate::Error>(ptr)
         })
@@ -58,7 +58,7 @@ impl From<&[u8]> for String {
             let cstr = s.as_ptr();
             let len = s.len();
             let ptr = unsafe {
-                crate::generated::svn_string_ncreate(cstr as *const i8, len, pool.as_mut_ptr())
+                subversion_sys::svn_string_ncreate(cstr as *const i8, len, pool.as_mut_ptr())
             };
             Ok::<_, crate::Error>(ptr)
         })

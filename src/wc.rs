@@ -1,6 +1,6 @@
-use crate::generated::{svn_wc_context_t, svn_wc_version};
 use crate::Error;
 use apr::pool::PooledPtr;
+use subversion_sys::{svn_wc_context_t, svn_wc_version};
 pub fn version() -> crate::Version {
     unsafe { crate::Version(svn_wc_version()) }
 }
@@ -12,7 +12,7 @@ impl Context {
         Ok(Self(PooledPtr::initialize(|pool| {
             let mut ctx = std::ptr::null_mut();
             let err = unsafe {
-                crate::generated::svn_wc_context_create(
+                subversion_sys::svn_wc_context_create(
                     &mut ctx,
                     std::ptr::null_mut(),
                     pool.as_mut_ptr(),
@@ -28,7 +28,7 @@ impl Context {
         let path = std::ffi::CString::new(path).unwrap();
         let mut wc_format = 0;
         let err = unsafe {
-            crate::generated::svn_wc_check_wc2(
+            subversion_sys::svn_wc_check_wc2(
                 &mut wc_format,
                 self.0.as_mut_ptr(),
                 path.as_ptr(),
@@ -43,7 +43,7 @@ impl Context {
         let path = std::ffi::CString::new(path).unwrap();
         let mut modified = 0;
         let err = unsafe {
-            crate::generated::svn_wc_text_modified_p2(
+            subversion_sys::svn_wc_text_modified_p2(
                 &mut modified,
                 self.0.as_mut_ptr(),
                 path.as_ptr(),
@@ -59,7 +59,7 @@ impl Context {
         let path = std::ffi::CString::new(path).unwrap();
         let mut modified = 0;
         let err = unsafe {
-            crate::generated::svn_wc_props_modified_p2(
+            subversion_sys::svn_wc_props_modified_p2(
                 &mut modified,
                 self.0.as_mut_ptr(),
                 path.as_ptr(),
@@ -76,7 +76,7 @@ impl Context {
         let mut prop_conflicted = 0;
         let mut tree_conflicted = 0;
         let err = unsafe {
-            crate::generated::svn_wc_conflicted_p3(
+            subversion_sys::svn_wc_conflicted_p3(
                 &mut text_conflicted,
                 &mut prop_conflicted,
                 &mut tree_conflicted,
@@ -107,7 +107,7 @@ impl Context {
         let repos_root_url = std::ffi::CString::new(repos_root_url).unwrap();
         let repos_uuid = std::ffi::CString::new(repos_uuid).unwrap();
         let err = unsafe {
-            crate::generated::svn_wc_ensure_adm4(
+            subversion_sys::svn_wc_ensure_adm4(
                 self.0.as_mut_ptr(),
                 local_abspath.as_ptr(),
                 url.as_ptr(),
@@ -128,7 +128,7 @@ impl Context {
         let mut locked_here = 0;
         let scratch_pool = apr::pool::Pool::new();
         let err = unsafe {
-            crate::generated::svn_wc_locked2(
+            subversion_sys::svn_wc_locked2(
                 &mut locked_here,
                 &mut locked,
                 self.0.as_mut_ptr(),
@@ -144,7 +144,7 @@ impl Context {
 impl Drop for Context {
     fn drop(&mut self) {
         unsafe {
-            crate::generated::svn_wc_context_destroy(self.0.as_mut_ptr());
+            subversion_sys::svn_wc_context_destroy(self.0.as_mut_ptr());
         }
     }
 }
@@ -152,7 +152,7 @@ impl Drop for Context {
 pub fn set_adm_dir(name: &str) -> Result<(), crate::Error> {
     let name = std::ffi::CString::new(name).unwrap();
     let err = unsafe {
-        crate::generated::svn_wc_set_adm_dir(name.as_ptr(), apr::pool::Pool::new().as_mut_ptr())
+        subversion_sys::svn_wc_set_adm_dir(name.as_ptr(), apr::pool::Pool::new().as_mut_ptr())
     };
     Error::from_raw(err)?;
     Ok(())
@@ -160,7 +160,7 @@ pub fn set_adm_dir(name: &str) -> Result<(), crate::Error> {
 
 pub fn get_adm_dir() -> String {
     let pool = apr::pool::Pool::new();
-    let name = unsafe { crate::generated::svn_wc_get_adm_dir(pool.as_mut_ptr()) };
+    let name = unsafe { subversion_sys::svn_wc_get_adm_dir(pool.as_mut_ptr()) };
     unsafe { std::ffi::CStr::from_ptr(name) }
         .to_string_lossy()
         .into_owned()
