@@ -64,11 +64,38 @@ impl Drop for Repos {
 
 impl Repos {
     pub fn create(path: &std::path::Path) -> Result<Repos, Error> {
-        // TODO: Support config, fs_config
+        Self::create_with_config(path, None, None)
+    }
+
+    pub fn create_with_config(
+        path: &std::path::Path,
+        config: Option<&std::collections::HashMap<String, String>>,
+        fs_config: Option<&std::collections::HashMap<String, String>>,
+    ) -> Result<Repos, Error> {
         let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
-        let config = std::ptr::null_mut();
-        let fs_config = std::ptr::null_mut();
         let pool = apr::Pool::new();
+
+        // Convert config HashMap to APR hash if provided
+        let config_hash = if let Some(cfg) = config {
+            let mut hash = apr::hash::Hash::<&[u8], &[u8]>::new(&pool);
+            for (k, v) in cfg.iter() {
+                hash.set(&k.as_bytes(), &v.as_bytes());
+            }
+            unsafe { hash.as_mut_ptr() }
+        } else {
+            std::ptr::null_mut()
+        };
+
+        // Convert fs_config HashMap to APR hash if provided
+        let fs_config_hash = if let Some(cfg) = fs_config {
+            let mut hash = apr::hash::Hash::<&[u8], &[u8]>::new(&pool);
+            for (k, v) in cfg.iter() {
+                hash.set(&k.as_bytes(), &v.as_bytes());
+            }
+            unsafe { hash.as_mut_ptr() }
+        } else {
+            std::ptr::null_mut()
+        };
 
         unsafe {
             let mut repos: *mut svn_repos_t = std::ptr::null_mut();
@@ -77,8 +104,8 @@ impl Repos {
                 path.as_ptr(),
                 std::ptr::null(),
                 std::ptr::null(),
-                config,
-                fs_config,
+                config_hash,
+                fs_config_hash,
                 pool.as_mut_ptr(),
             );
             svn_result(ret)?;
@@ -162,7 +189,7 @@ impl Repos {
         Ok(())
     }
 
-    pub fn fs(&mut self) -> Option<crate::fs::Fs> {
+    pub fn fs(&self) -> Option<crate::fs::Fs> {
         let fs_ptr = unsafe { subversion_sys::svn_repos_fs(self.ptr) };
 
         if fs_ptr.is_null() {
@@ -174,7 +201,7 @@ impl Repos {
         }
     }
 
-    pub fn fs_type(&mut self) -> String {
+    pub fn fs_type(&self) -> String {
         with_tmp_pool(|pool| {
             let ret = unsafe { subversion_sys::svn_repos_fs_type(self.ptr, pool.as_mut_ptr()) };
             let fs_type = unsafe { std::ffi::CStr::from_ptr(ret) };
@@ -241,7 +268,7 @@ impl Repos {
     }
 
     pub fn load_fs(
-        &mut self,
+        &self,
         dumpstream: &mut crate::io::Stream,
         start_rev: Revnum,
         end_rev: Revnum,
@@ -297,7 +324,7 @@ impl Repos {
     }
 
     pub fn verify_fs(
-        &mut self,
+        &self,
         start_rev: Revnum,
         end_rev: Revnum,
         check_normalization: bool,
@@ -359,7 +386,7 @@ impl Repos {
     }
 
     pub fn pack_fs(
-        &mut self,
+        &self,
         notify_func: Option<&impl Fn(&Notify)>,
         cancel_func: Option<&impl Fn() -> Result<(), Error>>,
     ) -> Result<(), Error> {
@@ -534,15 +561,15 @@ pub fn version() -> crate::Version {
 }
 
 pub fn hotcopy(
-    src_path: &str,
-    dst_path: &str,
+    src_path: &std::path::Path,
+    dst_path: &std::path::Path,
     clean_logs: bool,
     incremental: bool,
     notify_func: Option<&impl Fn(&Notify)>,
     cancel_func: Option<&impl Fn() -> Result<(), Error>>,
 ) -> Result<(), Error> {
-    let src_path = std::ffi::CString::new(src_path).unwrap();
-    let dst_path = std::ffi::CString::new(dst_path).unwrap();
+    let src_path = std::ffi::CString::new(src_path.to_str().unwrap()).unwrap();
+    let dst_path = std::ffi::CString::new(dst_path.to_str().unwrap()).unwrap();
     let pool = apr::Pool::new();
     let ret = unsafe {
         subversion_sys::svn_repos_hotcopy3(
@@ -596,5 +623,38 @@ mod tests {
     #[test]
     fn test_version() {
         assert!(super::version().major() >= 1);
+    }
+
+    #[test]
+    fn test_create_with_config() {
+        let td = tempfile::tempdir().unwrap();
+        let config = std::collections::HashMap::from([(
+            "repository.compression".to_string(),
+            "6".to_string(),
+        )]);
+        let fs_config =
+            std::collections::HashMap::from([("fsfs.compression".to_string(), "zlib".to_string())]);
+
+        let repos = super::Repos::create_with_config(td.path(), Some(&config), Some(&fs_config));
+        assert!(repos.is_ok(), "Failed to create repository with config");
+
+        // Test that we can open the created repository
+        let repos = super::Repos::open(td.path());
+        assert!(
+            repos.is_ok(),
+            "Failed to open repository created with config"
+        );
+    }
+
+    #[test]
+    fn test_create_with_empty_config() {
+        let td = tempfile::tempdir().unwrap();
+        let empty_config = std::collections::HashMap::new();
+
+        let repos = super::Repos::create_with_config(td.path(), Some(&empty_config), None);
+        assert!(
+            repos.is_ok(),
+            "Failed to create repository with empty config"
+        );
     }
 }
