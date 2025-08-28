@@ -949,7 +949,7 @@ mod tests {
         assert_eq!(ptr, provider.ptr);
 
         // Test reference also works
-        let ptr2 = (&provider).as_auth_provider(&pool);
+        let ptr2 = provider.as_auth_provider(&pool);
         assert_eq!(ptr, ptr2);
     }
 }

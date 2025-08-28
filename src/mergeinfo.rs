@@ -140,7 +140,7 @@ mod tests {
         ];
 
         for variant in variants {
-            let svn_val = subversion_sys::svn_mergeinfo_inheritance_t::from(variant.clone());
+            let svn_val = subversion_sys::svn_mergeinfo_inheritance_t::from(variant);
             let back = MergeinfoInheritance::from(svn_val);
             assert_eq!(variant, back);
         }
