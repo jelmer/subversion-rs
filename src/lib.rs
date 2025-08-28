@@ -107,12 +107,22 @@ impl apr::hash::IntoHashKey<'_> for &Revnum {
 }
 
 impl Revnum {
-    fn from_raw(raw: subversion_sys::svn_revnum_t) -> Option<Self> {
+    pub fn from_raw(raw: subversion_sys::svn_revnum_t) -> Option<Self> {
         if raw < 0 {
             None
         } else {
             Some(Self(raw))
         }
+    }
+
+    /// Get the revision number as u64 (for Python compatibility)
+    pub fn as_u64(&self) -> u64 {
+        self.0 as u64
+    }
+
+    /// Get the raw svn_revnum_t value
+    pub fn as_i64(&self) -> i64 {
+        self.0
     }
 }
 
@@ -530,6 +540,34 @@ pub enum NodeKind {
     Dir,
     Unknown,
     Symlink,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FsPathChangeKind {
+    Modify,
+    Add,
+    Delete,
+    Replace,
+}
+
+impl From<subversion_sys::svn_fs_path_change_kind_t> for FsPathChangeKind {
+    fn from(kind: subversion_sys::svn_fs_path_change_kind_t) -> Self {
+        match kind {
+            subversion_sys::svn_fs_path_change_kind_t_svn_fs_path_change_modify => {
+                FsPathChangeKind::Modify
+            }
+            subversion_sys::svn_fs_path_change_kind_t_svn_fs_path_change_add => {
+                FsPathChangeKind::Add
+            }
+            subversion_sys::svn_fs_path_change_kind_t_svn_fs_path_change_delete => {
+                FsPathChangeKind::Delete
+            }
+            subversion_sys::svn_fs_path_change_kind_t_svn_fs_path_change_replace => {
+                FsPathChangeKind::Replace
+            }
+            _ => FsPathChangeKind::Modify, // Default case
+        }
+    }
 }
 
 impl From<subversion_sys::svn_node_kind_t> for NodeKind {
