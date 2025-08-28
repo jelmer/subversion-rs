@@ -28,26 +28,27 @@ fn create_svn_bindings(
         .allowlist_file(".*/svn_.*.h")
         .blocklist_type("apr_.*")
         .derive_default(true)
-        .raw_line("use apr::apr_file_t;")
-        .raw_line("use apr::apr_finfo_t;")
-        .raw_line("use apr::apr_getopt_t;")
-        .raw_line("use apr::apr_int64_t;")
-        .raw_line("use apr::apr_off_t;")
-        .raw_line("use apr::apr_pool_t;")
-        .raw_line("use apr::apr_size_t;")
-        .raw_line("use apr::apr_status_t;")
-        .raw_line("use apr::apr_time_t;")
-        .raw_line("use apr::apr_int32_t;")
-        .raw_line("use apr::apr_uint32_t;")
-        .raw_line("use apr::apr_fileperms_t;")
-        .raw_line("use apr::apr_proc_t;")
-        .raw_line("use apr::apr_uint64_t;")
-        .raw_line("use apr::apr_dir_t;")
+        .raw_line("use apr_sys::apr_file_t;")
+        .raw_line("use apr_sys::apr_finfo_t;")
+        .raw_line("use apr_sys::apr_getopt_t;")
+        .raw_line("use apr_sys::apr_int64_t;")
+        .raw_line("use apr_sys::apr_off_t;")
+        .raw_line("use apr_sys::apr_pool_t;")
+        .raw_line("use apr_sys::apr_size_t;")
+        .raw_line("use apr_sys::apr_status_t;")
+        .raw_line("use apr_sys::apr_time_t;")
+        .raw_line("use apr_sys::apr_int32_t;")
+        .raw_line("use apr_sys::apr_uint32_t;")
+        .raw_line("use apr_sys::apr_fileperms_t;")
+        .raw_line("use apr_sys::apr_proc_t;")
+        .raw_line("use apr_sys::apr_uint64_t;")
+        .raw_line("use apr_sys::apr_dir_t;")
         .raw_line("use apr::hash::apr_hash_t;")
         .raw_line("use apr::tables::apr_array_header_t;")
-        .raw_line("use apr::apr_getopt_option_t;")
-        .raw_line("use apr::apr_exit_why_e;")
-        .raw_line("use apr::apr_seek_where_t;")
+        .raw_line("use apr_sys::apr_getopt_option_t;")
+        .raw_line("use apr_sys::apr_exit_why_e;")
+        .raw_line("use apr_sys::apr_seek_where_t;")
+        .raw_line("use apr_sys::apr_byte_t;")
         .clang_args(
             include_paths
                 .iter()
@@ -55,9 +56,7 @@ fn create_svn_bindings(
         );
 
     if client_feature_enabled {
-        builder = builder
-            .header(svn_path.join("svn_client.h").to_str().unwrap())
-            .raw_line("use apr::apr_byte_t;");
+        builder = builder.header(svn_path.join("svn_client.h").to_str().unwrap());
     }
 
     if wc_feature_enabled {

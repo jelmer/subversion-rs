@@ -1,7 +1,4 @@
-use crate::dirent::Dirent;
 use crate::Canonical;
-use crate::Error;
-use apr::pool::Pooled;
 
 pub struct Uri<'a>(*const i8, std::marker::PhantomData<&'a ()>);
 
@@ -35,14 +32,11 @@ impl<'a> Uri<'a> {
         Self(cstr.as_ptr(), std::marker::PhantomData)
     }
 
-    pub fn pooled(s: &str) -> Pooled<Self> {
-        Pooled::initialize(|pool| {
-            Ok::<_, crate::Error>(Self(
-                apr::strings::pstrdup(s, pool).as_ptr() as *const i8,
-                std::marker::PhantomData,
-            ))
-        })
-        .unwrap()
+    pub fn from_str(s: &str, pool: &'a apr::Pool) -> Self {
+        Self(
+            apr::strings::pstrdup_raw(s, pool).unwrap() as *const i8,
+            std::marker::PhantomData,
+        )
     }
 
     pub fn is_root(&self, length: usize) -> bool {
@@ -53,6 +47,20 @@ impl<'a> Uri<'a> {
         self.0
     }
 
+    pub fn canonicalize_in<'b>(&'_ self, pool: &'b mut apr::pool::Pool) -> Canonical<Self>
+    where
+        'a: 'b,
+    {
+        Canonical(Self(
+            unsafe { subversion_sys::svn_uri_canonicalize(self.as_ptr(), pool.as_mut_ptr()) },
+            std::marker::PhantomData,
+        ))
+    }
+}
+
+// TODO: Rework to handle lifetime-bound types - these methods return Pooled types which don't work with lifetimes
+/*
+impl<'a> Uri<'a> {
     pub fn dirname(&self) -> Pooled<Self> {
         Pooled::initialize(|pool| unsafe {
             Ok::<_, crate::Error>(Self(
@@ -61,9 +69,9 @@ impl<'a> Uri<'a> {
             ))
         })
         .unwrap()
-    }
+    }*/
 
-    pub fn basename(&self) -> Pooled<Self> {
+/*pub fn basename(&self) -> Pooled<Self> {
         Pooled::initialize(|pool| unsafe {
             Ok::<_, crate::Error>(Self(
                 subversion_sys::svn_uri_basename(self.as_ptr(), pool.as_mut_ptr()),
@@ -200,6 +208,7 @@ impl TryFrom<Uri<'_>> for url::Url {
         Ok(url::Url::parse(&uri)?)
     }
 }
+*/
 
 pub trait AsCanonicalUri<'a> {
     fn as_canonical_uri(self, scratch_pool: &mut apr::pool::Pool) -> Canonical<Uri<'a>>;
@@ -220,24 +229,28 @@ impl<'a> AsCanonicalUri<'a> for Canonical<Uri<'a>> {
 #[cfg(feature = "url")]
 impl<'a> AsCanonicalUri<'a> for url::Url {
     fn as_canonical_uri(self, scratch_pool: &mut apr::pool::Pool) -> Canonical<Uri<'a>> {
-        Uri::pooled(self.as_str()).canonicalize_in(scratch_pool)
+        Uri::from_str(self.as_str(), scratch_pool).canonicalize_in(scratch_pool)
     }
 }
 
 #[cfg(feature = "url")]
 impl<'a> AsCanonicalUri<'a> for &'a url::Url {
     fn as_canonical_uri(self, scratch_pool: &mut apr::pool::Pool) -> Canonical<Uri<'a>> {
-        Uri::pooled(self.as_str()).canonicalize_in(scratch_pool)
+        Uri::from_str(self.as_str(), scratch_pool).canonicalize_in(scratch_pool)
     }
 }
 
 impl<'a> AsCanonicalUri<'a> for &'a str {
     fn as_canonical_uri(self, scratch_pool: &mut apr::pool::Pool) -> Canonical<Uri<'a>> {
-        Uri::pooled(self).canonicalize_in(scratch_pool)
+        // Create Uri in the scratch pool and canonicalize it
+        let ptr = apr::strings::pstrdup_raw(self, scratch_pool).unwrap() as *const i8;
+        let uri = Uri::from_raw(ptr);
+        uri.canonicalize_in(scratch_pool)
     }
 }
 
-impl<'a> AsCanonicalUri<'a> for Pooled<Uri<'a>> {
+// TODO: These implementations need Pooled types which don't work with lifetimes
+/*impl<'a> AsCanonicalUri<'a> for Pooled<Uri<'a>> {
     fn as_canonical_uri(self, scratch_pool: &mut apr::pool::Pool) -> Canonical<Uri<'a>> {
         self.canonicalize_in(scratch_pool)
     }
@@ -247,4 +260,4 @@ impl<'a> AsCanonicalUri<'a> for Pooled<Canonical<Uri<'a>>> {
     fn as_canonical_uri(self, _scratch_pool: &mut apr::pool::Pool) -> Canonical<Uri<'a>> {
         Canonical(Uri(self.0 .0, std::marker::PhantomData))
     }
-}
+}*/

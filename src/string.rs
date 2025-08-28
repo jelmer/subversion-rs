@@ -1,74 +1,83 @@
-use apr::pool::PooledPtr;
+use std::marker::PhantomData;
 use subversion_sys::svn_string_t;
 
-pub struct String(PooledPtr<svn_string_t>);
+/// Borrowed view of an SVN string tied to pool lifetime
+pub struct BStr<'pool> {
+    ptr: *const svn_string_t,
+    _pool: PhantomData<&'pool apr::Pool>,
+}
 
-impl String {
+impl<'pool> BStr<'pool> {
+    /// Create from raw SVN string pointer
+    pub fn from_raw(ptr: *const svn_string_t) -> Self {
+        Self {
+            ptr,
+            _pool: PhantomData,
+        }
+    }
+
+    /// Create SVN string in pool from bytes
+    pub fn from_bytes(data: &[u8], pool: &'pool apr::Pool) -> Self {
+        let ptr = unsafe {
+            subversion_sys::svn_string_ncreate(
+                data.as_ptr() as *const i8,
+                data.len(),
+                pool.as_mut_ptr(),
+            )
+        };
+        Self::from_raw(ptr)
+    }
+
+    /// Create SVN string in pool from str
+    pub fn from_str(s: &str, pool: &'pool apr::Pool) -> Self {
+        Self::from_bytes(s.as_bytes(), pool)
+    }
+
     pub fn as_ptr(&self) -> *const svn_string_t {
-        self.0.as_ptr()
+        self.ptr
     }
 
     pub fn as_mut_ptr(&mut self) -> *mut svn_string_t {
-        self.0.as_mut_ptr()
+        self.ptr as *mut svn_string_t
     }
 
-    pub fn as_slice(&self) -> &[u8] {
-        let ptr = unsafe { (*self.as_ptr()).data };
-        let len = unsafe { (*self.as_ptr()).len as usize };
+    /// Get bytes as slice
+    pub fn as_bytes(&self) -> &[u8] {
+        let ptr = unsafe { (*self.ptr).data };
+        let len = unsafe { (*self.ptr).len as usize };
         unsafe { std::slice::from_raw_parts(ptr as *const u8, len) }
     }
-}
 
-impl From<String> for Vec<u8> {
-    fn from(s: String) -> Self {
-        s.as_slice().to_vec()
+    /// Convert to owned Vec<u8>
+    pub fn to_bytes(&self) -> Vec<u8> {
+        self.as_bytes().to_vec()
+    }
+
+    /// Try to interpret as UTF-8 string
+    pub fn as_str(&self) -> Result<&str, std::str::Utf8Error> {
+        std::str::from_utf8(self.as_bytes())
+    }
+
+    /// Convert to owned String, replacing invalid UTF-8
+    pub fn to_string_lossy(&self) -> std::string::String {
+        std::string::String::from_utf8_lossy(self.as_bytes()).into_owned()
     }
 }
 
-impl From<PooledPtr<svn_string_t>> for String {
-    fn from(ptr: PooledPtr<svn_string_t>) -> Self {
-        String(ptr)
+impl<'pool> From<&[u8]> for BStr<'pool> {
+    fn from(data: &[u8]) -> Self {
+        // This is a bit tricky - we need a pool to create the SVN string
+        // For now, create a global pool (not ideal, but works for compatibility)
+        let pool = Box::leak(Box::new(apr::Pool::new()));
+        Self::from_bytes(data, pool)
     }
 }
 
-impl From<&str> for String {
+impl<'pool> From<&str> for BStr<'pool> {
     fn from(s: &str) -> Self {
-        let ptr = apr::pool::PooledPtr::initialize(|pool| {
-            let cstr = s.as_ptr();
-            let len = s.len();
-            let ptr = unsafe {
-                subversion_sys::svn_string_ncreate(cstr as *const i8, len, pool.as_mut_ptr())
-            };
-            Ok::<_, crate::Error>(ptr)
-        })
-        .unwrap();
-        String(ptr)
+        Self::from(s.as_bytes())
     }
 }
 
-impl From<std::string::String> for String {
-    fn from(s: std::string::String) -> Self {
-        s.as_str().into()
-    }
-}
-
-impl From<&[u8]> for String {
-    fn from(s: &[u8]) -> Self {
-        let ptr = apr::pool::PooledPtr::initialize(|pool| {
-            let cstr = s.as_ptr();
-            let len = s.len();
-            let ptr = unsafe {
-                subversion_sys::svn_string_ncreate(cstr as *const i8, len, pool.as_mut_ptr())
-            };
-            Ok::<_, crate::Error>(ptr)
-        })
-        .unwrap();
-        String(ptr)
-    }
-}
-
-impl From<Vec<u8>> for String {
-    fn from(s: Vec<u8>) -> Self {
-        s.as_slice().into()
-    }
-}
+// For backwards compatibility, keep the old String name as an alias
+pub type String<'pool> = BStr<'pool>;

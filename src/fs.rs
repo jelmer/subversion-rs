@@ -1,66 +1,110 @@
-use crate::{Error, Revnum};
-use apr::pool::PooledPtr;
-pub struct Fs(pub(crate) PooledPtr<subversion_sys::svn_fs_t>);
+use crate::{svn_result, with_tmp_pool, Error, Revnum};
+
+/// Filesystem handle with RAII cleanup
+pub struct Fs {
+    fs_ptr: *mut subversion_sys::svn_fs_t,
+    pool: apr::Pool, // Keep pool alive for fs lifetime
+}
+
+unsafe impl Send for Fs {}
+
+impl Drop for Fs {
+    fn drop(&mut self) {
+        // Pool drop will clean up fs
+    }
+}
 
 impl Fs {
+    /// Create Fs from existing pointer with shared pool (for repos integration)
+    pub(crate) unsafe fn from_ptr_and_pool(
+        fs_ptr: *mut subversion_sys::svn_fs_t,
+        pool: apr::Pool,
+    ) -> Self {
+        Self { fs_ptr, pool }
+    }
+
     pub fn create(path: &std::path::Path) -> Result<Fs, Error> {
+        let pool = apr::Pool::new();
+        let path_str = path
+            .to_str()
+            .ok_or_else(|| Error::from_str("Invalid path"))?;
+        let path_c =
+            std::ffi::CString::new(path_str).map_err(|_| Error::from_str("Invalid path string"))?;
+
         unsafe {
-            Ok(Self(PooledPtr::initialize(|pool| {
-                let mut fs_ptr = std::ptr::null_mut();
-                let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
+            let mut fs_ptr = std::ptr::null_mut();
+            with_tmp_pool(|scratch_pool| {
                 let err = subversion_sys::svn_fs_create2(
                     &mut fs_ptr,
-                    path.as_ptr(),
+                    path_c.as_ptr(),
                     std::ptr::null_mut(),
                     pool.as_mut_ptr(),
-                    apr::pool::Pool::new().as_mut_ptr(),
+                    scratch_pool.as_mut_ptr(),
                 );
-                Error::from_raw(err)?;
-                Ok::<_, Error>(fs_ptr)
-            })?))
+                svn_result(err)
+            })?;
+
+            Ok(Fs { fs_ptr, pool })
         }
     }
 
     pub fn open(path: &std::path::Path) -> Result<Fs, Error> {
+        let pool = apr::Pool::new();
+        let path_str = path
+            .to_str()
+            .ok_or_else(|| Error::from_str("Invalid path"))?;
+        let path_c =
+            std::ffi::CString::new(path_str).map_err(|_| Error::from_str("Invalid path string"))?;
+
         unsafe {
-            Ok(Self(PooledPtr::initialize(|pool| {
-                let mut fs_ptr = std::ptr::null_mut();
-                let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
+            let mut fs_ptr = std::ptr::null_mut();
+            with_tmp_pool(|scratch_pool| {
                 let err = subversion_sys::svn_fs_open2(
                     &mut fs_ptr,
-                    path.as_ptr(),
+                    path_c.as_ptr(),
                     std::ptr::null_mut(),
                     pool.as_mut_ptr(),
-                    apr::pool::Pool::new().as_mut_ptr(),
+                    scratch_pool.as_mut_ptr(),
                 );
-                Error::from_raw(err)?;
-                Ok::<_, Error>(fs_ptr)
-            })?))
+                svn_result(err)
+            })?;
+
+            Ok(Fs { fs_ptr, pool })
         }
     }
 
-    pub fn path(&mut self) -> std::path::PathBuf {
+    pub fn as_ptr(&self) -> *const subversion_sys::svn_fs_t {
+        self.fs_ptr
+    }
+
+    pub fn as_mut_ptr(&mut self) -> *mut subversion_sys::svn_fs_t {
+        self.fs_ptr
+    }
+
+    pub fn path(&self) -> std::path::PathBuf {
         unsafe {
-            let pool = apr::pool::Pool::new();
-            let path = subversion_sys::svn_fs_path(self.0.as_mut_ptr(), pool.as_mut_ptr());
-            std::ffi::CStr::from_ptr(path)
-                .to_string_lossy()
-                .into_owned()
-                .into()
+            with_tmp_pool(|pool| {
+                let path = subversion_sys::svn_fs_path(self.fs_ptr, pool.as_mut_ptr());
+                std::ffi::CStr::from_ptr(path)
+                    .to_string_lossy()
+                    .into_owned()
+                    .into()
+            })
         }
     }
 
-    pub fn youngest_revision(&mut self) -> Result<Revnum, Error> {
+    pub fn youngest_revision(&self) -> Result<Revnum, Error> {
         unsafe {
-            let pool = apr::pool::Pool::new();
-            let mut youngest = 0;
-            let err = subversion_sys::svn_fs_youngest_rev(
-                &mut youngest,
-                self.0.as_mut_ptr(),
-                pool.as_mut_ptr(),
-            );
-            Error::from_raw(err)?;
-            Ok(Revnum::from_raw(youngest).unwrap())
+            with_tmp_pool(|pool| {
+                let mut youngest = 0;
+                let err = subversion_sys::svn_fs_youngest_rev(
+                    &mut youngest,
+                    self.fs_ptr,
+                    pool.as_mut_ptr(),
+                );
+                svn_result(err)?;
+                Ok(Revnum::from_raw(youngest).unwrap())
+            })
         }
     }
 
@@ -73,19 +117,17 @@ impl Fs {
         let err = unsafe {
             subversion_sys::svn_fs_revision_proplist(
                 &mut props,
-                self.0.as_mut_ptr(),
+                self.fs_ptr,
                 rev.0,
                 pool.as_mut_ptr(),
             )
         };
-        Error::from_raw(err)?;
+        svn_result(err)?;
         let mut revprops =
-            apr::hash::Hash::<&str, *const subversion_sys::svn_string_t>::from_raw(unsafe {
-                PooledPtr::in_pool(std::rc::Rc::new(pool), props)
-            });
+            apr::hash::Hash::<&str, *const subversion_sys::svn_string_t>::from_ptr(props);
 
         let revprops = revprops
-            .iter()
+            .iter(&pool)
             .map(|(k, v)| {
                 (
                     std::str::from_utf8(k).unwrap().to_string(),
@@ -101,30 +143,33 @@ impl Fs {
 
     pub fn revision_root(&mut self, rev: Revnum) -> Result<Root, Error> {
         unsafe {
-            Ok(Root(PooledPtr::initialize(|pool| {
-                let mut root_ptr = std::ptr::null_mut();
-                let err = subversion_sys::svn_fs_revision_root(
-                    &mut root_ptr,
-                    self.0.as_mut_ptr(),
-                    rev.0,
-                    pool.as_mut_ptr(),
-                );
-                Error::from_raw(err)?;
-                Ok::<_, Error>(root_ptr)
-            })?))
+            let pool = apr::Pool::new();
+            let mut root_ptr = std::ptr::null_mut();
+            let err = subversion_sys::svn_fs_revision_root(
+                &mut root_ptr,
+                self.fs_ptr,
+                rev.0,
+                pool.as_mut_ptr(),
+            );
+            svn_result(err)?;
+            Ok(Root {
+                ptr: root_ptr,
+                pool,
+            })
         }
     }
 
     pub fn get_uuid(&mut self) -> Result<String, Error> {
         unsafe {
-            let pool = apr::pool::Pool::new();
-            let mut uuid = std::ptr::null();
-            let err =
-                subversion_sys::svn_fs_get_uuid(self.0.as_mut_ptr(), &mut uuid, pool.as_mut_ptr());
-            Error::from_raw(err)?;
-            Ok(std::ffi::CStr::from_ptr(uuid)
-                .to_string_lossy()
-                .into_owned())
+            with_tmp_pool(|pool| {
+                let mut uuid = std::ptr::null();
+                let err =
+                    subversion_sys::svn_fs_get_uuid(self.fs_ptr, &mut uuid, pool.as_mut_ptr());
+                svn_result(err)?;
+                Ok(std::ffi::CStr::from_ptr(uuid)
+                    .to_string_lossy()
+                    .into_owned())
+            })
         }
     }
 
@@ -132,11 +177,11 @@ impl Fs {
         unsafe {
             let uuid = std::ffi::CString::new(uuid).unwrap();
             let err = subversion_sys::svn_fs_set_uuid(
-                self.0.as_mut_ptr(),
+                self.fs_ptr,
                 uuid.as_ptr(),
                 apr::pool::Pool::new().as_mut_ptr(),
             );
-            Error::from_raw(err)?;
+            svn_result(err)?;
             Ok(())
         }
     }
@@ -151,13 +196,13 @@ impl Fs {
             let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
             let token = std::ffi::CString::new(token).unwrap();
             let err = subversion_sys::svn_fs_unlock(
-                self.0.as_mut_ptr(),
+                self.fs_ptr,
                 path.as_ptr(),
                 token.as_ptr(),
                 break_lock as i32,
                 apr::pool::Pool::new().as_mut_ptr(),
             );
-            Error::from_raw(err)?;
+            svn_result(err)?;
             Ok(())
         }
     }
@@ -169,7 +214,7 @@ pub fn fs_type(path: &std::path::Path) -> Result<String, Error> {
         let pool = apr::pool::Pool::new();
         let mut fs_type = std::ptr::null();
         let err = subversion_sys::svn_fs_type(&mut fs_type, path.as_ptr(), pool.as_mut_ptr());
-        Error::from_raw(err)?;
+        svn_result(err)?;
         Ok(std::ffi::CStr::from_ptr(fs_type)
             .to_string_lossy()
             .into_owned())
@@ -181,10 +226,31 @@ pub fn delete_fs(path: &std::path::Path) -> Result<(), Error> {
     unsafe {
         let err =
             subversion_sys::svn_fs_delete_fs(path.as_ptr(), apr::pool::Pool::new().as_mut_ptr());
-        Error::from_raw(err)?;
+        svn_result(err)?;
         Ok(())
     }
 }
 
 #[allow(dead_code)]
-pub struct Root(pub(crate) PooledPtr<subversion_sys::svn_fs_root_t>);
+pub struct Root {
+    ptr: *mut subversion_sys::svn_fs_root_t,
+    pool: apr::Pool, // Keep pool alive for root lifetime
+}
+
+unsafe impl Send for Root {}
+
+impl Drop for Root {
+    fn drop(&mut self) {
+        // Pool drop will clean up root
+    }
+}
+
+impl Root {
+    pub fn as_ptr(&self) -> *const subversion_sys::svn_fs_root_t {
+        self.ptr
+    }
+
+    pub fn as_mut_ptr(&mut self) -> *mut subversion_sys::svn_fs_root_t {
+        self.ptr
+    }
+}
