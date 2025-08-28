@@ -1075,7 +1075,7 @@ impl Session {
                 })
                 .collect();
 
-            match ((*baton).0)(Revnum::from_raw(revision).unwrap(), &revprops) {
+            match (baton.0)(Revnum::from_raw(revision).unwrap(), &revprops) {
                 Ok(mut e) => {
                     unsafe { *editor = &crate::delta::WRAP_EDITOR };
                     unsafe { *edit_baton = e.as_mut() as *mut _ as *mut std::ffi::c_void };
@@ -1133,7 +1133,7 @@ impl Session {
                 })
                 .collect();
 
-            match ((*baton).1)(Revnum::from_raw(revision).unwrap(), &mut editor, &revprops) {
+            match (baton.1)(Revnum::from_raw(revision).unwrap(), &mut editor, &revprops) {
                 Ok(_) => std::ptr::null_mut(),
                 Err(err) => unsafe { err.into_raw() },
             }

@@ -285,7 +285,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let fs_path = dir.path().join("test-fs");
 
-        let mut fs = Fs::create(&fs_path).unwrap();
+        let fs = Fs::create(&fs_path).unwrap();
         let rev = fs.youngest_revision();
         assert!(rev.is_ok());
         // New filesystem should have revision 0

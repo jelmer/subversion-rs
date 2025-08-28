@@ -490,7 +490,7 @@ pub fn remove_file(path: &std::path::Path, ignore_enoent: bool) -> Result<(), Er
 pub fn wrap_write(write: &mut dyn std::io::Write) -> Result<Stream, Error> {
     let write = Box::into_raw(Box::new(write));
     let pool = apr::Pool::new();
-    let mut stream = unsafe {
+    let stream = unsafe {
         subversion_sys::svn_stream_create(write as *mut std::ffi::c_void, pool.as_mut_ptr())
     };
 
@@ -764,7 +764,7 @@ pub fn file_affected_time(path: &std::path::Path) -> Result<apr::time::Time, Err
         )
     };
     Error::from_raw(err)?;
-    Ok(apr::time::Time::from(affected_time).into())
+    Ok(apr::time::Time::from(affected_time))
 }
 
 pub fn set_file_affected_time(
@@ -1107,7 +1107,7 @@ mod tests {
         let data = b"Test string data";
         let stream = Stream::from(data.as_ref());
         // Should be able to create stream from bytes
-        assert!(stream.as_ptr() != std::ptr::null());
+        assert!(stream.as_ptr().is_null());
     }
 
     #[test]

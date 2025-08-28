@@ -136,49 +136,6 @@ impl Error {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_error_chain_formatting() {
-        // Create a chain of errors
-        let child_err = Error::from_str("Child error");
-        let parent_err = Error::new(apr::Status::from(1), Some(child_err), "Parent error");
-
-        let full_msg = parent_err.full_message();
-        assert!(full_msg.contains("Parent error"));
-        assert!(full_msg.contains("Child error"));
-        assert!(full_msg.contains(": ")); // Check for separator
-    }
-
-    #[test]
-    fn test_single_error_message() {
-        let err = Error::from_str("Single error");
-        assert_eq!(err.message(), "Single error");
-
-        let full_msg = err.full_message();
-        assert!(full_msg.contains("Single error"));
-    }
-
-    #[test]
-    fn test_error_display() {
-        let err = Error::from_str("Display test error");
-        let display_str = format!("{}", err);
-        assert!(display_str.contains("Display test error"));
-    }
-
-    #[test]
-    fn test_error_from_raw() {
-        // Test with null pointer
-        let result = Error::from_raw(std::ptr::null_mut());
-        assert!(result.is_ok());
-
-        // Test with actual error would require creating a real svn_error_t
-        // which is complex, so we skip that for now
-    }
-}
-
 pub fn symbolic_name(status: apr::Status) -> Option<&'static str> {
     unsafe {
         let name = subversion_sys::svn_error_symbolic_name(status as i32);
@@ -256,8 +213,51 @@ impl From<Error> for std::io::Error {
     fn from(err: Error) -> Self {
         let errno = err.apr_err().raw_os_error();
         errno.map_or(
-            std::io::Error::new(std::io::ErrorKind::Other, err.message()),
+            std::io::Error::other(err.message()),
             std::io::Error::from_raw_os_error,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_error_chain_formatting() {
+        // Create a chain of errors
+        let child_err = Error::from_str("Child error");
+        let parent_err = Error::new(apr::Status::from(1), Some(child_err), "Parent error");
+
+        let full_msg = parent_err.full_message();
+        assert!(full_msg.contains("Parent error"));
+        assert!(full_msg.contains("Child error"));
+        assert!(full_msg.contains(": ")); // Check for separator
+    }
+
+    #[test]
+    fn test_single_error_message() {
+        let err = Error::from_str("Single error");
+        assert_eq!(err.message(), "Single error");
+
+        let full_msg = err.full_message();
+        assert!(full_msg.contains("Single error"));
+    }
+
+    #[test]
+    fn test_error_display() {
+        let err = Error::from_str("Display test error");
+        let display_str = format!("{}", err);
+        assert!(display_str.contains("Display test error"));
+    }
+
+    #[test]
+    fn test_error_from_raw() {
+        // Test with null pointer
+        let result = Error::from_raw(std::ptr::null_mut());
+        assert!(result.is_ok());
+
+        // Test with actual error would require creating a real svn_error_t
+        // which is complex, so we skip that for now
     }
 }
