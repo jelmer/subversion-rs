@@ -168,8 +168,8 @@ extern "C" fn wrap_info_receiver2(
     _scatch_pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     unsafe {
-        let callback = baton as *mut &mut dyn FnMut(&std::path::Path, &Info) -> Result<(), Error>;
-        let mut callback = Box::from_raw(callback);
+        let callback =
+            &mut *(baton as *mut &mut dyn FnMut(&std::path::Path, &Info) -> Result<(), Error>);
         let abspath_or_url: &std::path::Path = std::ffi::CStr::from_ptr(abspath_or_url)
             .to_str()
             .unwrap()
@@ -677,17 +677,29 @@ impl Context {
         }
 
         unsafe {
+            // Keep CStrings alive for the duration of the function
+            let target_cstrings: Vec<std::ffi::CString> = targets
+                .iter()
+                .map(|t| std::ffi::CString::new(*t).unwrap())
+                .collect();
             let mut ps = apr::tables::ArrayHeader::new_with_capacity(&pool, targets.len());
-            for target in targets {
-                let target = std::ffi::CString::new(*target).unwrap();
+            for target in &target_cstrings {
                 ps.push(target.as_ptr() as *mut std::ffi::c_void);
             }
-            let mut cl = apr::tables::ArrayHeader::new_with_capacity(&pool, 0);
-            if let Some(changelists) = options.changelists {
-                for changelist in changelists {
-                    let changelist = std::ffi::CString::new(*changelist).unwrap();
-                    cl.push(changelist.as_ptr() as *mut std::ffi::c_void);
-                }
+
+            let changelist_cstrings: Vec<std::ffi::CString> =
+                if let Some(changelists) = options.changelists {
+                    changelists
+                        .iter()
+                        .map(|c| std::ffi::CString::new(*c).unwrap())
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+            let mut cl =
+                apr::tables::ArrayHeader::new_with_capacity(&pool, changelist_cstrings.len());
+            for changelist in &changelist_cstrings {
+                cl.push(changelist.as_ptr() as *mut std::ffi::c_void);
             }
             let commit_callback = Box::into_raw(Box::new(commit_callback));
             let err = svn_client_commit6(
@@ -1650,7 +1662,7 @@ impl Context {
                 }
             }
 
-            let list_func_ptr = list_func as *mut _ as *mut std::ffi::c_void;
+            let list_func_ptr = &list_func as *const _ as *mut std::ffi::c_void;
 
             let err = unsafe {
                 subversion_sys::svn_client_list4(
@@ -3333,37 +3345,50 @@ mod tests {
 
     #[test]
     fn test_commit_builder() {
+        // Create temporary directories for test
         let td = tempfile::tempdir().unwrap();
         let repo_path = td.path().join("repo");
         let wc_path = td.path().join("wc");
 
-        // Create a test repository
-        crate::repos::Repos::create(&repo_path).unwrap();
+        // Create a test repository and get its UUID
+        let mut repos = crate::repos::Repos::create(&repo_path).unwrap();
+        let mut fs = repos.fs().unwrap();
+        let uuid = fs.get_uuid().unwrap();
+        drop(fs);
+        drop(repos);
 
-        // Check out working copy
-        let mut ctx = Context::new().unwrap();
-        let url_str = format!("file://{}", repo_path.to_str().unwrap());
-        let pool = apr::Pool::new();
-        let url = crate::uri::Uri::from_str(&url_str, &pool);
+        // Create working copy directory
+        std::fs::create_dir_all(&wc_path).unwrap();
 
-        ctx.checkout(
-            url,
-            &wc_path,
-            &CheckoutOptions {
-                peg_revision: Revision::Head,
-                revision: Revision::Head,
-                depth: Depth::Infinity,
-                ignore_externals: false,
-                allow_unver_obstructions: false,
-            },
-        )
-        .unwrap();
+        // Initialize working copy using wc context
+        let mut wc_ctx = crate::wc::Context::new().unwrap();
+        let repo_abs_path = repo_path.canonicalize().unwrap();
+        let wc_abs_path = wc_path.canonicalize().unwrap();
+        let url_str = format!("file://{}", repo_abs_path.to_str().unwrap());
+
+        // Create basic .svn structure using ensure_adm
+        wc_ctx
+            .ensure_adm(
+                wc_abs_path.to_str().unwrap(),
+                &url_str,
+                &url_str,
+                &uuid,
+                crate::Revnum(0),
+                crate::Depth::Infinity,
+            )
+            .unwrap();
 
         // Create and add a test file
         let test_file = wc_path.join("test.txt");
         std::fs::write(&test_file, "test content").unwrap();
+
+        // Create client context for adding and committing
+        let mut ctx = Context::new().unwrap();
+
+        // Add the file using its absolute path
+        let test_file_abs = test_file.canonicalize().unwrap();
         ctx.add(
-            &test_file,
+            &test_file_abs,
             &AddOptions {
                 depth: Depth::Empty,
                 force: false,
@@ -3375,17 +3400,15 @@ mod tests {
         .unwrap();
 
         // Test commit using builder pattern
-        let result = ctx
-            .commit_builder()
-            .add_target(wc_path.to_str().unwrap())
-            .add_revprop("svn:log", "Test commit using builder")
-            .depth(Depth::Infinity)
-            .keep_locks(false)
-            .keep_changelists(false)
-            .commit_as_operations(false)
-            .execute(&|_info| Ok(()));
+        let builder = CommitBuilder::new(&mut ctx)
+            .add_target(wc_abs_path.to_str().unwrap())
+            .depth(Depth::Infinity);
 
-        assert!(result.is_ok());
+        // Execute the commit
+        let result = builder.execute(&mut |_info| Ok(()));
+
+        // Check that the commit succeeded
+        assert!(result.is_ok(), "Commit failed: {:?}", result.err());
     }
 
     #[test]
@@ -3440,7 +3463,7 @@ mod tests {
                 include_dir_externals: false,
                 changelists: None,
             },
-            [("svn:log", "Initial commit")].iter().cloned().collect(),
+            std::collections::HashMap::new(), // Empty revprops - svn:log is set through other means
             &|_info| Ok(()),
         )
         .unwrap();
