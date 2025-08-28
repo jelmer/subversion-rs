@@ -224,7 +224,7 @@ mod tests {
     fn test_check_wc() {
         let dir = tempdir().unwrap();
         let wc_path = dir.path();
-        
+
         // Non-working-copy directory should return None
         let wc_format = check_wc(wc_path);
         assert!(wc_format.is_ok());
@@ -235,17 +235,17 @@ mod tests {
     fn test_ensure_adm() {
         let dir = tempdir().unwrap();
         let wc_path = dir.path();
-        
+
         // Try to ensure admin area
         let result = ensure_adm(
             wc_path,
-            "",  // uuid
-            "file:///test/repo",  // url
-            "file:///test/repo",  // repos
+            "",                  // uuid
+            "file:///test/repo", // url
+            "file:///test/repo", // repos
             crate::Revnum::from(0),
             crate::Depth::Infinity,
         );
-        
+
         // This might fail if the directory already exists or other reasons
         // Just ensure it doesn't panic
         let _ = result;
@@ -256,7 +256,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let abspath = dir.path();
         let repos_root = "file:///test/repo";
-        
+
         // This will likely fail as we don't have a real working copy
         let result = maybe_set_repos_root_url(abspath, repos_root);
         // Just ensure it doesn't panic
@@ -266,13 +266,13 @@ mod tests {
     #[test]
     fn test_context_cancel_func() {
         let mut context = Context::new().unwrap();
-        
+
         // Set a cancel function that always returns Ok
         let cancel_fn = || Ok::<(), crate::Error>(());
         unsafe {
             context.set_cancel_func(&cancel_fn);
         }
-        
+
         // Cancel func should be set
         unsafe {
             assert!(!(*context.as_mut_ptr()).cancel_func.is_none());
@@ -282,13 +282,14 @@ mod tests {
     #[test]
     fn test_context_notify_func() {
         let mut context = Context::new().unwrap();
-        
+
         // Create a simple notify function
-        let notify_fn = |_path: &std::path::Path, _action: crate::NotifyAction, _kind: crate::NodeKind| {};
+        let notify_fn =
+            |_path: &std::path::Path, _action: crate::NotifyAction, _kind: crate::NodeKind| {};
         unsafe {
             context.set_notify_func(&notify_fn);
         }
-        
+
         // Notify func should be set
         unsafe {
             assert!(!(*context.as_mut_ptr()).notify_func.is_none());
@@ -307,7 +308,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("test.txt");
         std::fs::write(&file_path, "test content").unwrap();
-        
+
         // This will fail without a working copy, but shouldn't panic
         let result = text_modified(&file_path, false);
         assert!(result.is_err()); // Expected to fail without WC
@@ -318,7 +319,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("test.txt");
         std::fs::write(&file_path, "test content").unwrap();
-        
+
         // This will fail without a working copy, but shouldn't panic
         let result = props_modified(&file_path);
         assert!(result.is_err()); // Expected to fail without WC

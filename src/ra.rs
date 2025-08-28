@@ -1384,11 +1384,11 @@ mod tests {
     fn test_session_url_validation() {
         // Test that Session creation requires proper URL format
         // We can't test actual connection without a real SVN server
-        
+
         // Invalid URL should fail
         let result = Session::open("not-a-url");
         assert!(result.is_err());
-        
+
         // File URL might work depending on system
         let _result = Session::open("file:///tmp/test");
         // Don't assert on this as it depends on system configuration
@@ -1412,12 +1412,13 @@ mod tests {
             (*lock_raw).path = apr::strings::pstrdup_raw("/test/path", &pool).unwrap() as *const _;
             (*lock_raw).token = apr::strings::pstrdup_raw("lock-token", &pool).unwrap() as *const _;
             (*lock_raw).owner = apr::strings::pstrdup_raw("test-owner", &pool).unwrap() as *const _;
-            (*lock_raw).comment = apr::strings::pstrdup_raw("test comment", &pool).unwrap() as *const _;
+            (*lock_raw).comment =
+                apr::strings::pstrdup_raw("test comment", &pool).unwrap() as *const _;
             (*lock_raw).is_dav_comment = 0;
             (*lock_raw).creation_date = 0;
             (*lock_raw).expiration_date = 0;
         }
-        
+
         let lock = unsafe { Lock::from_raw(lock_raw) };
         assert_eq!(lock.path(), "/test/path");
         assert_eq!(lock.token(), "lock-token");
@@ -1437,9 +1438,10 @@ mod tests {
             (*dirent_raw).has_props = 1;
             (*dirent_raw).created_rev = 42;
             (*dirent_raw).time = 1000000;
-            (*dirent_raw).last_author = apr::strings::pstrdup_raw("author", &pool).unwrap() as *const _;
+            (*dirent_raw).last_author =
+                apr::strings::pstrdup_raw("author", &pool).unwrap() as *const _;
         }
-        
+
         let dirent = unsafe { Dirent::from_raw(dirent_raw) };
         assert_eq!(dirent.kind(), crate::NodeKind::File);
         assert_eq!(dirent.size(), Some(1024));
@@ -1457,9 +1459,10 @@ mod tests {
         unsafe {
             (*segment_raw).range_start = 10;
             (*segment_raw).range_end = 20;
-            (*segment_raw).path = apr::strings::pstrdup_raw("/trunk/src", &pool).unwrap() as *const _;
+            (*segment_raw).path =
+                apr::strings::pstrdup_raw("/trunk/src", &pool).unwrap() as *const _;
         }
-        
+
         let segment = unsafe { LocationSegment::from_raw(segment_raw) };
         assert_eq!(segment.range_start(), crate::Revnum::from(10));
         assert_eq!(segment.range_end(), crate::Revnum::from(20));
@@ -1518,7 +1521,7 @@ mod tests {
             (*fr_raw).created_path = apr::strings::pstrdup_raw("/test", &pool).unwrap() as *const _;
             (*fr_raw).kind = subversion_sys::svn_node_kind_t_svn_node_file;
         }
-        
+
         // FileRevision wraps svn_repos_node_t (based on the fields)
         // This just ensures the types compile correctly
     }
@@ -1526,16 +1529,22 @@ mod tests {
     #[test]
     fn test_no_send_no_sync() {
         // Verify that Session is !Send and !Sync due to PhantomData<*mut ()>
-        fn assert_not_send<T>() where T: ?Sized {
+        fn assert_not_send<T>()
+        where
+            T: ?Sized,
+        {
             // This function body is empty - the check happens at compile time
             // If T were Send, this would fail to compile
         }
-        
-        fn assert_not_sync<T>() where T: ?Sized {
-            // This function body is empty - the check happens at compile time  
+
+        fn assert_not_sync<T>()
+        where
+            T: ?Sized,
+        {
+            // This function body is empty - the check happens at compile time
             // If T were Sync, this would fail to compile
         }
-        
+
         // These will compile only if Session is !Send and !Sync
         assert_not_send::<Session>();
         assert_not_sync::<Session>();
