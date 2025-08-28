@@ -64,6 +64,11 @@ impl Dirent {
         // Since we canonicalize on construction, this should always be true
         is_canonical_dirent(self).unwrap_or(true)
     }
+
+    /// Get the absolute path from this dirent
+    pub fn get_absolute(&self) -> Result<Dirent, crate::Error> {
+        get_absolute_dirent(self)
+    }
 }
 
 impl std::fmt::Display for Dirent {
@@ -284,6 +289,26 @@ pub fn is_canonical_dirent(dirent: &Dirent) -> Result<bool, crate::Error> {
 
         let result = subversion_sys::svn_dirent_is_canonical(path_cstr.as_ptr(), pool.as_mut_ptr());
         Ok(result != 0)
+    })
+}
+
+/// Get the absolute path from a relative path (type-safe version)
+pub fn get_absolute_dirent(dirent: &Dirent) -> Result<Dirent, crate::Error> {
+    with_tmp_pool(|pool| unsafe {
+        let path_cstr = std::ffi::CString::new(dirent.as_str())?;
+        let mut absolute_ptr: *const std::ffi::c_char = std::ptr::null();
+        
+        let err = subversion_sys::svn_dirent_get_absolute(
+            &mut absolute_ptr,
+            path_cstr.as_ptr(),
+            pool.as_mut_ptr(),
+        );
+        
+        crate::Error::from_raw(err)?;
+        
+        let absolute_cstr = std::ffi::CStr::from_ptr(absolute_ptr);
+        let absolute_str = absolute_cstr.to_str()?;
+        Ok(Dirent(std::path::PathBuf::from(absolute_str)))
     })
 }
 
@@ -643,6 +668,28 @@ mod tests {
         let joined = rel_base.join("project").unwrap();
         assert!(!joined.is_absolute());
         assert_eq!(joined.as_str(), "home/user/project");
+    }
+
+    #[test]
+    fn test_get_absolute() {
+        // Test with relative path
+        let rel_dirent = Dirent::new("project/subdir").unwrap();
+        assert!(!rel_dirent.is_absolute());
+        
+        let abs_dirent = rel_dirent.get_absolute().unwrap();
+        assert!(abs_dirent.is_absolute());
+        
+        // Should contain current working directory
+        assert!(abs_dirent.as_str().contains("project/subdir"));
+        
+        // Test with already absolute path
+        let already_abs = Dirent::new("/home/user/project").unwrap();
+        assert!(already_abs.is_absolute());
+        
+        let still_abs = already_abs.get_absolute().unwrap();
+        assert!(still_abs.is_absolute());
+        // Should remain the same
+        assert_eq!(already_abs.as_str(), still_abs.as_str());
     }
 
     #[test]
