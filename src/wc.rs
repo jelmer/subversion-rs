@@ -611,4 +611,61 @@ mod tests {
         let result = props_modified(&file_path);
         assert!(result.is_err()); // Expected to fail without WC
     }
+
+    #[test]
+    fn test_status_enum() {
+        // Test Status enum conversions
+        assert_eq!(Status::Normal as u32, subversion_sys::svn_wc_status_kind_svn_wc_status_normal);
+        assert_eq!(Status::Added as u32, subversion_sys::svn_wc_status_kind_svn_wc_status_added);
+        assert_eq!(Status::Deleted as u32, subversion_sys::svn_wc_status_kind_svn_wc_status_deleted);
+        
+        // Test From conversion
+        let status = Status::from(subversion_sys::svn_wc_status_kind_svn_wc_status_modified);
+        assert_eq!(status, Status::Modified);
+    }
+
+    #[test]
+    fn test_schedule_enum() {
+        // Test Schedule enum conversions
+        assert_eq!(Schedule::Normal as u32, subversion_sys::svn_wc_schedule_t_svn_wc_schedule_normal);
+        assert_eq!(Schedule::Add as u32, subversion_sys::svn_wc_schedule_t_svn_wc_schedule_add);
+        
+        // Test From conversion
+        let schedule = Schedule::from(subversion_sys::svn_wc_schedule_t_svn_wc_schedule_delete);
+        assert_eq!(schedule, Schedule::Delete);
+    }
+
+    #[test]
+    fn test_is_normal_prop() {
+        // "Normal" properties are versioned properties that users can set
+        // SVN properties like svn:keywords ARE normal properties
+        assert!(is_normal_prop("svn:keywords"));
+        assert!(is_normal_prop("svn:eol-style"));
+        assert!(is_normal_prop("svn:mime-type"));
+        
+        // Entry and WC properties are NOT normal
+        assert!(!is_normal_prop("svn:entry:committed-rev"));
+        assert!(!is_normal_prop("svn:wc:ra_dav:version-url"));
+    }
+
+    #[test]
+    fn test_is_entry_prop() {
+        // These should be entry properties
+        assert!(is_entry_prop("svn:entry:committed-rev"));
+        assert!(is_entry_prop("svn:entry:uuid"));
+        
+        // These should not be entry properties
+        assert!(!is_entry_prop("svn:keywords"));
+        assert!(!is_entry_prop("user:custom"));
+    }
+
+    #[test]
+    fn test_is_wc_prop() {
+        // These should be WC properties
+        assert!(is_wc_prop("svn:wc:ra_dav:version-url"));
+        
+        // These should not be WC properties
+        assert!(!is_wc_prop("svn:keywords"));
+        assert!(!is_wc_prop("user:custom"));
+    }
 }
