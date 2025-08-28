@@ -1,27 +1,45 @@
-use crate::Error;
-use apr::pool::PooledPtr;
+use crate::{svn_result, with_tmp_pool, Error};
+use std::marker::PhantomData;
 use subversion_sys::{svn_wc_context_t, svn_wc_version};
 pub fn version() -> crate::Version {
     unsafe { crate::Version(svn_wc_version()) }
 }
 
-pub struct Context(apr::pool::PooledPtr<svn_wc_context_t>);
+/// Working copy context with RAII cleanup
+pub struct Context {
+    ptr: *mut svn_wc_context_t,
+    pool: apr::Pool,
+    _phantom: PhantomData<*mut ()>, // !Send + !Sync
+}
+
+impl Drop for Context {
+    fn drop(&mut self) {
+        // Pool drop will clean up context
+    }
+}
 
 impl Context {
     pub fn new() -> Result<Self, crate::Error> {
-        Ok(Self(PooledPtr::initialize(|pool| {
+        let pool = apr::Pool::new();
+
+        unsafe {
             let mut ctx = std::ptr::null_mut();
-            let err = unsafe {
-                subversion_sys::svn_wc_context_create(
+            with_tmp_pool(|scratch_pool| {
+                let err = subversion_sys::svn_wc_context_create(
                     &mut ctx,
                     std::ptr::null_mut(),
                     pool.as_mut_ptr(),
-                    apr::pool::Pool::new().as_mut_ptr(),
-                )
-            };
-            Error::from_raw(err)?;
-            Ok::<_, Error>(ctx)
-        })?))
+                    scratch_pool.as_mut_ptr(),
+                );
+                svn_result(err)
+            })?;
+
+            Ok(Context {
+                ptr: ctx,
+                pool,
+                _phantom: PhantomData,
+            })
+        }
     }
 
     pub fn check_wc(&mut self, path: &str) -> Result<i32, crate::Error> {
@@ -30,7 +48,7 @@ impl Context {
         let err = unsafe {
             subversion_sys::svn_wc_check_wc2(
                 &mut wc_format,
-                self.0.as_mut_ptr(),
+                self.ptr,
                 path.as_ptr(),
                 apr::pool::Pool::new().as_mut_ptr(),
             )
@@ -45,7 +63,7 @@ impl Context {
         let err = unsafe {
             subversion_sys::svn_wc_text_modified_p2(
                 &mut modified,
-                self.0.as_mut_ptr(),
+                self.ptr,
                 path.as_ptr(),
                 0,
                 apr::pool::Pool::new().as_mut_ptr(),
@@ -61,7 +79,7 @@ impl Context {
         let err = unsafe {
             subversion_sys::svn_wc_props_modified_p2(
                 &mut modified,
-                self.0.as_mut_ptr(),
+                self.ptr,
                 path.as_ptr(),
                 apr::pool::Pool::new().as_mut_ptr(),
             )
@@ -80,7 +98,7 @@ impl Context {
                 &mut text_conflicted,
                 &mut prop_conflicted,
                 &mut tree_conflicted,
-                self.0.as_mut_ptr(),
+                self.ptr,
                 path.as_ptr(),
                 apr::pool::Pool::new().as_mut_ptr(),
             )
@@ -108,7 +126,7 @@ impl Context {
         let repos_uuid = std::ffi::CString::new(repos_uuid).unwrap();
         let err = unsafe {
             subversion_sys::svn_wc_ensure_adm4(
-                self.0.as_mut_ptr(),
+                self.ptr,
                 local_abspath.as_ptr(),
                 url.as_ptr(),
                 repos_root_url.as_ptr(),
@@ -131,21 +149,13 @@ impl Context {
             subversion_sys::svn_wc_locked2(
                 &mut locked_here,
                 &mut locked,
-                self.0.as_mut_ptr(),
+                self.ptr,
                 path.as_ptr(),
                 scratch_pool.as_mut_ptr(),
             )
         };
         Error::from_raw(err)?;
         Ok((locked != 0, locked_here != 0))
-    }
-}
-
-impl Drop for Context {
-    fn drop(&mut self) {
-        unsafe {
-            subversion_sys::svn_wc_context_destroy(self.0.as_mut_ptr());
-        }
     }
 }
 

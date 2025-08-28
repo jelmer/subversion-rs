@@ -12,6 +12,10 @@ impl Error {
         Self(err)
     }
 
+    pub fn from_str(msg: &str) -> Self {
+        Self::new(apr::Status::from(1), None, msg)
+    }
+
     pub fn apr_err(&self) -> apr::Status {
         unsafe { (*self.0).apr_err }.into()
     }
@@ -103,6 +107,31 @@ impl Error {
             std::ffi::CStr::from_ptr(ret).to_string_lossy().into_owned()
         }
     }
+
+    /// Collect all messages from the error chain
+    pub fn full_message(&self) -> String {
+        let mut messages = Vec::new();
+        let mut current = self.0;
+
+        unsafe {
+            while !current.is_null() {
+                let msg = (*current).message;
+                if !msg.is_null() {
+                    let msg_str = std::ffi::CStr::from_ptr(msg).to_string_lossy();
+                    if !msg_str.is_empty() {
+                        messages.push(msg_str.into_owned());
+                    }
+                }
+                current = (*current).child;
+            }
+        }
+
+        if messages.is_empty() {
+            self.best_message()
+        } else {
+            messages.join(": ")
+        }
+    }
 }
 
 pub fn symbolic_name(status: apr::Status) -> Option<&'static str> {
@@ -166,8 +195,7 @@ impl std::fmt::Debug for Error {
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        writeln!(f, "{}", self.message())?;
-        Ok(())
+        write!(f, "{}", self.full_message())
     }
 }
 

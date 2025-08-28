@@ -1,3 +1,17 @@
+// Re-export apr_sys for internal use
+extern crate apr_sys;
+
+/// Helper to create temporary pools for FFI calls
+pub(crate) fn with_tmp_pool<R>(f: impl FnOnce(&apr::Pool) -> R) -> R {
+    let pool = apr::Pool::new();
+    f(&pool)
+}
+
+/// Convert SVN error to Rust Result
+pub(crate) fn svn_result(code: *mut subversion_sys::svn_error_t) -> Result<(), Error> {
+    Error::from_raw(code)
+}
+
 pub mod auth;
 #[cfg(feature = "client")]
 pub mod client;
@@ -19,7 +33,6 @@ pub mod uri;
 pub mod version;
 #[cfg(feature = "wc")]
 pub mod wc;
-use apr::pool::PooledPtr;
 use bitflags::bitflags;
 use std::str::FromStr;
 use subversion_sys::{svn_opt_revision_t, svn_opt_revision_value_t};
@@ -311,30 +324,40 @@ impl pyo3::FromPyObject<'_> for Depth {
     }
 }
 
-pub struct CommitInfo(PooledPtr<subversion_sys::svn_commit_info_t>);
-unsafe impl Send for CommitInfo {}
+pub struct CommitInfo<'pool> {
+    ptr: *const subversion_sys::svn_commit_info_t,
+    _pool: std::marker::PhantomData<&'pool apr::Pool>,
+}
+unsafe impl Send for CommitInfo<'_> {}
 
-impl CommitInfo {
+impl<'pool> CommitInfo<'pool> {
+    pub fn from_raw(ptr: *const subversion_sys::svn_commit_info_t) -> Self {
+        Self {
+            ptr,
+            _pool: std::marker::PhantomData,
+        }
+    }
+
     pub fn revision(&self) -> Revnum {
-        Revnum::from_raw(self.0.revision).unwrap()
+        Revnum::from_raw(unsafe { (*self.ptr).revision }).unwrap()
     }
 
     pub fn date(&self) -> &str {
         unsafe {
-            let date = self.0.date;
+            let date = (*self.ptr).date;
             std::ffi::CStr::from_ptr(date).to_str().unwrap()
         }
     }
 
     pub fn author(&self) -> &str {
         unsafe {
-            let author = self.0.author;
+            let author = (*self.ptr).author;
             std::ffi::CStr::from_ptr(author).to_str().unwrap()
         }
     }
     pub fn post_commit_err(&self) -> Option<&str> {
         unsafe {
-            let err = self.0.post_commit_err;
+            let err = (*self.ptr).post_commit_err;
             if err.is_null() {
                 None
             } else {
@@ -344,24 +367,15 @@ impl CommitInfo {
     }
     pub fn repos_root(&self) -> &str {
         unsafe {
-            let repos_root = self.0.repos_root;
+            let repos_root = (*self.ptr).repos_root;
             std::ffi::CStr::from_ptr(repos_root).to_str().unwrap()
         }
     }
-}
 
-impl Clone for CommitInfo {
-    fn clone(&self) -> Self {
+    pub fn dup(&self, pool: &'pool apr::Pool) -> Result<CommitInfo<'pool>, Error> {
         unsafe {
-            Self(
-                PooledPtr::initialize(|pool| {
-                    Ok::<_, Error>(subversion_sys::svn_commit_info_dup(
-                        self.0.as_ptr(),
-                        pool.as_mut_ptr(),
-                    ))
-                })
-                .unwrap(),
-            )
+            let duplicated = subversion_sys::svn_commit_info_dup(self.ptr, pool.as_mut_ptr());
+            Ok(CommitInfo::from_raw(duplicated))
         }
     }
 }
@@ -382,29 +396,36 @@ impl From<&RevisionRange> for subversion_sys::svn_opt_revision_range_t {
 }
 
 impl RevisionRange {
-    pub unsafe fn to_c(
-        &self,
-        pool: &mut apr::Pool,
-    ) -> *mut subversion_sys::svn_opt_revision_range_t {
+    pub unsafe fn to_c(&self, pool: &apr::Pool) -> *mut subversion_sys::svn_opt_revision_range_t {
         let range = pool.calloc::<subversion_sys::svn_opt_revision_range_t>();
         *range = self.into();
         range
     }
 }
 
-pub struct LogEntry(apr::pool::PooledPtr<subversion_sys::svn_log_entry_t>);
-unsafe impl Send for LogEntry {}
+pub struct LogEntry<'pool> {
+    ptr: *const subversion_sys::svn_log_entry_t,
+    _pool: std::marker::PhantomData<&'pool apr::Pool>,
+}
+unsafe impl Send for LogEntry<'_> {}
 
-impl Clone for LogEntry {
-    fn clone(&self) -> Self {
-        Self(
-            apr::pool::PooledPtr::initialize(|pool| {
-                Ok::<_, Error>(unsafe {
-                    subversion_sys::svn_log_entry_dup(self.0.as_ptr(), pool.as_mut_ptr())
-                })
-            })
-            .unwrap(),
-        )
+impl<'pool> LogEntry<'pool> {
+    pub fn from_raw(ptr: *const subversion_sys::svn_log_entry_t) -> Self {
+        Self {
+            ptr,
+            _pool: std::marker::PhantomData,
+        }
+    }
+
+    pub fn dup(&self, pool: &'pool apr::Pool) -> Result<LogEntry<'pool>, Error> {
+        unsafe {
+            let duplicated = subversion_sys::svn_log_entry_dup(self.ptr, pool.as_mut_ptr());
+            Ok(LogEntry::from_raw(duplicated))
+        }
+    }
+
+    pub fn as_ptr(&self) -> *const subversion_sys::svn_log_entry_t {
+        self.ptr
     }
 }
 
@@ -448,16 +469,22 @@ impl From<NativeEOL> for Option<&str> {
     }
 }
 
-pub struct InheritedItem(apr::pool::PooledPtr<subversion_sys::svn_prop_inherited_item_t>);
+pub struct InheritedItem<'pool> {
+    ptr: *const subversion_sys::svn_prop_inherited_item_t,
+    _pool: std::marker::PhantomData<&'pool apr::Pool>,
+}
 
-impl InheritedItem {
-    pub fn from_raw(ptr: apr::pool::PooledPtr<subversion_sys::svn_prop_inherited_item_t>) -> Self {
-        Self(ptr)
+impl<'pool> InheritedItem<'pool> {
+    pub fn from_raw(ptr: *const subversion_sys::svn_prop_inherited_item_t) -> Self {
+        Self {
+            ptr,
+            _pool: std::marker::PhantomData,
+        }
     }
 
     pub fn path_or_url(&self) -> &str {
         unsafe {
-            let path_or_url = self.0.path_or_url;
+            let path_or_url = (*self.ptr).path_or_url;
             std::ffi::CStr::from_ptr(path_or_url).to_str().unwrap()
         }
     }
@@ -587,68 +614,72 @@ impl From<StatusKind> for subversion_sys::svn_wc_status_kind {
     }
 }
 
-pub struct Lock(PooledPtr<subversion_sys::svn_lock_t>);
-unsafe impl Send for Lock {}
+pub struct Lock<'pool> {
+    ptr: *const subversion_sys::svn_lock_t,
+    _pool: std::marker::PhantomData<&'pool apr::Pool>,
+}
+unsafe impl Send for Lock<'_> {}
 
-impl Lock {
+impl<'pool> Lock<'pool> {
+    pub fn from_raw(ptr: *const subversion_sys::svn_lock_t) -> Self {
+        Self {
+            ptr,
+            _pool: std::marker::PhantomData,
+        }
+    }
+
     pub fn path(&self) -> &str {
         unsafe {
-            let path = (*self.0).path;
+            let path = (*self.ptr).path;
             std::ffi::CStr::from_ptr(path).to_str().unwrap()
         }
     }
 
-    pub fn dup(&self) -> Self {
-        Self(
-            apr::pool::PooledPtr::initialize(|pool| {
-                Ok::<_, Error>(unsafe {
-                    subversion_sys::svn_lock_dup(self.0.as_ptr(), pool.as_mut_ptr())
-                })
-            })
-            .unwrap(),
-        )
+    pub fn dup(&self, pool: &'pool apr::Pool) -> Result<Lock<'pool>, Error> {
+        unsafe {
+            let duplicated = subversion_sys::svn_lock_dup(self.ptr, pool.as_mut_ptr());
+            Ok(Lock::from_raw(duplicated))
+        }
     }
 
     pub fn token(&self) -> &str {
         unsafe {
-            let token = (*self.0).token;
+            let token = (*self.ptr).token;
             std::ffi::CStr::from_ptr(token).to_str().unwrap()
         }
     }
 
     pub fn owner(&self) -> &str {
         unsafe {
-            let owner = (*self.0).owner;
+            let owner = (*self.ptr).owner;
             std::ffi::CStr::from_ptr(owner).to_str().unwrap()
         }
     }
 
     pub fn comment(&self) -> &str {
         unsafe {
-            let comment = (*self.0).comment;
+            let comment = (*self.ptr).comment;
             std::ffi::CStr::from_ptr(comment).to_str().unwrap()
         }
     }
 
     pub fn is_dav_comment(&self) -> bool {
-        (*self.0).is_dav_comment == 1
+        unsafe { (*self.ptr).is_dav_comment == 1 }
     }
 
     pub fn creation_date(&self) -> i64 {
-        (*self.0).creation_date
+        unsafe { (*self.ptr).creation_date }
     }
 
     pub fn expiration_date(&self) -> apr::time::Time {
-        apr::time::Time::from((*self.0).expiration_date)
+        apr::time::Time::from(unsafe { (*self.ptr).expiration_date })
     }
 
-    pub fn create() -> Self {
-        Self(
-            apr::pool::PooledPtr::initialize(|pool| {
-                Ok::<_, Error>(unsafe { subversion_sys::svn_lock_create(pool.as_mut_ptr()) })
-            })
-            .unwrap(),
-        )
+    pub fn create(pool: &'pool apr::Pool) -> Result<Lock<'pool>, Error> {
+        unsafe {
+            let lock_ptr = subversion_sys::svn_lock_create(pool.as_mut_ptr());
+            Ok(Lock::from_raw(lock_ptr))
+        }
     }
 }
 
@@ -682,28 +713,37 @@ impl From<ChecksumKind> for subversion_sys::svn_checksum_kind_t {
     }
 }
 
-pub struct LocationSegment(PooledPtr<subversion_sys::svn_location_segment_t>);
-unsafe impl Send for LocationSegment {}
+pub struct LocationSegment<'pool> {
+    ptr: *const subversion_sys::svn_location_segment_t,
+    _pool: std::marker::PhantomData<&'pool apr::Pool>,
+}
+unsafe impl Send for LocationSegment<'_> {}
 
-impl LocationSegment {
-    pub fn dup(&self) -> Self {
-        Self(
-            apr::pool::PooledPtr::initialize(|pool| {
-                Ok::<_, Error>(unsafe {
-                    subversion_sys::svn_location_segment_dup(self.0.as_ptr(), pool.as_mut_ptr())
-                })
-            })
-            .unwrap(),
-        )
+impl<'pool> LocationSegment<'pool> {
+    pub fn from_raw(ptr: *const subversion_sys::svn_location_segment_t) -> Self {
+        Self {
+            ptr,
+            _pool: std::marker::PhantomData,
+        }
+    }
+
+    pub fn dup(&self, pool: &'pool apr::Pool) -> Result<LocationSegment<'pool>, Error> {
+        unsafe {
+            let duplicated = subversion_sys::svn_location_segment_dup(self.ptr, pool.as_mut_ptr());
+            Ok(LocationSegment::from_raw(duplicated))
+        }
     }
 
     pub fn range(&self) -> std::ops::Range<Revnum> {
-        Revnum::from_raw(self.0.range_end).unwrap()..Revnum::from_raw(self.0.range_start).unwrap()
+        unsafe {
+            Revnum::from_raw((*self.ptr).range_end).unwrap()
+                ..Revnum::from_raw((*self.ptr).range_start).unwrap()
+        }
     }
 
     pub fn path(&self) -> &str {
         unsafe {
-            let path = self.0.path;
+            let path = (*self.ptr).path;
             std::ffi::CStr::from_ptr(path).to_str().unwrap()
         }
     }
@@ -713,15 +753,13 @@ impl LocationSegment {
 pub(crate) extern "C" fn wrap_commit_callback2(
     commit_info: *const subversion_sys::svn_commit_info_t,
     baton: *mut std::ffi::c_void,
-    pool: *mut apr::apr_pool_t,
+    _pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     unsafe {
         let callback = baton as *mut &mut dyn FnMut(&crate::CommitInfo) -> Result<(), Error>;
         let mut callback = Box::from_raw(callback);
-        match callback(&crate::CommitInfo(PooledPtr::in_pool(
-            std::rc::Rc::new(apr::pool::Pool::from_raw(pool)),
-            commit_info as *mut subversion_sys::svn_commit_info_t,
-        ))) {
+        let commit_info = crate::CommitInfo::from_raw(commit_info);
+        match callback(&commit_info) {
             Ok(()) => std::ptr::null_mut(),
             Err(mut err) => err.as_mut_ptr(),
         }
@@ -732,16 +770,13 @@ pub(crate) extern "C" fn wrap_commit_callback2(
 pub(crate) extern "C" fn wrap_log_entry_receiver(
     baton: *mut std::ffi::c_void,
     log_entry: *mut subversion_sys::svn_log_entry_t,
-    pool: *mut apr::apr_pool_t,
+    _pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     unsafe {
         let callback = baton as *mut &mut dyn FnMut(&LogEntry) -> Result<(), Error>;
         let mut callback = Box::from_raw(callback);
-        let pool = apr::pool::Pool::from_raw(pool);
-        let ret = callback(&LogEntry(apr::pool::PooledPtr::in_pool(
-            std::rc::Rc::new(pool),
-            log_entry,
-        )));
+        let log_entry = LogEntry::from_raw(log_entry);
+        let ret = callback(&log_entry);
         if let Err(mut err) = ret {
             err.as_mut_ptr()
         } else {
@@ -760,33 +795,42 @@ extern "C" fn wrap_cancel_func(
     }
 }
 
-pub struct Checksum(PooledPtr<subversion_sys::svn_checksum_t>);
+pub struct Checksum<'pool> {
+    ptr: *const subversion_sys::svn_checksum_t,
+    _pool: std::marker::PhantomData<&'pool apr::Pool>,
+}
 
-impl Checksum {
+impl<'pool> Checksum<'pool> {
+    pub fn from_raw(ptr: *const subversion_sys::svn_checksum_t) -> Self {
+        Self {
+            ptr,
+            _pool: std::marker::PhantomData,
+        }
+    }
+
     pub fn kind(&self) -> ChecksumKind {
-        ChecksumKind::from(self.0.kind)
+        ChecksumKind::from(unsafe { (*self.ptr).kind })
     }
 
     pub fn size(&self) -> usize {
-        unsafe { subversion_sys::svn_checksum_size(self.0.as_ptr()) }
+        unsafe { subversion_sys::svn_checksum_size(self.ptr) }
     }
 
-    pub fn is_empty(&mut self) -> bool {
-        unsafe { subversion_sys::svn_checksum_is_empty_checksum(self.0.as_mut_ptr()) == 1 }
+    pub fn is_empty(&self) -> bool {
+        unsafe { subversion_sys::svn_checksum_is_empty_checksum(self.ptr as *mut _) == 1 }
     }
 
     pub fn digest(&self) -> &[u8] {
         unsafe {
-            let digest = self.0.digest;
-            std::slice::from_raw_parts(digest, self.size() as usize)
+            let digest = (*self.ptr).digest;
+            std::slice::from_raw_parts(digest, self.size())
         }
     }
 
-    pub fn parse_hex(kind: ChecksumKind, hex: &str) -> Result<Self, Error> {
+    pub fn parse_hex(kind: ChecksumKind, hex: &str, pool: &'pool apr::Pool) -> Result<Self, Error> {
         let mut checksum = std::ptr::null_mut();
         let kind = kind.into();
         let hex = std::ffi::CString::new(hex).unwrap();
-        let pool = apr::pool::Pool::new();
         unsafe {
             Error::from_raw(subversion_sys::svn_checksum_parse_hex(
                 &mut checksum,
@@ -794,34 +838,38 @@ impl Checksum {
                 hex.as_ptr(),
                 pool.as_mut_ptr(),
             ))?;
-            Ok(Self(PooledPtr::in_pool(std::rc::Rc::new(pool), checksum)))
+            Ok(Self::from_raw(checksum))
         }
     }
 
-    pub fn empty(kind: ChecksumKind) -> Result<Self, Error> {
+    pub fn empty(kind: ChecksumKind, pool: &'pool apr::Pool) -> Result<Self, Error> {
         let kind = kind.into();
-        let pool = apr::pool::Pool::new();
         unsafe {
             let checksum = subversion_sys::svn_checksum_empty_checksum(kind, pool.as_mut_ptr());
-            Ok(Self(PooledPtr::in_pool(std::rc::Rc::new(pool), checksum)))
+            Ok(Self::from_raw(checksum))
         }
     }
 }
 
-pub struct ChecksumContext(PooledPtr<subversion_sys::svn_checksum_ctx_t>);
+pub struct ChecksumContext<'pool> {
+    ptr: *mut subversion_sys::svn_checksum_ctx_t,
+    _pool: std::marker::PhantomData<&'pool apr::Pool>,
+}
 
-impl ChecksumContext {
-    pub fn new(kind: ChecksumKind) -> Result<Self, Error> {
+impl<'pool> ChecksumContext<'pool> {
+    pub fn new(kind: ChecksumKind, pool: &'pool apr::Pool) -> Result<Self, Error> {
         let kind = kind.into();
-        let pool = apr::pool::Pool::new();
         unsafe {
             let cc = subversion_sys::svn_checksum_ctx_create(kind, pool.as_mut_ptr());
-            Ok(Self(PooledPtr::in_pool(std::rc::Rc::new(pool), cc)))
+            Ok(Self {
+                ptr: cc,
+                _pool: std::marker::PhantomData,
+            })
         }
     }
 
     pub fn reset(&mut self) -> Result<(), Error> {
-        let err = unsafe { subversion_sys::svn_checksum_ctx_reset(self.0.as_mut_ptr()) };
+        let err = unsafe { subversion_sys::svn_checksum_ctx_reset(self.ptr) };
         Error::from_raw(err)?;
         Ok(())
     }
@@ -829,7 +877,7 @@ impl ChecksumContext {
     pub fn update(&mut self, data: &[u8]) -> Result<(), Error> {
         let err = unsafe {
             subversion_sys::svn_checksum_update(
-                self.0.as_mut_ptr(),
+                self.ptr,
                 data.as_ptr() as *const std::ffi::c_void,
                 data.len(),
             )
@@ -838,27 +886,26 @@ impl ChecksumContext {
         Ok(())
     }
 
-    pub fn finish(&self) -> Result<Checksum, Error> {
+    pub fn finish(&self, result_pool: &'pool apr::Pool) -> Result<Checksum<'pool>, Error> {
         let mut checksum = std::ptr::null_mut();
-        let pool = apr::pool::Pool::new();
         unsafe {
             Error::from_raw(subversion_sys::svn_checksum_final(
                 &mut checksum,
-                self.0.as_ptr(),
-                pool.as_mut_ptr(),
+                self.ptr,
+                result_pool.as_mut_ptr(),
             ))?;
-            Ok(Checksum(PooledPtr::in_pool(
-                std::rc::Rc::new(pool),
-                checksum,
-            )))
+            Ok(Checksum::from_raw(checksum))
         }
     }
 }
 
-pub fn checksum(kind: ChecksumKind, data: &[u8]) -> Result<Checksum, Error> {
+pub fn checksum<'pool>(
+    kind: ChecksumKind,
+    data: &[u8],
+    pool: &'pool apr::Pool,
+) -> Result<Checksum<'pool>, Error> {
     let mut checksum = std::ptr::null_mut();
     let kind = kind.into();
-    let pool = apr::pool::Pool::new();
     unsafe {
         Error::from_raw(subversion_sys::svn_checksum(
             &mut checksum,
@@ -867,9 +914,6 @@ pub fn checksum(kind: ChecksumKind, data: &[u8]) -> Result<Checksum, Error> {
             data.len(),
             pool.as_mut_ptr(),
         ))?;
-        Ok(Checksum(PooledPtr::in_pool(
-            std::rc::Rc::new(pool),
-            checksum,
-        )))
+        Ok(Checksum::from_raw(checksum))
     }
 }
