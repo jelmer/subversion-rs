@@ -219,6 +219,18 @@ impl From<Error> for std::io::Error {
     }
 }
 
+impl From<std::ffi::NulError> for Error {
+    fn from(err: std::ffi::NulError) -> Self {
+        Self::from_str(&format!("Null byte in string: {}", err))
+    }
+}
+
+impl From<std::str::Utf8Error> for Error {
+    fn from(err: std::str::Utf8Error) -> Self {
+        Self::from_str(&format!("UTF-8 encoding error: {}", err))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

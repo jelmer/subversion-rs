@@ -1,11 +1,13 @@
 use crate::Error;
 use std::marker::PhantomData;
 
-pub struct AuthBaton<'pool> {
+pub struct AuthBaton {
     ptr: *mut subversion_sys::svn_auth_baton_t,
-    _pool: std::marker::PhantomData<&'pool apr::Pool>,
+    pool: apr::Pool,
+    // Store parameter names to keep them alive for the lifetime of the baton
+    parameter_names: std::collections::HashMap<String, std::ffi::CString>,
 }
-unsafe impl Send for AuthBaton<'_> {}
+unsafe impl Send for AuthBaton {}
 
 pub trait Credentials {
     fn kind() -> &'static str;
@@ -80,7 +82,7 @@ impl<'pool> Credentials for SimpleCredentials<'pool> {
     }
 }
 
-impl<'pool> AuthBaton<'pool> {
+impl AuthBaton {
     pub fn as_mut_ptr(&mut self) -> *mut subversion_sys::svn_auth_baton_t {
         self.ptr
     }
@@ -142,8 +144,13 @@ impl<'pool> AuthBaton<'pool> {
     ///
     /// The caller must ensure that the value is valid for the lifetime of the auth baton.
     pub unsafe fn get_parameter(&mut self, name: &str) -> *const std::ffi::c_void {
-        let name = std::ffi::CString::new(name).unwrap();
-        subversion_sys::svn_auth_get_parameter(self.ptr, name.as_ptr())
+        // Ensure the parameter name is stored and persists
+        if !self.parameter_names.contains_key(name) {
+            let name_cstring = std::ffi::CString::new(name).unwrap();
+            self.parameter_names.insert(name.to_string(), name_cstring);
+        }
+        let name_cstring = &self.parameter_names[name];
+        subversion_sys::svn_auth_get_parameter(self.ptr, name_cstring.as_ptr())
     }
 
     /// Set a parameter on the auth baton.
@@ -151,8 +158,11 @@ impl<'pool> AuthBaton<'pool> {
     /// # Safety
     /// The caller must ensure that the value is valid for the lifetime of the auth baton.
     pub unsafe fn set_parameter(&mut self, name: &str, value: *const std::ffi::c_void) {
-        let name = std::ffi::CString::new(name).unwrap();
-        subversion_sys::svn_auth_set_parameter(self.ptr, name.as_ptr(), value);
+        // Store the parameter name to ensure it persists for the lifetime of the baton
+        let name_cstring = std::ffi::CString::new(name).unwrap();
+        let name_ptr = name_cstring.as_ptr();
+        self.parameter_names.insert(name.to_string(), name_cstring);
+        subversion_sys::svn_auth_set_parameter(self.ptr, name_ptr, value);
     }
 
     pub fn open(providers: &[impl AsAuthProvider]) -> Result<Self, Error> {
@@ -168,7 +178,8 @@ impl<'pool> AuthBaton<'pool> {
             subversion_sys::svn_auth_open(&mut baton, provider_array.as_ptr(), pool.as_mut_ptr());
             Ok(Self {
                 ptr: baton,
-                _pool: std::marker::PhantomData,
+                pool,
+                parameter_names: std::collections::HashMap::new(),
             })
         }
     }
