@@ -44,3 +44,7 @@ required-features = ["client"]
 [[example]]
 name = "cat"
 required-features = ["client"]
+
+[[example]]
+name = "merge_with_conflicts"
+required-features = ["client"]
