@@ -7,6 +7,7 @@ use crate::{
 use apr::Pool;
 
 use std::collections::HashMap;
+use std::ops::ControlFlow;
 use subversion_sys::svn_error_t;
 use subversion_sys::{
     svn_client_add5, svn_client_checkout3, svn_client_cleanup2, svn_client_commit6,
@@ -60,6 +61,26 @@ extern "C" fn wrap_status_func(
         } else {
             std::ptr::null_mut()
         }
+    }
+}
+
+/// C trampoline for cancel callbacks
+extern "C" fn cancel_trampoline(baton: *mut std::ffi::c_void) -> *mut subversion_sys::svn_error_t {
+    if baton.is_null() {
+        return std::ptr::null_mut();
+    }
+
+    let handler = unsafe { &mut *(baton as *mut Box<dyn FnMut() -> bool + Send>) };
+    if handler() {
+        // Return SVN_ERR_CANCELLED (200015)
+        let err = Error::new(
+            apr::Status::from(200015_i32),
+            None,
+            "Operation cancelled by user",
+        );
+        unsafe { err.into_raw() }
+    } else {
+        std::ptr::null_mut()
     }
 }
 
@@ -319,6 +340,7 @@ pub struct Context {
     pool: apr::Pool,
     _phantom: std::marker::PhantomData<*mut ()>,
     conflict_resolver: Option<Box<crate::conflict::ConflictResolverBaton>>,
+    cancel_handler: Option<Box<dyn FnMut() -> bool + Send>>,
 }
 unsafe impl Send for Context {}
 
@@ -329,6 +351,13 @@ impl Drop for Context {
             unsafe {
                 (*self.ptr).conflict_func2 = None;
                 (*self.ptr).conflict_baton2 = std::ptr::null_mut();
+            }
+        }
+        // Clear cancel handler
+        if self.cancel_handler.is_some() {
+            unsafe {
+                (*self.ptr).cancel_func = None;
+                (*self.ptr).cancel_baton = std::ptr::null_mut();
             }
         }
         // Pool drop will clean up context
@@ -348,6 +377,7 @@ impl Context {
             pool,
             _phantom: std::marker::PhantomData,
             conflict_resolver: None,
+            cancel_handler: None,
         })
     }
 
@@ -391,6 +421,43 @@ impl Context {
             (*self.ptr).conflict_baton2 = std::ptr::null_mut();
         }
         self.conflict_resolver = None;
+    }
+
+    /// Set a cancel handler that will be called periodically during long operations
+    ///
+    /// The handler should return `true` to cancel the operation, `false` to continue.
+    /// Operations will fail with an SVN_ERR_CANCELLED error if cancelled.
+    pub fn set_cancel_handler<F>(&mut self, handler: F)
+    where
+        F: FnMut() -> bool + Send + 'static,
+    {
+        // Clear any existing handler
+        unsafe {
+            (*self.ptr).cancel_func = None;
+            (*self.ptr).cancel_baton = std::ptr::null_mut();
+        }
+
+        // Store the new handler
+        self.cancel_handler = Some(Box::new(handler));
+
+        // Set up the C callback
+        unsafe {
+            (*self.ptr).cancel_func = Some(cancel_trampoline);
+            (*self.ptr).cancel_baton = self
+                .cancel_handler
+                .as_mut()
+                .map(|h| h.as_mut() as *mut _ as *mut std::ffi::c_void)
+                .unwrap_or(std::ptr::null_mut());
+        }
+    }
+
+    /// Clear the cancel handler
+    pub fn clear_cancel_handler(&mut self) {
+        unsafe {
+            (*self.ptr).cancel_func = None;
+            (*self.ptr).cancel_baton = std::ptr::null_mut();
+        }
+        self.cancel_handler = None;
     }
 
     pub fn set_auth<'a, 'b>(&'a mut self, auth_baton: &'b mut crate::auth::AuthBaton)
@@ -838,6 +905,10 @@ impl Context {
         }
     }
 
+    /// Retrieve log messages for a set of paths.
+    ///
+    /// The receiver callback will be called for each log entry found.
+    /// Return an error from the callback to stop iteration early.
     pub fn log(
         &mut self,
         targets: &[&str],
@@ -900,6 +971,48 @@ impl Context {
             Error::from_raw(err)?;
             Ok(())
         }
+    }
+
+    /// Retrieve log messages with control flow support.
+    ///
+    /// The receiver can return `ControlFlow::Break(())` to stop iteration early
+    /// or `ControlFlow::Continue(())` to continue processing.
+    pub fn log_with_control<F>(
+        &mut self,
+        targets: &[&str],
+        peg_revision: Revision,
+        revision_ranges: &[RevisionRange],
+        limit: i32,
+        discover_changed_paths: bool,
+        strict_node_history: bool,
+        include_merged_revisions: bool,
+        revprops: &[&str],
+        mut receiver: F,
+    ) -> Result<(), Error>
+    where
+        F: FnMut(&LogEntry) -> ControlFlow<()>,
+    {
+        self.log(
+            targets,
+            peg_revision,
+            revision_ranges,
+            limit,
+            discover_changed_paths,
+            strict_node_history,
+            include_merged_revisions,
+            revprops,
+            &|entry| match receiver(entry) {
+                ControlFlow::Continue(()) => Ok(()),
+                ControlFlow::Break(()) => {
+                    // Return a cancellation error to stop iteration
+                    Err(Error::new(
+                        apr::Status::from(200015_i32), // SVN_ERR_CANCELLED
+                        None,
+                        "Log iteration stopped by user",
+                    ))
+                }
+            },
+        )
     }
 
     // TODO: This method needs to be reworked to handle lifetime-bound Context
