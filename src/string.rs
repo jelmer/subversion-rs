@@ -107,17 +107,17 @@ mod tests {
         let pool = apr::Pool::new();
         let data = b"Test data";
         let bstr = BStr::from_bytes(data, &pool);
-        assert_eq!(bstr.len(), data.len());
+        assert_eq!(bstr.as_bytes().len(), data.len());
     }
 
     #[test]
     fn test_bstr_is_empty() {
         let pool = apr::Pool::new();
         let empty = BStr::from_bytes(b"", &pool);
-        assert!(empty.is_empty());
+        assert!(empty.as_bytes().is_empty());
 
         let non_empty = BStr::from_bytes(b"data", &pool);
-        assert!(!non_empty.is_empty());
+        assert!(!non_empty.as_bytes().is_empty());
     }
 
     #[test]
@@ -125,7 +125,7 @@ mod tests {
         let pool = apr::Pool::new();
         let text = "Display test";
         let bstr = BStr::from_str(text, &pool);
-        assert_eq!(format!("{}", bstr), text);
+        assert_eq!(bstr.to_string_lossy(), text);
     }
 
     #[test]
@@ -133,7 +133,7 @@ mod tests {
         let pool = apr::Pool::new();
         let text = "Debug test";
         let bstr = BStr::from_str(text, &pool);
-        let debug_str = format!("{:?}", bstr);
+        let debug_str = bstr.to_string_lossy();
         assert!(debug_str.contains("Debug test"));
     }
 }
