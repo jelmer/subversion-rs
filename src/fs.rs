@@ -15,6 +15,20 @@ impl Drop for Fs {
 }
 
 impl Fs {
+    /// Get a reference to the underlying pool
+    pub fn pool(&self) -> &apr::Pool {
+        &self.pool
+    }
+
+    /// Get the raw pointer to the filesystem (use with caution)
+    pub fn as_ptr(&self) -> *const subversion_sys::svn_fs_t {
+        self.fs_ptr
+    }
+
+    /// Get the mutable raw pointer to the filesystem (use with caution)
+    pub fn as_mut_ptr(&mut self) -> *mut subversion_sys::svn_fs_t {
+        self.fs_ptr
+    }
     /// Create Fs from existing pointer with shared pool (for repos integration)
     pub(crate) unsafe fn from_ptr_and_pool(
         fs_ptr: *mut subversion_sys::svn_fs_t,
@@ -71,14 +85,6 @@ impl Fs {
 
             Ok(Fs { fs_ptr, pool })
         }
-    }
-
-    pub fn as_ptr(&self) -> *const subversion_sys::svn_fs_t {
-        self.fs_ptr
-    }
-
-    pub fn as_mut_ptr(&mut self) -> *mut subversion_sys::svn_fs_t {
-        self.fs_ptr
     }
 
     pub fn path(&self) -> std::path::PathBuf {
@@ -280,10 +286,10 @@ mod tests {
         let fs_path = dir.path().join("test-fs");
 
         let mut fs = Fs::create(&fs_path).unwrap();
-        let rev = fs.youngest_rev();
+        let rev = fs.youngest_revision();
         assert!(rev.is_ok());
         // New filesystem should have revision 0
-        assert_eq!(rev.unwrap(), crate::Revnum::from(0));
+        assert_eq!(rev.unwrap(), crate::Revnum(0));
     }
 
     #[test]
@@ -304,7 +310,7 @@ mod tests {
         let fs_path = dir.path().join("test-fs");
 
         let mut fs = Fs::create(&fs_path).unwrap();
-        let root = fs.revision_root(crate::Revnum::from(0));
+        let root = fs.revision_root(crate::Revnum(0));
         assert!(root.is_ok(), "Failed to get revision root");
     }
 
