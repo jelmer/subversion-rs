@@ -13,21 +13,10 @@ dependencies = [
 
 [[package]]
 name = "apr"
-version = "0.1.16"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "512197dbe69965909173bdeba6fc77c4ccbadfec3eea32952b0861668ab046c0"
-dependencies = [
- "bindgen",
- "ctor 0.2.9",
- "system-deps",
-]
-
-[[package]]
-name = "apr"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "apr-sys",
- "ctor 0.5.0",
+ "ctor",
 ]
 
 [[package]]
@@ -104,16 +93,6 @@ dependencies = [
  "glob",
  "libc",
  "libloading",
-]
-
-[[package]]
-name = "ctor"
-version = "0.2.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32a2785755761f3ddc1492979ce1e48d2c00d09311c39e4466429188f3dd6501"
-dependencies = [
- "quote",
- "syn",
 ]
 
 [[package]]
@@ -656,9 +635,10 @@ checksum = "a8f112729512f8e442d81f95a8a7ddf2b7c6b8a1a6f509a95864142b30cab2d3"
 name = "subversion"
 version = "0.0.8"
 dependencies = [
- "apr 0.2.0",
+ "apr",
+ "apr-sys",
  "bitflags",
- "ctor 0.5.0",
+ "ctor",
  "lazy_static",
  "pyo3",
  "subversion-sys",
@@ -670,7 +650,8 @@ dependencies = [
 name = "subversion-sys"
 version = "0.0.8"
 dependencies = [
- "apr 0.1.16",
+ "apr",
+ "apr-sys",
  "bindgen",
  "system-deps",
 ]
