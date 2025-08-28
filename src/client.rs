@@ -29,8 +29,7 @@ extern "C" fn wrap_filter_callback(
 ) -> *mut svn_error_t {
     unsafe {
         let callback =
-            baton as *mut &mut dyn FnMut(&std::path::Path, &Dirent) -> Result<bool, Error>;
-        let mut callback = Box::from_raw(callback);
+            &mut *(baton as *mut &mut dyn FnMut(&std::path::Path, &Dirent) -> Result<bool, Error>);
         let local_abspath: &std::path::Path = std::ffi::CStr::from_ptr(local_abspath)
             .to_str()
             .unwrap()
@@ -52,8 +51,8 @@ extern "C" fn wrap_status_func(
     _pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     unsafe {
-        let callback = baton as *mut &mut dyn FnMut(&std::path::Path, &Status) -> Result<(), Error>;
-        let mut callback = Box::from_raw(callback);
+        let callback =
+            &mut *(baton as *mut &mut dyn FnMut(&std::path::Path, &Status) -> Result<(), Error>);
         let path: &std::path::Path = std::ffi::CStr::from_ptr(path).to_str().unwrap().as_ref();
         let ret = callback(path, &Status(status));
         if let Err(mut err) = ret {
@@ -79,7 +78,7 @@ extern "C" fn wrap_proplist_receiver2(
                 &HashMap<String, Vec<u8>>,
                 Option<&[crate::InheritedItem]>,
             ) -> Result<(), Error>;
-        let mut callback = Box::from_raw(callback);
+        let callback = &mut *(callback);
         let path: &str = std::ffi::CStr::from_ptr(path).to_str().unwrap();
         let mut props = apr::hash::Hash::<&str, *mut subversion_sys::svn_string_t>::from_ptr(props);
         let props = props
@@ -400,9 +399,13 @@ impl Context {
         let mut pool = std::rc::Rc::new(Pool::default());
         let mut result_revs = std::ptr::null_mut();
         unsafe {
+            // Keep CStrings alive for the duration of the function
+            let path_cstrings: Vec<std::ffi::CString> = paths
+                .iter()
+                .map(|p| std::ffi::CString::new(*p).unwrap())
+                .collect();
             let mut ps = apr::tables::ArrayHeader::new_with_capacity(&pool, paths.len());
-            for path in paths {
-                let path = std::ffi::CString::new(*path).unwrap();
+            for path in &path_cstrings {
                 ps.push(path.as_ptr() as *mut std::ffi::c_void);
             }
 
@@ -492,18 +495,21 @@ impl Context {
             for (k, v) in revprop_table {
                 rps.set(k, &v);
             }
+            // Keep CStrings alive for the duration of the function
+            let path_cstrings: Vec<std::ffi::CString> = paths
+                .iter()
+                .map(|p| std::ffi::CString::new(*p).unwrap())
+                .collect();
             let mut ps = apr::tables::ArrayHeader::new_with_capacity(&pool, paths.len());
-            for path in paths {
-                let path = std::ffi::CString::new(*path).unwrap();
+            for path in &path_cstrings {
                 ps.push(path.as_ptr() as *mut std::ffi::c_void);
             }
-            let commit_callback = Box::into_raw(Box::new(commit_callback));
             let err = svn_client_mkdir4(
                 ps.as_ptr(),
                 make_parents.into(),
                 rps.as_ptr(),
                 Some(crate::wrap_commit_callback2),
-                commit_callback as *mut std::ffi::c_void,
+                &commit_callback as *const _ as *mut std::ffi::c_void,
                 self.ptr,
                 std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
             );
@@ -524,9 +530,13 @@ impl Context {
             for (k, v) in revprop_table {
                 rps.set(k, &v);
             }
+            // Keep CStrings alive for the duration of the function
+            let path_cstrings: Vec<std::ffi::CString> = paths
+                .iter()
+                .map(|p| std::ffi::CString::new(*p).unwrap())
+                .collect();
             let mut ps = apr::tables::ArrayHeader::new_with_capacity(&pool, paths.len());
-            for path in paths {
-                let path = std::ffi::CString::new(*path).unwrap();
+            for path in &path_cstrings {
                 ps.push(path.as_ptr() as *mut std::ffi::c_void);
             }
             let commit_callback = Box::into_raw(Box::new(options.commit_callback));
@@ -1391,8 +1401,12 @@ impl Context {
             let mut result = std::collections::HashMap::new();
             for (k, v) in hash.iter(pool) {
                 let key = String::from_utf8_lossy(k).into_owned();
-                let value = unsafe {
-                    std::slice::from_raw_parts((**v).data as *const u8, (**v).len).to_vec()
+                let value = if v.is_null() {
+                    Vec::new()
+                } else {
+                    unsafe {
+                        std::slice::from_raw_parts((**v).data as *const u8, (**v).len).to_vec()
+                    }
                 };
                 result.insert(key, value);
             }
