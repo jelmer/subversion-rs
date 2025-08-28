@@ -22,6 +22,8 @@ pub mod dirent;
 pub mod error;
 pub mod fs;
 pub mod io;
+#[cfg(feature = "client")]
+pub mod merge;
 pub mod mergeinfo;
 pub mod props;
 #[cfg(feature = "ra")]
