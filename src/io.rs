@@ -462,7 +462,7 @@ impl From<&[u8]> for Stream {
             subversion_sys::svn_string_ncreate(
                 bytes.as_ptr() as *const i8,
                 bytes.len(),
-                pool.as_mut_ptr()
+                pool.as_mut_ptr(),
             )
         };
         let stream = unsafe { subversion_sys::svn_stream_from_string(svn_str, pool.as_mut_ptr()) };
