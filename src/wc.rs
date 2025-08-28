@@ -1,8 +1,91 @@
 use crate::{svn_result, with_tmp_pool, Error};
 use std::marker::PhantomData;
 use subversion_sys::{svn_wc_context_t, svn_wc_version};
+
 pub fn version() -> crate::Version {
     unsafe { crate::Version(svn_wc_version()) }
+}
+
+/// Working copy status types
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum Status {
+    /// Not under version control
+    None = subversion_sys::svn_wc_status_kind_svn_wc_status_none,
+    /// Item is not versioned
+    Unversioned = subversion_sys::svn_wc_status_kind_svn_wc_status_unversioned,
+    /// Item is versioned and unchanged
+    Normal = subversion_sys::svn_wc_status_kind_svn_wc_status_normal,
+    /// Item has been added
+    Added = subversion_sys::svn_wc_status_kind_svn_wc_status_added,
+    /// Item is missing (removed by non-svn command)
+    Missing = subversion_sys::svn_wc_status_kind_svn_wc_status_missing,
+    /// Item has been deleted
+    Deleted = subversion_sys::svn_wc_status_kind_svn_wc_status_deleted,
+    /// Item has been replaced
+    Replaced = subversion_sys::svn_wc_status_kind_svn_wc_status_replaced,
+    /// Item has been modified
+    Modified = subversion_sys::svn_wc_status_kind_svn_wc_status_modified,
+    /// Item has been merged
+    Merged = subversion_sys::svn_wc_status_kind_svn_wc_status_merged,
+    /// Item is in conflict
+    Conflicted = subversion_sys::svn_wc_status_kind_svn_wc_status_conflicted,
+    /// Item is ignored
+    Ignored = subversion_sys::svn_wc_status_kind_svn_wc_status_ignored,
+    /// Item is obstructed
+    Obstructed = subversion_sys::svn_wc_status_kind_svn_wc_status_obstructed,
+    /// Item is an external
+    External = subversion_sys::svn_wc_status_kind_svn_wc_status_external,
+    /// Item is incomplete
+    Incomplete = subversion_sys::svn_wc_status_kind_svn_wc_status_incomplete,
+}
+
+impl From<subversion_sys::svn_wc_status_kind> for Status {
+    fn from(status: subversion_sys::svn_wc_status_kind) -> Self {
+        match status {
+            subversion_sys::svn_wc_status_kind_svn_wc_status_none => Status::None,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_unversioned => Status::Unversioned,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_normal => Status::Normal,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_added => Status::Added,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_missing => Status::Missing,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_deleted => Status::Deleted,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_replaced => Status::Replaced,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_modified => Status::Modified,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_merged => Status::Merged,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_conflicted => Status::Conflicted,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_ignored => Status::Ignored,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_obstructed => Status::Obstructed,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_external => Status::External,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_incomplete => Status::Incomplete,
+            _ => Status::None,
+        }
+    }
+}
+
+/// Working copy schedule types
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum Schedule {
+    /// Nothing scheduled
+    Normal = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_normal,
+    /// Scheduled for addition
+    Add = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_add,
+    /// Scheduled for deletion
+    Delete = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_delete,
+    /// Scheduled for replacement
+    Replace = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_replace,
+}
+
+impl From<subversion_sys::svn_wc_schedule_t> for Schedule {
+    fn from(schedule: subversion_sys::svn_wc_schedule_t) -> Self {
+        match schedule {
+            subversion_sys::svn_wc_schedule_t_svn_wc_schedule_normal => Schedule::Normal,
+            subversion_sys::svn_wc_schedule_t_svn_wc_schedule_add => Schedule::Add,
+            subversion_sys::svn_wc_schedule_t_svn_wc_schedule_delete => Schedule::Delete,
+            subversion_sys::svn_wc_schedule_t_svn_wc_schedule_replace => Schedule::Replace,
+            _ => Schedule::Normal,
+        }
+    }
 }
 
 /// Working copy context with RAII cleanup
@@ -384,6 +467,55 @@ pub fn ensure_adm(
         };
         Error::from_raw(err)?;
         Ok(())
+    })
+}
+
+/// Check if a property name is a "normal" property (not special)
+pub fn is_normal_prop(name: &str) -> bool {
+    let name_cstr = std::ffi::CString::new(name).unwrap();
+    unsafe { subversion_sys::svn_wc_is_normal_prop(name_cstr.as_ptr()) != 0 }
+}
+
+/// Check if a property name is an "entry" property
+pub fn is_entry_prop(name: &str) -> bool {
+    let name_cstr = std::ffi::CString::new(name).unwrap();
+    unsafe { subversion_sys::svn_wc_is_entry_prop(name_cstr.as_ptr()) != 0 }
+}
+
+/// Check if a property name is a "wc" property
+pub fn is_wc_prop(name: &str) -> bool {
+    let name_cstr = std::ffi::CString::new(name).unwrap();
+    unsafe { subversion_sys::svn_wc_is_wc_prop(name_cstr.as_ptr()) != 0 }
+}
+
+/// Match a path against an ignore list
+pub fn match_ignore_list(
+    path: &str,
+    patterns: &[&str],
+) -> Result<bool, crate::Error> {
+    let path_cstr = std::ffi::CString::new(path).unwrap();
+    
+    with_tmp_pool(|pool| {
+        // Create APR array of patterns
+        let mut patterns_array = apr::tables::ArrayHeader::<*const i8>::new(&pool);
+        for pattern in patterns {
+            let pattern_cstr = std::ffi::CString::new(*pattern)?;
+            patterns_array.push(pattern_cstr.as_ptr());
+        }
+        
+        let mut matched = 0;
+        let err = unsafe {
+            subversion_sys::svn_wc_match_ignore_list(
+                path_cstr.as_ptr(),
+                patterns_array.as_ptr(),
+                pool.as_mut_ptr(),
+            )
+        };
+        
+        // svn_wc_match_ignore_list returns a boolean, not an error
+        // The return value indicates whether there was a match
+        matched = err as i32;
+        Ok(matched != 0)
     })
 }
 
