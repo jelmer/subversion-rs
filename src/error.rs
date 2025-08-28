@@ -142,12 +142,8 @@ mod tests {
     fn test_error_chain_formatting() {
         // Create a chain of errors
         let child_err = Error::from_str("Child error");
-        let parent_err = Error::new(
-            apr::Status::from(1),
-            Some(child_err),
-            "Parent error"
-        );
-        
+        let parent_err = Error::new(apr::Status::from(1), Some(child_err), "Parent error");
+
         let full_msg = parent_err.full_message();
         assert!(full_msg.contains("Parent error"));
         assert!(full_msg.contains("Child error"));
@@ -158,7 +154,7 @@ mod tests {
     fn test_single_error_message() {
         let err = Error::from_str("Single error");
         assert_eq!(err.message(), "Single error");
-        
+
         let full_msg = err.full_message();
         assert!(full_msg.contains("Single error"));
     }
@@ -175,7 +171,7 @@ mod tests {
         // Test with null pointer
         let result = Error::from_raw(std::ptr::null_mut());
         assert!(result.is_ok());
-        
+
         // Test with actual error would require creating a real svn_error_t
         // which is complex, so we skip that for now
     }

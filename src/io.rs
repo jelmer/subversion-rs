@@ -1071,13 +1071,13 @@ mod tests {
     fn test_stream_create_and_write() {
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("test.txt");
-        
+
         // Create and write to a stream
         let mut stream = Stream::open_writable(&file_path).unwrap();
         let data = b"Hello, world!";
         assert!(stream.write(data).is_ok());
         assert!(stream.close().is_ok());
-        
+
         // Verify file was created
         assert!(file_path.exists());
     }
@@ -1086,10 +1086,10 @@ mod tests {
     fn test_stream_read() {
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("test.txt");
-        
+
         // Write some data first
         std::fs::write(&file_path, b"Test data").unwrap();
-        
+
         // Read using Stream
         let mut stream = Stream::open_readonly(&file_path).unwrap();
         let mut buf = vec![0u8; 9];
@@ -1131,17 +1131,17 @@ mod tests {
     fn test_stream_mark_and_seek() {
         let data = b"Test data for seeking";
         let mut stream = Stream::from(data.as_ref());
-        
+
         // Check if stream supports marking
         if stream.supports_mark() {
             // Create a mark
             let mark = stream.mark();
             assert!(mark.is_ok());
-            
+
             // Read some data
             let mut buf = vec![0u8; 4];
             let _ = stream.read(&mut buf);
-            
+
             // Seek back to mark
             if let Ok(mark) = mark {
                 assert!(stream.seek(&mark).is_ok());
@@ -1153,13 +1153,13 @@ mod tests {
     fn test_stream_reset() {
         let data = b"Reset test data";
         let mut stream = Stream::from(data.as_ref());
-        
+
         // Check if stream supports reset
         if stream.supports_reset() {
             // Read some data
             let mut buf = vec![0u8; 5];
             let _ = stream.read(&mut buf);
-            
+
             // Reset stream
             assert!(stream.reset().is_ok());
         }
@@ -1170,11 +1170,11 @@ mod tests {
         let dir = tempdir().unwrap();
         let test_dir = dir.path().join("test_dir");
         std::fs::create_dir(&test_dir).unwrap();
-        
+
         // Remove the directory
         let result = remove_dir(&test_dir, false, None::<&fn() -> Result<(), Error>>);
         assert!(result.is_ok());
-        
+
         // Directory should no longer exist
         assert!(!test_dir.exists());
     }

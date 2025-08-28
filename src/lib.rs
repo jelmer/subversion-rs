@@ -810,14 +810,30 @@ pub enum ConflictChoice {
 impl From<ConflictChoice> for subversion_sys::svn_wc_conflict_choice_t {
     fn from(choice: ConflictChoice) -> Self {
         match choice {
-            ConflictChoice::Postpone => subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_postpone,
-            ConflictChoice::Base => subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_base,
-            ConflictChoice::TheirsFull => subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_theirs_full,
-            ConflictChoice::MineFull => subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_mine_full,
-            ConflictChoice::TheirsConflict => subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_theirs_conflict,
-            ConflictChoice::MineConflict => subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_mine_conflict,
-            ConflictChoice::Merged => subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_merged,
-            ConflictChoice::Unspecified => subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_unspecified,
+            ConflictChoice::Postpone => {
+                subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_postpone
+            }
+            ConflictChoice::Base => {
+                subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_base
+            }
+            ConflictChoice::TheirsFull => {
+                subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_theirs_full
+            }
+            ConflictChoice::MineFull => {
+                subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_mine_full
+            }
+            ConflictChoice::TheirsConflict => {
+                subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_theirs_conflict
+            }
+            ConflictChoice::MineConflict => {
+                subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_mine_conflict
+            }
+            ConflictChoice::Merged => {
+                subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_merged
+            }
+            ConflictChoice::Unspecified => {
+                subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_unspecified
+            }
         }
     }
 }
