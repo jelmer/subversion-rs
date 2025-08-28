@@ -380,6 +380,25 @@ mod tests {
         assert_eq!("bar", basename.as_str());
     }
 
+    #[test]
+    fn test_from_path() {
+        let pool = apr::pool::Pool::new();
+        let path = std::path::Path::new("/foo/bar");
+        let dirent = Dirent::from_path(path, &pool);
+        // The internal style should handle the path correctly
+        assert!(dirent.as_str().contains("foo"));
+        assert!(dirent.as_str().contains("bar"));
+    }
+
+    #[test]
+    fn test_to_local_style() {
+        let pool = apr::pool::Pool::new();
+        let dirent = Dirent::from_str("/foo/bar", &pool);
+        let local_path = dirent.to_local_style(&pool);
+        // Should return a valid PathBuf
+        assert!(local_path.to_str().is_some());
+    }
+
     // TODO: Uncomment when to_file_url is reimplemented
     /*#[test]
     fn test_to_uri() {

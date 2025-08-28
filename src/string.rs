@@ -81,3 +81,59 @@ impl<'pool> From<&str> for BStr<'pool> {
 
 // For backwards compatibility, keep the old String name as an alias
 pub type String<'pool> = BStr<'pool>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_bstr_from_bytes() {
+        let pool = apr::Pool::new();
+        let data = b"Hello, world!";
+        let bstr = BStr::from_bytes(data, &pool);
+        assert_eq!(bstr.as_bytes(), data);
+    }
+
+    #[test]
+    fn test_bstr_from_str() {
+        let pool = apr::Pool::new();
+        let text = "Hello, Rust!";
+        let bstr = BStr::from_str(text, &pool);
+        assert_eq!(bstr.as_bytes(), text.as_bytes());
+    }
+
+    #[test]
+    fn test_bstr_len() {
+        let pool = apr::Pool::new();
+        let data = b"Test data";
+        let bstr = BStr::from_bytes(data, &pool);
+        assert_eq!(bstr.len(), data.len());
+    }
+
+    #[test]
+    fn test_bstr_is_empty() {
+        let pool = apr::Pool::new();
+        let empty = BStr::from_bytes(b"", &pool);
+        assert!(empty.is_empty());
+        
+        let non_empty = BStr::from_bytes(b"data", &pool);
+        assert!(!non_empty.is_empty());
+    }
+
+    #[test]
+    fn test_bstr_display() {
+        let pool = apr::Pool::new();
+        let text = "Display test";
+        let bstr = BStr::from_str(text, &pool);
+        assert_eq!(format!("{}", bstr), text);
+    }
+
+    #[test]
+    fn test_bstr_debug() {
+        let pool = apr::Pool::new();
+        let text = "Debug test";
+        let bstr = BStr::from_str(text, &pool);
+        let debug_str = format!("{:?}", bstr);
+        assert!(debug_str.contains("Debug test"));
+    }
+}
