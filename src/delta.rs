@@ -608,8 +608,7 @@ extern "C" fn wrap_editor_change_dir_prop(
     _pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     let name = unsafe { std::ffi::CStr::from_ptr(name) };
-    let value =
-        unsafe { std::slice::from_raw_parts((*value).data as *const u8, (*value).len) };
+    let value = unsafe { std::slice::from_raw_parts((*value).data as *const u8, (*value).len) };
     let editor: &mut dyn DirectoryEditor = unsafe { *(baton as *mut &mut dyn DirectoryEditor) };
     match editor.change_prop(name.to_str().unwrap(), value) {
         Ok(()) => std::ptr::null_mut(),
@@ -723,8 +722,7 @@ extern "C" fn wrap_editor_change_file_prop(
     _pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     let name = unsafe { std::ffi::CStr::from_ptr(name) };
-    let value =
-        unsafe { std::slice::from_raw_parts((*value).data as *const u8, (*value).len) };
+    let value = unsafe { std::slice::from_raw_parts((*value).data as *const u8, (*value).len) };
     let editor: &mut dyn FileEditor = unsafe { *(baton as *mut &mut dyn FileEditor) };
     match editor.change_prop(name.to_str().unwrap(), value) {
         Ok(()) => std::ptr::null_mut(),
