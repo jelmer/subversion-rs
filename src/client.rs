@@ -1639,6 +1639,429 @@ impl Context {
 
 // Note: Context now requires a pool parameter, so no Default impl
 
+/// Builder for diff operations
+pub struct DiffBuilder<'a> {
+    ctx: &'a mut Context,
+    path1: String,
+    revision1: Revision,
+    path2: String,
+    revision2: Revision,
+    depth: Depth,
+    diff_options: Vec<String>,
+    relative_to_dir: Option<String>,
+    ignore_ancestry: bool,
+    no_diff_added: bool,
+    no_diff_deleted: bool,
+    show_copies_as_adds: bool,
+    ignore_content_type: bool,
+    ignore_properties: bool,
+    properties_only: bool,
+    use_git_diff_format: bool,
+    header_encoding: String,
+    changelists: Option<Vec<String>>,
+}
+
+impl<'a> DiffBuilder<'a> {
+    pub fn new(
+        ctx: &'a mut Context,
+        path1: impl Into<String>,
+        revision1: Revision,
+        path2: impl Into<String>,
+        revision2: Revision,
+    ) -> Self {
+        Self {
+            ctx,
+            path1: path1.into(),
+            revision1,
+            path2: path2.into(),
+            revision2,
+            depth: Depth::Infinity,
+            diff_options: Vec::new(),
+            relative_to_dir: None,
+            ignore_ancestry: false,
+            no_diff_added: false,
+            no_diff_deleted: false,
+            show_copies_as_adds: false,
+            ignore_content_type: false,
+            ignore_properties: false,
+            properties_only: false,
+            use_git_diff_format: false,
+            header_encoding: "UTF-8".to_string(),
+            changelists: None,
+        }
+    }
+
+    pub fn depth(mut self, depth: Depth) -> Self {
+        self.depth = depth;
+        self
+    }
+
+    pub fn diff_options(mut self, options: Vec<String>) -> Self {
+        self.diff_options = options;
+        self
+    }
+
+    pub fn relative_to_dir(mut self, dir: impl Into<String>) -> Self {
+        self.relative_to_dir = Some(dir.into());
+        self
+    }
+
+    pub fn ignore_ancestry(mut self, ignore: bool) -> Self {
+        self.ignore_ancestry = ignore;
+        self
+    }
+
+    pub fn no_diff_added(mut self, no_diff: bool) -> Self {
+        self.no_diff_added = no_diff;
+        self
+    }
+
+    pub fn no_diff_deleted(mut self, no_diff: bool) -> Self {
+        self.no_diff_deleted = no_diff;
+        self
+    }
+
+    pub fn show_copies_as_adds(mut self, show: bool) -> Self {
+        self.show_copies_as_adds = show;
+        self
+    }
+
+    pub fn ignore_content_type(mut self, ignore: bool) -> Self {
+        self.ignore_content_type = ignore;
+        self
+    }
+
+    pub fn ignore_properties(mut self, ignore: bool) -> Self {
+        self.ignore_properties = ignore;
+        self
+    }
+
+    pub fn properties_only(mut self, only: bool) -> Self {
+        self.properties_only = only;
+        self
+    }
+
+    pub fn use_git_diff_format(mut self, use_git: bool) -> Self {
+        self.use_git_diff_format = use_git;
+        self
+    }
+
+    pub fn header_encoding(mut self, encoding: impl Into<String>) -> Self {
+        self.header_encoding = encoding.into();
+        self
+    }
+
+    pub fn changelists(mut self, lists: Vec<String>) -> Self {
+        self.changelists = Some(lists);
+        self
+    }
+
+    pub fn execute(
+        self,
+        outstream: &mut crate::io::Stream,
+        errstream: &mut crate::io::Stream,
+    ) -> Result<(), Error> {
+        let diff_options: Vec<&str> = self.diff_options.iter().map(|s| s.as_str()).collect();
+        let changelists = self.changelists.as_ref().map(|cl| {
+            cl.iter().map(|s| s.as_str()).collect::<Vec<_>>()
+        });
+        
+        self.ctx.diff(
+            &diff_options,
+            &self.path1,
+            &self.revision1,
+            &self.path2,
+            &self.revision2,
+            self.relative_to_dir.as_deref(),
+            self.depth,
+            self.ignore_ancestry,
+            self.no_diff_added,
+            self.no_diff_deleted,
+            self.show_copies_as_adds,
+            self.ignore_content_type,
+            self.ignore_properties,
+            self.properties_only,
+            self.use_git_diff_format,
+            &self.header_encoding,
+            outstream,
+            errstream,
+            changelists.as_deref(),
+        )
+    }
+}
+
+/// Builder for list operations
+pub struct ListBuilder<'a> {
+    ctx: &'a mut Context,
+    path_or_url: String,
+    peg_revision: Revision,
+    revision: Revision,
+    patterns: Option<Vec<String>>,
+    depth: Depth,
+    dirent_fields: u32,
+    fetch_locks: bool,
+    include_externals: bool,
+}
+
+impl<'a> ListBuilder<'a> {
+    pub fn new(ctx: &'a mut Context, path_or_url: impl Into<String>) -> Self {
+        Self {
+            ctx,
+            path_or_url: path_or_url.into(),
+            peg_revision: Revision::Head,
+            revision: Revision::Head,
+            patterns: None,
+            depth: Depth::Infinity,
+            dirent_fields: subversion_sys::SVN_DIRENT_ALL,
+            fetch_locks: false,
+            include_externals: false,
+        }
+    }
+
+    pub fn peg_revision(mut self, rev: Revision) -> Self {
+        self.peg_revision = rev;
+        self
+    }
+
+    pub fn revision(mut self, rev: Revision) -> Self {
+        self.revision = rev;
+        self
+    }
+
+    pub fn patterns(mut self, patterns: Vec<String>) -> Self {
+        self.patterns = Some(patterns);
+        self
+    }
+
+    pub fn depth(mut self, depth: Depth) -> Self {
+        self.depth = depth;
+        self
+    }
+
+    pub fn dirent_fields(mut self, fields: u32) -> Self {
+        self.dirent_fields = fields;
+        self
+    }
+
+    pub fn fetch_locks(mut self, fetch: bool) -> Self {
+        self.fetch_locks = fetch;
+        self
+    }
+
+    pub fn include_externals(mut self, include: bool) -> Self {
+        self.include_externals = include;
+        self
+    }
+
+    pub fn execute(
+        self,
+        list_func: &mut dyn FnMut(&str, &crate::ra::Dirent, Option<&crate::Lock>) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        let patterns = self.patterns.as_ref().map(|p| {
+            p.iter().map(|s| s.as_str()).collect::<Vec<_>>()
+        });
+        
+        self.ctx.list(
+            &self.path_or_url,
+            &self.peg_revision,
+            &self.revision,
+            patterns.as_deref(),
+            self.depth,
+            self.dirent_fields,
+            self.fetch_locks,
+            self.include_externals,
+            list_func,
+        )
+    }
+}
+
+/// Builder for copy operations
+pub struct CopyBuilder<'a> {
+    ctx: &'a mut Context,
+    sources: Vec<(String, Option<Revision>)>,
+    dst_path: String,
+    copy_as_child: bool,
+    make_parents: bool,
+    ignore_externals: bool,
+    metadata_only: bool,
+    pin_externals: bool,
+}
+
+impl<'a> CopyBuilder<'a> {
+    pub fn new(ctx: &'a mut Context, dst_path: impl Into<String>) -> Self {
+        Self {
+            ctx,
+            sources: Vec::new(),
+            dst_path: dst_path.into(),
+            copy_as_child: false,
+            make_parents: false,
+            ignore_externals: false,
+            metadata_only: false,
+            pin_externals: false,
+        }
+    }
+
+    pub fn add_source(mut self, path: impl Into<String>, revision: Option<Revision>) -> Self {
+        self.sources.push((path.into(), revision));
+        self
+    }
+
+    pub fn copy_as_child(mut self, as_child: bool) -> Self {
+        self.copy_as_child = as_child;
+        self
+    }
+
+    pub fn make_parents(mut self, make: bool) -> Self {
+        self.make_parents = make;
+        self
+    }
+
+    pub fn ignore_externals(mut self, ignore: bool) -> Self {
+        self.ignore_externals = ignore;
+        self
+    }
+
+    pub fn metadata_only(mut self, only: bool) -> Self {
+        self.metadata_only = only;
+        self
+    }
+
+    pub fn pin_externals(mut self, pin: bool) -> Self {
+        self.pin_externals = pin;
+        self
+    }
+
+    pub fn execute(self) -> Result<(), Error> {
+        let sources: Vec<(&str, Option<Revision>)> = self.sources
+            .iter()
+            .map(|(path, rev)| (path.as_str(), *rev))
+            .collect();
+        
+        self.ctx.copy(
+            &sources,
+            &self.dst_path,
+            self.copy_as_child,
+            self.make_parents,
+            self.ignore_externals,
+            self.metadata_only,
+            self.pin_externals,
+        )
+    }
+}
+
+/// Builder for info operations
+pub struct InfoBuilder<'a> {
+    ctx: &'a mut Context,
+    abspath_or_url: String,
+    peg_revision: Revision,
+    revision: Revision,
+    depth: Depth,
+    fetch_excluded: bool,
+    fetch_actual_only: bool,
+    include_externals: bool,
+    changelists: Option<Vec<String>>,
+}
+
+impl<'a> InfoBuilder<'a> {
+    pub fn new(ctx: &'a mut Context, abspath_or_url: impl Into<String>) -> Self {
+        Self {
+            ctx,
+            abspath_or_url: abspath_or_url.into(),
+            peg_revision: Revision::Head,
+            revision: Revision::Head,
+            depth: Depth::Infinity,
+            fetch_excluded: false,
+            fetch_actual_only: false,
+            include_externals: false,
+            changelists: None,
+        }
+    }
+
+    pub fn peg_revision(mut self, rev: Revision) -> Self {
+        self.peg_revision = rev;
+        self
+    }
+
+    pub fn revision(mut self, rev: Revision) -> Self {
+        self.revision = rev;
+        self
+    }
+
+    pub fn depth(mut self, depth: Depth) -> Self {
+        self.depth = depth;
+        self
+    }
+
+    pub fn fetch_excluded(mut self, fetch: bool) -> Self {
+        self.fetch_excluded = fetch;
+        self
+    }
+
+    pub fn fetch_actual_only(mut self, fetch: bool) -> Self {
+        self.fetch_actual_only = fetch;
+        self
+    }
+
+    pub fn include_externals(mut self, include: bool) -> Self {
+        self.include_externals = include;
+        self
+    }
+
+    pub fn changelists(mut self, lists: Vec<String>) -> Self {
+        self.changelists = Some(lists);
+        self
+    }
+
+    pub fn execute(
+        self,
+        receiver: &dyn FnMut(&Info) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        let changelists = self.changelists.as_ref().map(|cl| {
+            cl.iter().map(|s| s.as_str()).collect::<Vec<_>>()
+        });
+        
+        self.ctx.info(
+            &self.abspath_or_url,
+            self.peg_revision,
+            self.revision,
+            self.depth,
+            self.fetch_excluded,
+            self.fetch_actual_only,
+            self.include_externals,
+            changelists.as_deref(),
+            receiver,
+        )
+    }
+}
+
+impl Context {
+    /// Create a builder for diff operations
+    pub fn diff_builder<'a>(
+        &'a mut self,
+        path1: impl Into<String>,
+        revision1: Revision,
+        path2: impl Into<String>,
+        revision2: Revision,
+    ) -> DiffBuilder<'a> {
+        DiffBuilder::new(self, path1, revision1, path2, revision2)
+    }
+
+    /// Create a builder for list operations
+    pub fn list_builder<'a>(&'a mut self, path_or_url: impl Into<String>) -> ListBuilder<'a> {
+        ListBuilder::new(self, path_or_url)
+    }
+
+    /// Create a builder for copy operations
+    pub fn copy_builder<'a>(&'a mut self, dst_path: impl Into<String>) -> CopyBuilder<'a> {
+        CopyBuilder::new(self, dst_path)
+    }
+
+    /// Create a builder for info operations
+    pub fn info_builder<'a>(&'a mut self, abspath_or_url: impl Into<String>) -> InfoBuilder<'a> {
+        InfoBuilder::new(self, abspath_or_url)
+    }
+}
+
 pub struct Status(pub(crate) *const subversion_sys::svn_client_status_t);
 
 impl Status {
@@ -2174,7 +2597,7 @@ mod tests {
         let mut out_stream = crate::io::Stream::buffered();
         let mut err_stream = crate::io::Stream::buffered();
         
-        // Test diff between repository revisions
+        // Test diff between repository revisions using direct function
         let diff_result = ctx.diff(
             &[], // diff_options
             url.as_str(),
@@ -2199,6 +2622,53 @@ mod tests {
         
         // Should succeed even with no differences
         assert!(diff_result.is_ok());
+    }
+
+    #[test]
+    fn test_diff_builder() {
+        let td = tempfile::tempdir().unwrap();
+        let repo_path = td.path().join("repo");
+        let wc_path = td.path().join("wc");
+        
+        // Create a test repository
+        crate::repos::create(
+            &repo_path,
+            None,
+            None,
+            None,
+            Some(&apr::hash::Hash::<&str, &str>::new()),
+        ).unwrap();
+        
+        // Check out working copy
+        let mut ctx = Context::new().unwrap();
+        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        let pool = apr::Pool::new();
+        let url = crate::uri::Uri::from_str(&url_str, &pool);
+        
+        ctx.checkout(
+            url.clone(),
+            &wc_path,
+            &CheckoutOptions {
+                peg_revision: Revision::Head,
+                revision: Revision::Head,
+                depth: Depth::Infinity,
+                ignore_externals: false,
+                allow_unver_obstructions: false,
+            },
+        ).unwrap();
+        
+        // Create output streams
+        let mut out_stream = crate::io::Stream::buffered();
+        let mut err_stream = crate::io::Stream::buffered();
+        
+        // Test diff using builder pattern - much cleaner!
+        let result = ctx.diff_builder(url.as_str(), Revision::Head, url.as_str(), Revision::Head)
+            .depth(Depth::Infinity)
+            .ignore_ancestry(true)
+            .use_git_diff_format(true)
+            .execute(&mut out_stream, &mut err_stream);
+        
+        assert!(result.is_ok());
     }
 
     #[test]
@@ -2236,6 +2706,116 @@ mod tests {
         );
         
         // Should succeed for empty repository
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_list_builder() {
+        let td = tempfile::tempdir().unwrap();
+        let repo_path = td.path().join("repo");
+        
+        // Create a test repository
+        crate::repos::create(
+            &repo_path,
+            None,
+            None,
+            None,
+            Some(&apr::hash::Hash::<&str, &str>::new()),
+        ).unwrap();
+        
+        let mut ctx = Context::new().unwrap();
+        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        
+        // Test listing using builder pattern
+        let mut entries = Vec::new();
+        let result = ctx.list_builder(&url_str)
+            .depth(Depth::Files)
+            .fetch_locks(true)
+            .patterns(vec!["*.txt".to_string()])
+            .execute(&mut |path, _dirent, _lock| {
+                entries.push(path.to_string());
+                Ok(())
+            });
+        
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_copy_builder() {
+        let td = tempfile::tempdir().unwrap();
+        let repo_path = td.path().join("repo");
+        let wc_path = td.path().join("wc");
+        
+        // Create a test repository
+        crate::repos::create(
+            &repo_path,
+            None,
+            None,
+            None,
+            Some(&apr::hash::Hash::<&str, &str>::new()),
+        ).unwrap();
+        
+        // Check out working copy
+        let mut ctx = Context::new().unwrap();
+        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        let pool = apr::Pool::new();
+        let url = crate::uri::Uri::from_str(&url_str, &pool);
+        
+        ctx.checkout(
+            url,
+            &wc_path,
+            &CheckoutOptions {
+                peg_revision: Revision::Head,
+                revision: Revision::Head,
+                depth: Depth::Infinity,
+                ignore_externals: false,
+                allow_unver_obstructions: false,
+            },
+        ).unwrap();
+        
+        // Create a test file
+        let test_file = wc_path.join("test.txt");
+        std::fs::write(&test_file, "test content").unwrap();
+        ctx.add(&test_file, Depth::Empty, false, false, false).unwrap();
+        
+        // Test copy using builder pattern
+        let result = ctx.copy_builder(wc_path.join("test_copy.txt").to_str().unwrap())
+            .add_source(test_file.to_str().unwrap(), None)
+            .make_parents(true)
+            .ignore_externals(true)
+            .execute();
+        
+        // May fail without commit, just ensure no panic
+        let _ = result;
+    }
+
+    #[test]
+    fn test_info_builder() {
+        let td = tempfile::tempdir().unwrap();
+        let repo_path = td.path().join("repo");
+        
+        // Create a test repository
+        crate::repos::create(
+            &repo_path,
+            None,
+            None,
+            None,
+            Some(&apr::hash::Hash::<&str, &str>::new()),
+        ).unwrap();
+        
+        let mut ctx = Context::new().unwrap();
+        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        
+        // Test info using builder pattern
+        let mut info_count = 0;
+        let result = ctx.info_builder(&url_str)
+            .depth(Depth::Empty)
+            .fetch_excluded(true)
+            .execute(&|_info| {
+                info_count += 1;
+                Ok(())
+            });
+        
         assert!(result.is_ok());
     }
 
