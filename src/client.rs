@@ -65,20 +65,18 @@ extern "C" fn wrap_status_func(
 }
 
 /// C trampoline for cancel callbacks
-extern "C" fn cancel_trampoline(
-    baton: *mut std::ffi::c_void,
-) -> *mut subversion_sys::svn_error_t {
+extern "C" fn cancel_trampoline(baton: *mut std::ffi::c_void) -> *mut subversion_sys::svn_error_t {
     if baton.is_null() {
         return std::ptr::null_mut();
     }
-    
+
     let handler = unsafe { &mut *(baton as *mut Box<dyn FnMut() -> bool + Send>) };
     if handler() {
         // Return SVN_ERR_CANCELLED (200015)
         let err = Error::new(
             apr::Status::from(200015_i32),
             None,
-            "Operation cancelled by user"
+            "Operation cancelled by user",
         );
         unsafe { err.into_raw() }
     } else {
@@ -424,33 +422,35 @@ impl Context {
         }
         self.conflict_resolver = None;
     }
-    
+
     /// Set a cancel handler that will be called periodically during long operations
-    /// 
+    ///
     /// The handler should return `true` to cancel the operation, `false` to continue.
     /// Operations will fail with an SVN_ERR_CANCELLED error if cancelled.
-    pub fn set_cancel_handler<F>(&mut self, handler: F) 
+    pub fn set_cancel_handler<F>(&mut self, handler: F)
     where
-        F: FnMut() -> bool + Send + 'static
+        F: FnMut() -> bool + Send + 'static,
     {
         // Clear any existing handler
         unsafe {
             (*self.ptr).cancel_func = None;
             (*self.ptr).cancel_baton = std::ptr::null_mut();
         }
-        
+
         // Store the new handler
         self.cancel_handler = Some(Box::new(handler));
-        
+
         // Set up the C callback
         unsafe {
             (*self.ptr).cancel_func = Some(cancel_trampoline);
-            (*self.ptr).cancel_baton = self.cancel_handler.as_mut()
+            (*self.ptr).cancel_baton = self
+                .cancel_handler
+                .as_mut()
                 .map(|h| h.as_mut() as *mut _ as *mut std::ffi::c_void)
                 .unwrap_or(std::ptr::null_mut());
         }
     }
-    
+
     /// Clear the cancel handler
     pub fn clear_cancel_handler(&mut self) {
         unsafe {
@@ -906,7 +906,7 @@ impl Context {
     }
 
     /// Retrieve log messages for a set of paths.
-    /// 
+    ///
     /// The receiver callback will be called for each log entry found.
     /// Return an error from the callback to stop iteration early.
     pub fn log(
@@ -972,9 +972,9 @@ impl Context {
             Ok(())
         }
     }
-    
+
     /// Retrieve log messages with control flow support.
-    /// 
+    ///
     /// The receiver can return `ControlFlow::Break(())` to stop iteration early
     /// or `ControlFlow::Continue(())` to continue processing.
     pub fn log_with_control<F>(
@@ -1006,7 +1006,7 @@ impl Context {
                 ControlFlow::Break(()) => {
                     // Return a cancellation error to stop iteration
                     Err(Error::new(
-                        apr::Status::from(200015_i32), // SVN_ERR_CANCELLED  
+                        apr::Status::from(200015_i32), // SVN_ERR_CANCELLED
                         None,
                         "Log iteration stopped by user",
                     ))
