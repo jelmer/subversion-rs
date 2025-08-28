@@ -457,11 +457,15 @@ pub fn tee(out1: &mut Stream, out2: &mut Stream) -> Result<Stream, Error> {
 impl From<&[u8]> for Stream {
     fn from(bytes: &[u8]) -> Self {
         let pool = apr::Pool::new();
-        let buf = subversion_sys::svn_string_t {
-            data: bytes.as_ptr() as *mut i8,
-            len: bytes.len(),
+        // Create a proper svn_string in the pool
+        let svn_str = unsafe {
+            subversion_sys::svn_string_ncreate(
+                bytes.as_ptr() as *const i8,
+                bytes.len(),
+                pool.as_mut_ptr()
+            )
         };
-        let stream = unsafe { subversion_sys::svn_stream_from_string(&buf, pool.as_mut_ptr()) };
+        let stream = unsafe { subversion_sys::svn_stream_from_string(svn_str, pool.as_mut_ptr()) };
         Self {
             ptr: stream,
             pool,

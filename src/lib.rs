@@ -779,8 +779,7 @@ pub(crate) extern "C" fn wrap_log_entry_receiver(
     _pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     unsafe {
-        let callback = baton as *mut &mut dyn FnMut(&LogEntry) -> Result<(), Error>;
-        let mut callback = Box::from_raw(callback);
+        let callback = &mut *(baton as *mut &mut dyn FnMut(&LogEntry) -> Result<(), Error>);
         let log_entry = LogEntry::from_raw(log_entry);
         let ret = callback(&log_entry);
         if let Err(mut err) = ret {

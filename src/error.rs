@@ -7,7 +7,7 @@ unsafe impl Send for Error {}
 impl Error {
     pub fn new(status: apr::Status, child: Option<Error>, msg: &str) -> Self {
         let msg = std::ffi::CString::new(msg).unwrap();
-        let child = child.map(|e| e.0).unwrap_or(std::ptr::null_mut());
+        let child = child.map(|mut e| unsafe { e.detach() }).unwrap_or(std::ptr::null_mut());
         let err = unsafe { subversion_sys::svn_error_create(status as i32, child, msg.as_ptr()) };
         Self(err)
     }
