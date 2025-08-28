@@ -762,8 +762,7 @@ pub(crate) extern "C" fn wrap_commit_callback2(
     _pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     unsafe {
-        let callback = baton as *mut &mut dyn FnMut(&crate::CommitInfo) -> Result<(), Error>;
-        let mut callback = Box::from_raw(callback);
+        let callback = &mut *(baton as *mut &mut dyn FnMut(&crate::CommitInfo) -> Result<(), Error>);
         let commit_info = crate::CommitInfo::from_raw(commit_info);
         match callback(&commit_info) {
             Ok(()) => std::ptr::null_mut(),
