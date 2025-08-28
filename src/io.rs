@@ -1107,7 +1107,7 @@ mod tests {
         let data = b"Test string data";
         let stream = Stream::from(data.as_ref());
         // Should be able to create stream from bytes
-        assert!(stream.as_ptr().is_null());
+        assert!(!stream.as_ptr().is_null());
     }
 
     #[test]
