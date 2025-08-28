@@ -318,11 +318,19 @@ pub struct Context {
     ptr: *mut svn_client_ctx_t,
     pool: apr::Pool,
     _phantom: std::marker::PhantomData<*mut ()>,
+    conflict_resolver: Option<Box<crate::conflict::ConflictResolverBaton>>,
 }
 unsafe impl Send for Context {}
 
 impl Drop for Context {
     fn drop(&mut self) {
+        // Clear the conflict resolver callback first
+        if self.conflict_resolver.is_some() {
+            unsafe {
+                (*self.ptr).conflict_func2 = None;
+                (*self.ptr).conflict_baton2 = std::ptr::null_mut();
+            }
+        }
         // Pool drop will clean up context
     }
 }
@@ -339,11 +347,50 @@ impl Context {
             ptr: ctx,
             pool,
             _phantom: std::marker::PhantomData,
+            conflict_resolver: None,
         })
     }
 
     pub(crate) unsafe fn as_mut_ptr(&mut self) -> *mut svn_client_ctx_t {
         self.ptr
+    }
+
+    /// Set the conflict resolver for this context
+    ///
+    /// The resolver will be called when conflicts are encountered during
+    /// operations like merge, update, or switch.
+    pub fn set_conflict_resolver(
+        &mut self,
+        resolver: impl crate::conflict::ConflictResolver + 'static,
+    ) {
+        // Clear any existing resolver
+        unsafe {
+            (*self.ptr).conflict_func2 = None;
+            (*self.ptr).conflict_baton2 = std::ptr::null_mut();
+        }
+
+        // Create new resolver baton
+        let baton = Box::new(crate::conflict::ConflictResolverBaton {
+            resolver: Box::new(resolver),
+        });
+
+        // Store the baton and set up the callback
+        unsafe {
+            let baton_ptr = Box::into_raw(baton);
+            self.conflict_resolver = Some(Box::from_raw(baton_ptr));
+
+            (*self.ptr).conflict_func2 = Some(crate::conflict::conflict_resolver_callback);
+            (*self.ptr).conflict_baton2 = baton_ptr as *mut std::ffi::c_void;
+        }
+    }
+
+    /// Clear the conflict resolver
+    pub fn clear_conflict_resolver(&mut self) {
+        unsafe {
+            (*self.ptr).conflict_func2 = None;
+            (*self.ptr).conflict_baton2 = std::ptr::null_mut();
+        }
+        self.conflict_resolver = None;
     }
 
     pub fn set_auth<'a, 'b>(&'a mut self, auth_baton: &'b mut crate::auth::AuthBaton)
