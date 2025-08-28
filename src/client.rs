@@ -318,11 +318,19 @@ pub struct Context {
     ptr: *mut svn_client_ctx_t,
     pool: apr::Pool,
     _phantom: std::marker::PhantomData<*mut ()>,
+    conflict_resolver: Option<Box<crate::conflict::ConflictResolverBaton>>,
 }
 unsafe impl Send for Context {}
 
 impl Drop for Context {
     fn drop(&mut self) {
+        // Clear the conflict resolver callback first
+        if self.conflict_resolver.is_some() {
+            unsafe {
+                (*self.ptr).conflict_func2 = None;
+                (*self.ptr).conflict_baton2 = std::ptr::null_mut();
+            }
+        }
         // Pool drop will clean up context
     }
 }
@@ -339,11 +347,50 @@ impl Context {
             ptr: ctx,
             pool,
             _phantom: std::marker::PhantomData,
+            conflict_resolver: None,
         })
     }
 
     pub(crate) unsafe fn as_mut_ptr(&mut self) -> *mut svn_client_ctx_t {
         self.ptr
+    }
+
+    /// Set the conflict resolver for this context
+    ///
+    /// The resolver will be called when conflicts are encountered during
+    /// operations like merge, update, or switch.
+    pub fn set_conflict_resolver(
+        &mut self,
+        resolver: impl crate::conflict::ConflictResolver + 'static,
+    ) {
+        // Clear any existing resolver
+        unsafe {
+            (*self.ptr).conflict_func2 = None;
+            (*self.ptr).conflict_baton2 = std::ptr::null_mut();
+        }
+
+        // Create new resolver baton
+        let baton = Box::new(crate::conflict::ConflictResolverBaton {
+            resolver: Box::new(resolver),
+        });
+
+        // Store the baton and set up the callback
+        unsafe {
+            let baton_ptr = Box::into_raw(baton);
+            self.conflict_resolver = Some(Box::from_raw(baton_ptr));
+
+            (*self.ptr).conflict_func2 = Some(crate::conflict::conflict_resolver_callback);
+            (*self.ptr).conflict_baton2 = baton_ptr as *mut std::ffi::c_void;
+        }
+    }
+
+    /// Clear the conflict resolver
+    pub fn clear_conflict_resolver(&mut self) {
+        unsafe {
+            (*self.ptr).conflict_func2 = None;
+            (*self.ptr).conflict_baton2 = std::ptr::null_mut();
+        }
+        self.conflict_resolver = None;
     }
 
     pub fn set_auth<'a, 'b>(&'a mut self, auth_baton: &'b mut crate::auth::AuthBaton)
@@ -375,17 +422,17 @@ impl Context {
         let peg_revision = options.peg_revision.into();
         let revision = options.revision.into();
         let mut pool = Pool::default();
-        
+
         // Canonicalize inputs
         let url = url.as_canonical_uri()?;
         let path = path.as_canonical_dirent()?;
-        
+
         with_tmp_pool(|tmp_pool| unsafe {
             let mut revnum = 0;
             // Convert to C strings for FFI
             let url_cstr = std::ffi::CString::new(url.as_str())?;
             let path_cstr = std::ffi::CString::new(path.as_str())?;
-            
+
             let err = svn_client_checkout3(
                 &mut revnum,
                 url_cstr.as_ptr(),
@@ -450,16 +497,16 @@ impl Context {
     ) -> Result<Revnum, Error> {
         let mut pool = Pool::default();
         let mut result_rev = 0;
-        
+
         // Canonicalize inputs
         let path = path.as_canonical_dirent()?;
         let url = url.as_canonical_uri()?;
-        
+
         with_tmp_pool(|tmp_pool| unsafe {
-            // Convert to C strings for FFI  
+            // Convert to C strings for FFI
             let path_cstr = std::ffi::CString::new(path.as_str())?;
             let url_cstr = std::ffi::CString::new(url.as_str())?;
-            
+
             let err = svn_client_switch3(
                 &mut result_rev,
                 path_cstr.as_ptr(),
@@ -479,11 +526,7 @@ impl Context {
         })
     }
 
-    pub fn add(
-        &mut self,
-        path: impl AsCanonicalDirent,
-        options: &AddOptions,
-    ) -> Result<(), Error> {
+    pub fn add(&mut self, path: impl AsCanonicalDirent, options: &AddOptions) -> Result<(), Error> {
         let mut pool = Pool::default();
         let path = path.as_canonical_dirent()?;
         with_tmp_pool(|tmp_pool| unsafe {
@@ -1165,14 +1208,14 @@ impl Context {
 
     pub fn url_from_path(&mut self, path: impl AsCanonicalUri) -> Result<String, Error> {
         let mut pool = Pool::default();
-        
+
         // Canonicalize input
         let path = path.as_canonical_uri()?;
-        
+
         with_tmp_pool(|tmp_pool| unsafe {
             let mut url: *const i8 = std::ptr::null();
             let path_cstr = std::ffi::CString::new(path.as_str())?;
-            
+
             let err = subversion_sys::svn_client_url_from_path2(
                 &mut url,
                 path_cstr.as_ptr(),

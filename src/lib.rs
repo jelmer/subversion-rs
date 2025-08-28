@@ -16,6 +16,8 @@ pub mod auth;
 #[cfg(feature = "client")]
 pub mod client;
 pub mod config;
+#[cfg(feature = "client")]
+pub mod conflict;
 #[cfg(feature = "delta")]
 pub mod delta;
 pub mod dirent;
@@ -42,7 +44,7 @@ use subversion_sys::{svn_opt_revision_t, svn_opt_revision_value_t};
 pub use version::Version;
 
 // Re-export important types for API consumers
-pub use repos::{Notify, LoadUUID};
+pub use repos::{LoadUUID, Notify};
 
 bitflags! {
     pub struct DirentField: u32 {

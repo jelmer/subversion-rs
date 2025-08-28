@@ -1,6 +1,6 @@
-use crate::{with_tmp_pool, Depth, Error, Revision, RevisionRange, Revnum};
-use crate::uri::AsCanonicalUri;
 use crate::dirent::AsCanonicalDirent;
+use crate::uri::AsCanonicalUri;
+use crate::{with_tmp_pool, Depth, Error, Revision};
 use std::ffi::CString;
 use std::ptr;
 
@@ -56,14 +56,14 @@ where
         let source1_uri = source1.as_canonical_uri()?;
         let source2_uri = source2.as_canonical_uri()?;
         let target = target_wcpath.as_canonical_dirent()?;
-        
+
         let source1_cstr = CString::new(source1_uri.as_str())?;
         let source2_cstr = CString::new(source2_uri.as_str())?;
         let target_cstr = CString::new(target.as_str())?;
-        
+
         let revision1: subversion_sys::svn_opt_revision_t = revision1.into().into();
         let revision2: subversion_sys::svn_opt_revision_t = revision2.into().into();
-        
+
         // Convert diff options to APR array
         let merge_options = if options.diff_options.is_empty() {
             ptr::null()
@@ -74,7 +74,7 @@ where
             }
             arr.as_ptr()
         };
-        
+
         let err = subversion_sys::svn_client_merge5(
             source1_cstr.as_ptr(),
             &revision1,
@@ -92,7 +92,7 @@ where
             ctx.as_mut_ptr(),
             pool.as_mut_ptr(),
         );
-        
+
         Error::from_raw(err)
     })
 }
@@ -126,15 +126,18 @@ where
     with_tmp_pool(|pool| unsafe {
         let source_uri = source.as_canonical_uri()?;
         let target = target_wcpath.as_canonical_dirent()?;
-        
+
         let source_cstr = CString::new(source_uri.as_str())?;
         let target_cstr = CString::new(target.as_str())?;
-        
+
         let peg_revision: subversion_sys::svn_opt_revision_t = source_peg_revision.into().into();
-        
+
         // Convert revision ranges to APR array if provided
         let ranges_array = if let Some(ranges) = ranges_to_merge {
-            let mut arr = apr::tables::ArrayHeader::<*mut subversion_sys::svn_opt_revision_range_t>::new(&pool);
+            let mut arr =
+                apr::tables::ArrayHeader::<*mut subversion_sys::svn_opt_revision_range_t>::new(
+                    &pool,
+                );
             for range in ranges {
                 let range_ptr: *mut subversion_sys::svn_opt_revision_range_t = pool.calloc();
                 (*range_ptr).start = range.start.into();
@@ -145,7 +148,7 @@ where
         } else {
             ptr::null()
         };
-        
+
         // Convert diff options to APR array
         let merge_options = if options.diff_options.is_empty() {
             ptr::null()
@@ -156,7 +159,7 @@ where
             }
             arr.as_ptr()
         };
-        
+
         let err = subversion_sys::svn_client_merge_peg5(
             source_cstr.as_ptr(),
             ranges_array,
@@ -173,7 +176,7 @@ where
             ctx.as_mut_ptr(),
             pool.as_mut_ptr(),
         );
-        
+
         Error::from_raw(err)
     })
 }
@@ -193,9 +196,9 @@ where
         let path = path_or_url.as_canonical_uri()?;
         let path_cstr = CString::new(path.as_str())?;
         let peg_rev: subversion_sys::svn_opt_revision_t = peg_revision.into().into();
-        
+
         let mut mergeinfo_ptr = ptr::null_mut();
-        
+
         let err = subversion_sys::svn_client_mergeinfo_get_merged(
             &mut mergeinfo_ptr,
             path_cstr.as_ptr(),
@@ -203,37 +206,38 @@ where
             ctx.as_mut_ptr(),
             pool.as_mut_ptr(),
         );
-        
+
         Error::from_raw(err)?;
-        
+
         if mergeinfo_ptr.is_null() {
             return Ok(std::collections::HashMap::new());
         }
-        
+
         // Convert the apr_hash_t to a Rust HashMap
         // mergeinfo is a hash from path (char*) to rangelist (apr_array_header_t*)
         let mut result = std::collections::HashMap::new();
-        
+
         // We need to iterate the hash directly using APR's hash iteration
         let iter_pool = apr::pool::Pool::new();
         let hi = unsafe { apr_sys::apr_hash_first(iter_pool.as_mut_ptr(), mergeinfo_ptr) };
         let mut iter = hi;
-        
+
         while !iter.is_null() {
             let mut key_ptr: *const std::ffi::c_void = ptr::null();
             let mut val_ptr: *mut std::ffi::c_void = ptr::null_mut();
-            
+
             unsafe {
                 apr_sys::apr_hash_this(iter, &mut key_ptr, ptr::null_mut(), &mut val_ptr);
-                
+
                 let source_cstr = std::ffi::CStr::from_ptr(key_ptr as *const std::ffi::c_char);
                 let source_str = source_cstr.to_str()?.to_string();
-                
+
                 // Convert svn_rangelist_t (apr_array_header_t of svn_merge_range_t*)
-                let rangelist_array = apr::tables::ArrayHeader::<*mut subversion_sys::svn_merge_range_t>::from_ptr(
-                    val_ptr as *mut apr_sys::apr_array_header_t
-                );
-                
+                let rangelist_array =
+                    apr::tables::ArrayHeader::<*mut subversion_sys::svn_merge_range_t>::from_ptr(
+                        val_ptr as *mut apr_sys::apr_array_header_t,
+                    );
+
                 let mut ranges = Vec::new();
                 for range_ptr in rangelist_array.iter() {
                     let range = &*range_ptr;
@@ -242,13 +246,13 @@ where
                         crate::Revision::Number(crate::Revnum(range.end)),
                     ));
                 }
-                
+
                 result.insert(source_str, ranges);
-                
+
                 iter = apr_sys::apr_hash_next(iter);
             }
         }
-        
+
         Ok(result)
     })
 }

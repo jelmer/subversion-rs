@@ -105,4 +105,3 @@ impl AsCanonicalUri for &url::Url {
         self.as_str().as_canonical_uri()
     }
 }
-
