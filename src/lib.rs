@@ -795,6 +795,33 @@ extern "C" fn wrap_cancel_func(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConflictChoice {
+    Postpone,
+    Base,
+    TheirsFull,
+    MineFull,
+    TheirsConflict,
+    MineConflict,
+    Merged,
+    Unspecified,
+}
+
+impl From<ConflictChoice> for subversion_sys::svn_wc_conflict_choice_t {
+    fn from(choice: ConflictChoice) -> Self {
+        match choice {
+            ConflictChoice::Postpone => subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_postpone,
+            ConflictChoice::Base => subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_base,
+            ConflictChoice::TheirsFull => subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_theirs_full,
+            ConflictChoice::MineFull => subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_mine_full,
+            ConflictChoice::TheirsConflict => subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_theirs_conflict,
+            ConflictChoice::MineConflict => subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_mine_conflict,
+            ConflictChoice::Merged => subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_merged,
+            ConflictChoice::Unspecified => subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_unspecified,
+        }
+    }
+}
+
 pub struct Checksum<'pool> {
     ptr: *const subversion_sys::svn_checksum_t,
     _pool: std::marker::PhantomData<&'pool apr::Pool>,
