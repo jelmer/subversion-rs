@@ -39,6 +39,9 @@ use subversion_sys::{svn_opt_revision_t, svn_opt_revision_value_t};
 
 pub use version::Version;
 
+// Re-export important types for API consumers
+pub use repos::{Notify, LoadUUID};
+
 bitflags! {
     pub struct DirentField: u32 {
         const Kind = subversion_sys::SVN_DIRENT_KIND;
@@ -584,6 +587,7 @@ impl<'pool> InheritedItem<'pool> {
     }
 }
 
+#[derive(Clone)]
 pub struct Canonical<T>(T);
 
 impl<T> std::ops::Deref for Canonical<T> {

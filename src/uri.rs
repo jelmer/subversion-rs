@@ -1,263 +1,108 @@
-use crate::Canonical;
+use crate::{with_tmp_pool, Canonical};
 
-pub struct Uri<'a>(*const i8, std::marker::PhantomData<&'a ()>);
+/// A URI string - by default returns owned String, borrowed variants behind features
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Uri(String);
 
-impl ToString for Uri<'_> {
-    fn to_string(&self) -> String {
-        let t = unsafe { std::ffi::CStr::from_ptr(self.as_ptr()) };
-        t.to_str().unwrap().to_string()
+impl Uri {
+    /// Create a new URI from a string, canonicalizing it
+    pub fn new(uri: &str) -> Result<Self, crate::Error> {
+        let canonical = canonicalize_uri(uri)?;
+        Ok(Uri(canonical))
+    }
+
+    /// Get the URI as a string
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Check if this URI is a root URI (has no path component beyond "/")
+    pub fn is_root(&self) -> bool {
+        with_tmp_pool(|pool| unsafe {
+            let uri_cstr = std::ffi::CString::new(self.0.as_str()).unwrap();
+            subversion_sys::svn_uri_is_root(uri_cstr.as_ptr(), self.0.len()) != 0
+        })
+    }
+
+    /// Get the canonical form of this URI
+    pub fn canonical(&self) -> Canonical<Uri> {
+        // Already canonical since we canonicalize on construction
+        Canonical(self.clone())
     }
 }
 
-impl std::fmt::Debug for Uri<'_> {
+impl std::fmt::Display for Uri {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("Uri").field(&self.to_string()).finish()
+        self.0.fmt(f)
     }
 }
 
-impl PartialEq for Uri<'_> {
-    fn eq(&self, other: &Self) -> bool {
-        self.to_string() == other.to_string()
+impl std::str::FromStr for Uri {
+    type Err = crate::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::new(s)
     }
 }
 
-impl Eq for Uri<'_> {}
-
-impl<'a> Uri<'a> {
-    pub fn from_raw(raw: *const i8) -> Self {
-        Self(raw, std::marker::PhantomData)
-    }
-
-    pub fn from_cstr(cstr: &std::ffi::CStr) -> Self {
-        Self(cstr.as_ptr(), std::marker::PhantomData)
-    }
-
-    pub fn from_str(s: &str, pool: &'a apr::Pool) -> Self {
-        Self(
-            apr::strings::pstrdup_raw(s, pool).unwrap() as *const i8,
-            std::marker::PhantomData,
-        )
-    }
-
-    pub fn is_root(&self, length: usize) -> bool {
-        unsafe { subversion_sys::svn_uri_is_root(self.as_ptr(), length) != 0 }
-    }
-
-    pub fn as_ptr(&self) -> *const i8 {
-        self.0
-    }
-
-    pub fn canonicalize_in<'b>(&'_ self, pool: &'b mut apr::pool::Pool) -> Canonical<Self>
-    where
-        'a: 'b,
-    {
-        Canonical(Self(
-            unsafe { subversion_sys::svn_uri_canonicalize(self.as_ptr(), pool.as_mut_ptr()) },
-            std::marker::PhantomData,
-        ))
+impl AsRef<str> for Uri {
+    fn as_ref(&self) -> &str {
+        &self.0
     }
 }
 
-// TODO: Rework to handle lifetime-bound types - these methods return Pooled types which don't work with lifetimes
-/*
-impl<'a> Uri<'a> {
-    pub fn dirname(&self) -> Pooled<Self> {
-        Pooled::initialize(|pool| unsafe {
-            Ok::<_, crate::Error>(Self(
-                subversion_sys::svn_uri_dirname(self.as_ptr(), pool.as_mut_ptr()) as *const i8,
-                std::marker::PhantomData,
-            ))
-        })
-        .unwrap()
-    }*/
+/// Canonicalize a URI string using SVN's canonicalization rules
+pub fn canonicalize_uri(uri: &str) -> Result<String, crate::Error> {
+    with_tmp_pool(|pool| unsafe {
+        let uri_cstr = std::ffi::CString::new(uri)?;
+        let canonical = subversion_sys::svn_uri_canonicalize(uri_cstr.as_ptr(), pool.as_mut_ptr());
+        let canonical_cstr = std::ffi::CStr::from_ptr(canonical);
+        Ok(canonical_cstr.to_str()?.to_owned())
+    })
+}
 
-/*pub fn basename(&self) -> Pooled<Self> {
-        Pooled::initialize(|pool| unsafe {
-            Ok::<_, crate::Error>(Self(
-                subversion_sys::svn_uri_basename(self.as_ptr(), pool.as_mut_ptr()),
-                std::marker::PhantomData,
-            ))
-        })
-        .unwrap()
-    }
+/// Trait for types that can be converted to canonical URIs
+pub trait AsCanonicalUri {
+    /// Convert to a canonical URI
+    fn as_canonical_uri(&self) -> Result<Canonical<Uri>, crate::Error>;
+}
 
-    pub fn split(&self) -> (Pooled<Self>, Pooled<Self>) {
-        let pool = apr::pool::Pool::new();
-        unsafe {
-            let mut dirname = std::ptr::null();
-            let mut basename = std::ptr::null();
-            subversion_sys::svn_uri_split(
-                &mut dirname,
-                &mut basename,
-                self.as_ptr(),
-                pool.as_mut_ptr(),
-            );
-            let pool = std::rc::Rc::new(pool);
-            (
-                Pooled::in_pool(pool.clone(), Self(dirname, std::marker::PhantomData)),
-                Pooled::in_pool(pool, Self(basename, std::marker::PhantomData)),
-            )
-        }
-    }
-
-    pub fn canonicalize(&self) -> Pooled<Canonical<Self>> {
-        Pooled::initialize(|pool| unsafe {
-            Ok::<_, crate::Error>(Canonical(Self(
-                subversion_sys::svn_uri_canonicalize(self.as_ptr(), pool.as_mut_ptr()),
-                std::marker::PhantomData,
-            )))
-        })
-        .unwrap()
-    }
-
-    pub fn canonicalize_in<'b>(&'_ self, pool: &'b mut apr::pool::Pool) -> Canonical<Self>
-    where
-        'a: 'b,
-    {
-        Canonical(Self(
-            unsafe { subversion_sys::svn_uri_canonicalize(self.as_ptr(), pool.as_mut_ptr()) },
-            std::marker::PhantomData,
-        ))
-    }
-
-    pub fn canonicalize_safe(
-        &self,
-    ) -> Result<(Pooled<Canonical<Self>>, Pooled<Self>), crate::Error> {
-        let pool = apr::pool::Pool::new();
-        unsafe {
-            let mut canonical = std::ptr::null();
-            let mut non_canonical = std::ptr::null();
-            let err = subversion_sys::svn_uri_canonicalize_safe(
-                &mut canonical,
-                &mut non_canonical,
-                self.as_ptr(),
-                pool.as_mut_ptr(),
-                apr::pool::Pool::new().as_mut_ptr(),
-            );
-            Error::from_raw(err)?;
-            let pool = std::rc::Rc::new(pool);
-            Ok((
-                Pooled::in_pool(
-                    pool.clone(),
-                    Canonical(Self(canonical, std::marker::PhantomData)),
-                ),
-                Pooled::in_pool(pool, Self(non_canonical, std::marker::PhantomData)),
-            ))
-        }
-    }
-
-    pub fn is_canonical(&self) -> bool {
-        unsafe {
-            subversion_sys::svn_uri_is_canonical(self.as_ptr(), apr::pool::Pool::new().as_mut_ptr())
-                != 0
-        }
-    }
-
-    pub fn check_canonical(self) -> Option<Canonical<Self>> {
-        if self.is_canonical() {
-            Some(Canonical(self))
-        } else {
-            None
-        }
-    }
-
-    fn to_dirent<'b>(&self) -> Result<Pooled<Dirent<'b>>, crate::Error> {
-        Pooled::initialize(|pool| unsafe {
-            let mut dirent = std::ptr::null();
-            let err = subversion_sys::svn_uri_get_dirent_from_file_url(
-                &mut dirent,
-                self.as_ptr(),
-                pool.as_mut_ptr(),
-            );
-            Error::from_raw(err)?;
-            Ok::<_, Error>(Dirent::from_raw(dirent))
-        })
+impl AsCanonicalUri for Uri {
+    fn as_canonical_uri(&self) -> Result<Canonical<Uri>, crate::Error> {
+        Ok(self.canonical())
     }
 }
 
-impl<'a, 'b> TryFrom<Canonical<Uri<'a>>> for Pooled<Dirent<'b>> {
-    type Error = crate::Error;
-
-    fn try_from(uri: Canonical<Uri<'a>>) -> Result<Pooled<Dirent<'b>>, Self::Error> {
-        uri.to_dirent()
+impl AsCanonicalUri for Canonical<Uri> {
+    fn as_canonical_uri(&self) -> Result<Canonical<Uri>, crate::Error> {
+        Ok(self.clone())
     }
 }
 
-impl<'a> From<&'a str> for Uri<'a> {
-    fn from(s: &'a str) -> Self {
-        Self(
-            std::ffi::CString::new(s).unwrap().into_raw(),
-            std::marker::PhantomData,
-        )
+impl AsCanonicalUri for &str {
+    fn as_canonical_uri(&self) -> Result<Canonical<Uri>, crate::Error> {
+        let uri = Uri::new(self)?;
+        Ok(uri.canonical())
     }
 }
 
-impl<'a> From<&Uri<'a>> for &'a str {
-    fn from(uri: &Uri<'a>) -> Self {
-        let t = unsafe { std::ffi::CStr::from_ptr(uri.as_ptr()) };
-        t.to_str().unwrap()
+impl AsCanonicalUri for String {
+    fn as_canonical_uri(&self) -> Result<Canonical<Uri>, crate::Error> {
+        self.as_str().as_canonical_uri()
     }
 }
 
 #[cfg(feature = "url")]
-impl TryFrom<Uri<'_>> for url::Url {
-    type Error = url::ParseError;
-
-    fn try_from(uri: Uri) -> Result<Self, Self::Error> {
-        let uri = uri.to_string();
-        Ok(url::Url::parse(&uri)?)
-    }
-}
-*/
-
-pub trait AsCanonicalUri<'a> {
-    fn as_canonical_uri(self, scratch_pool: &mut apr::pool::Pool) -> Canonical<Uri<'a>>;
-}
-
-impl<'a> AsCanonicalUri<'a> for Uri<'a> {
-    fn as_canonical_uri(self, scratch_pool: &mut apr::pool::Pool) -> Canonical<Uri<'a>> {
-        self.canonicalize_in(scratch_pool)
-    }
-}
-
-impl<'a> AsCanonicalUri<'a> for Canonical<Uri<'a>> {
-    fn as_canonical_uri(self, _scratch_pool: &mut apr::pool::Pool) -> Canonical<Uri<'a>> {
-        self
+impl AsCanonicalUri for url::Url {
+    fn as_canonical_uri(&self) -> Result<Canonical<Uri>, crate::Error> {
+        self.as_str().as_canonical_uri()
     }
 }
 
 #[cfg(feature = "url")]
-impl<'a> AsCanonicalUri<'a> for url::Url {
-    fn as_canonical_uri(self, scratch_pool: &mut apr::pool::Pool) -> Canonical<Uri<'a>> {
-        Uri::from_str(self.as_str(), scratch_pool).canonicalize_in(scratch_pool)
+impl AsCanonicalUri for &url::Url {
+    fn as_canonical_uri(&self) -> Result<Canonical<Uri>, crate::Error> {
+        self.as_str().as_canonical_uri()
     }
 }
 
-#[cfg(feature = "url")]
-impl<'a> AsCanonicalUri<'a> for &'a url::Url {
-    fn as_canonical_uri(self, scratch_pool: &mut apr::pool::Pool) -> Canonical<Uri<'a>> {
-        Uri::from_str(self.as_str(), scratch_pool).canonicalize_in(scratch_pool)
-    }
-}
-
-impl<'a> AsCanonicalUri<'a> for &'a str {
-    fn as_canonical_uri(self, scratch_pool: &mut apr::pool::Pool) -> Canonical<Uri<'a>> {
-        // Create Uri in the scratch pool and canonicalize it
-        let ptr = apr::strings::pstrdup_raw(self, scratch_pool).unwrap() as *const i8;
-        let uri = Uri::from_raw(ptr);
-        uri.canonicalize_in(scratch_pool)
-    }
-}
-
-// TODO: These implementations need Pooled types which don't work with lifetimes
-/*impl<'a> AsCanonicalUri<'a> for Pooled<Uri<'a>> {
-    fn as_canonical_uri(self, scratch_pool: &mut apr::pool::Pool) -> Canonical<Uri<'a>> {
-        self.canonicalize_in(scratch_pool)
-    }
-}
-
-impl<'a> AsCanonicalUri<'a> for Pooled<Canonical<Uri<'a>>> {
-    fn as_canonical_uri(self, _scratch_pool: &mut apr::pool::Pool) -> Canonical<Uri<'a>> {
-        Canonical(Uri(self.0 .0, std::marker::PhantomData))
-    }
-}*/
