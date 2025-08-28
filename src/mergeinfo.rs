@@ -33,7 +33,7 @@ impl Drop for Mergeinfo {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum MergeinfoInheritance {
     Explicit,
     Inherited,
@@ -151,7 +151,7 @@ mod tests {
         let ptr = pool.calloc::<svn_mergeinfo_t>();
         
         {
-            let _mergeinfo = unsafe { Mergeinfo::from_ptr_and_pool(ptr, pool.clone()) };
+            let _mergeinfo = unsafe { Mergeinfo::from_ptr_and_pool(ptr, apr::Pool::new()) };
             // mergeinfo is dropped here
         }
         
