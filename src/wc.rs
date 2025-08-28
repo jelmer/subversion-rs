@@ -175,3 +175,152 @@ pub fn get_adm_dir() -> String {
         .to_string_lossy()
         .into_owned()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_context_creation() {
+        let context = Context::new();
+        assert!(context.is_ok());
+        let mut context = context.unwrap();
+        assert!(!context.as_mut_ptr().is_null());
+    }
+
+    #[test]
+    fn test_adm_dir_default() {
+        // Default admin dir should be ".svn"
+        let dir = get_adm_dir();
+        assert_eq!(dir, ".svn");
+    }
+
+    #[test]
+    fn test_pristine_version() {
+        // Should be a positive version number
+        let version = pristine_version();
+        assert!(version > 0);
+    }
+
+    #[test]
+    fn test_is_adm_dir() {
+        // Test standard admin dirs
+        assert!(is_adm_dir(".svn"));
+        assert!(is_adm_dir("_svn"));
+        assert!(!is_adm_dir("not_svn"));
+        assert!(!is_adm_dir("svn"));
+    }
+
+    #[test]
+    fn test_context_with_config() {
+        // Create context with empty config
+        let config = std::ptr::null_mut();
+        let result = Context::new_with_config(config);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_check_wc() {
+        let dir = tempdir().unwrap();
+        let wc_path = dir.path();
+        
+        // Non-working-copy directory should return None
+        let wc_format = check_wc(wc_path);
+        assert!(wc_format.is_ok());
+        assert_eq!(wc_format.unwrap(), None);
+    }
+
+    #[test]
+    fn test_ensure_adm() {
+        let dir = tempdir().unwrap();
+        let wc_path = dir.path();
+        
+        // Try to ensure admin area
+        let result = ensure_adm(
+            wc_path,
+            "",  // uuid
+            "file:///test/repo",  // url
+            "file:///test/repo",  // repos
+            crate::Revnum::from(0),
+            crate::Depth::Infinity,
+        );
+        
+        // This might fail if the directory already exists or other reasons
+        // Just ensure it doesn't panic
+        let _ = result;
+    }
+
+    #[test]
+    fn test_maybe_set_repos_root_url() {
+        let dir = tempdir().unwrap();
+        let abspath = dir.path();
+        let repos_root = "file:///test/repo";
+        
+        // This will likely fail as we don't have a real working copy
+        let result = maybe_set_repos_root_url(abspath, repos_root);
+        // Just ensure it doesn't panic
+        let _ = result;
+    }
+
+    #[test]
+    fn test_context_cancel_func() {
+        let mut context = Context::new().unwrap();
+        
+        // Set a cancel function that always returns Ok
+        let cancel_fn = || Ok::<(), crate::Error>(());
+        unsafe {
+            context.set_cancel_func(&cancel_fn);
+        }
+        
+        // Cancel func should be set
+        unsafe {
+            assert!(!(*context.as_mut_ptr()).cancel_func.is_none());
+        }
+    }
+
+    #[test]
+    fn test_context_notify_func() {
+        let mut context = Context::new().unwrap();
+        
+        // Create a simple notify function
+        let notify_fn = |_path: &std::path::Path, _action: crate::NotifyAction, _kind: crate::NodeKind| {};
+        unsafe {
+            context.set_notify_func(&notify_fn);
+        }
+        
+        // Notify func should be set
+        unsafe {
+            assert!(!(*context.as_mut_ptr()).notify_func.is_none());
+        }
+    }
+
+    #[test]
+    fn test_context_send_safety() {
+        // Context should be Send (has explicit unsafe impl Send)
+        fn assert_send<T: Send>() {}
+        assert_send::<Context>();
+    }
+
+    #[test]
+    fn test_text_modified() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("test.txt");
+        std::fs::write(&file_path, "test content").unwrap();
+        
+        // This will fail without a working copy, but shouldn't panic
+        let result = text_modified(&file_path, false);
+        assert!(result.is_err()); // Expected to fail without WC
+    }
+
+    #[test]
+    fn test_props_modified() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("test.txt");
+        std::fs::write(&file_path, "test content").unwrap();
+        
+        // This will fail without a working copy, but shouldn't panic
+        let result = props_modified(&file_path);
+        assert!(result.is_err()); // Expected to fail without WC
+    }
+}

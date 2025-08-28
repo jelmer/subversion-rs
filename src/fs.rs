@@ -254,3 +254,72 @@ impl Root {
         self.ptr
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_fs_create_and_open() {
+        let dir = tempdir().unwrap();
+        let fs_path = dir.path().join("test-fs");
+        
+        // Create filesystem
+        let fs = Fs::create(&fs_path);
+        assert!(fs.is_ok(), "Failed to create filesystem");
+        
+        // Open existing filesystem
+        let fs = Fs::open(&fs_path);
+        assert!(fs.is_ok(), "Failed to open filesystem");
+    }
+
+    #[test]
+    fn test_fs_youngest_rev() {
+        let dir = tempdir().unwrap();
+        let fs_path = dir.path().join("test-fs");
+        
+        let mut fs = Fs::create(&fs_path).unwrap();
+        let rev = fs.youngest_rev();
+        assert!(rev.is_ok());
+        // New filesystem should have revision 0
+        assert_eq!(rev.unwrap(), crate::Revnum::from(0));
+    }
+
+    #[test]
+    fn test_fs_get_uuid() {
+        let dir = tempdir().unwrap();
+        let fs_path = dir.path().join("test-fs");
+        
+        let mut fs = Fs::create(&fs_path).unwrap();
+        let uuid = fs.get_uuid();
+        assert!(uuid.is_ok());
+        // UUID should not be empty
+        assert!(!uuid.unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_root_creation() {
+        let dir = tempdir().unwrap();
+        let fs_path = dir.path().join("test-fs");
+        
+        let mut fs = Fs::create(&fs_path).unwrap();
+        let root = fs.revision_root(crate::Revnum::from(0));
+        assert!(root.is_ok(), "Failed to get revision root");
+    }
+
+    #[test]
+    fn test_drop_cleanup() {
+        let dir = tempdir().unwrap();
+        let fs_path = dir.path().join("test-fs");
+        
+        {
+            let _fs = Fs::create(&fs_path).unwrap();
+            // Fs should be dropped here
+        }
+        
+        // Should be able to open again after drop
+        let fs = Fs::open(&fs_path);
+        assert!(fs.is_ok());
+    }
+}
