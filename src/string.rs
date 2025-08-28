@@ -115,7 +115,7 @@ mod tests {
         let pool = apr::Pool::new();
         let empty = BStr::from_bytes(b"", &pool);
         assert!(empty.is_empty());
-        
+
         let non_empty = BStr::from_bytes(b"data", &pool);
         assert!(!non_empty.is_empty());
     }
