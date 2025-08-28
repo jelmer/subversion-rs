@@ -733,3 +733,185 @@ pub fn get_platform_specific_client_providers() -> Result<Vec<AuthProvider>, Err
         })
         .collect())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_simple_credentials_creation() {
+        let pool = apr::Pool::new();
+        let creds = SimpleCredentials::new(
+            "testuser".to_string(),
+            "testpass".to_string(),
+            true,
+            &pool,
+        );
+        assert_eq!(creds.username(), "testuser");
+        assert_eq!(creds.password(), "testpass");
+        assert!(creds.may_save());
+    }
+
+    #[test]
+    fn test_simple_credentials_set_username() {
+        let pool = apr::Pool::new();
+        let mut creds = SimpleCredentials::new(
+            "olduser".to_string(),
+            "pass".to_string(),
+            false,
+            &pool,
+        );
+        creds.set_username("newuser", &pool);
+        assert_eq!(creds.username(), "newuser");
+        assert!(!creds.may_save());
+    }
+
+    #[test]
+    fn test_simple_credentials_kind() {
+        let kind = SimpleCredentials::kind();
+        assert!(kind.contains("simple"));
+    }
+
+    #[test]
+    fn test_auth_provider_creation() {
+        // Test username provider
+        let username_provider = get_username_provider();
+        assert!(!username_provider.ptr.is_null());
+        
+        // Test simple provider
+        let simple_provider = get_simple_provider(None::<&fn(&str) -> Result<bool, Error>>);
+        assert!(!simple_provider.ptr.is_null());
+        
+        // Test SSL providers
+        let ssl_trust_provider = get_ssl_server_trust_file_provider();
+        assert!(!ssl_trust_provider.ptr.is_null());
+        
+        let ssl_cert_provider = get_ssl_client_cert_file_provider();
+        assert!(!ssl_cert_provider.ptr.is_null());
+    }
+
+    #[test]
+    fn test_auth_provider_cred_kind() {
+        let provider = get_username_provider();
+        let kind = provider.cred_kind();
+        assert!(kind.contains("username"));
+    }
+
+    #[test]
+    fn test_auth_baton_open() {
+        let providers = vec![
+            get_username_provider(),
+            get_simple_provider(None::<&fn(&str) -> Result<bool, Error>>),
+        ];
+        
+        let baton = AuthBaton::open(&providers);
+        assert!(baton.is_ok());
+    }
+
+    #[test]
+    fn test_auth_baton_parameter_safety() {
+        let providers = vec![get_username_provider()];
+        let mut baton = AuthBaton::open(&providers).unwrap();
+        
+        // Test setting and getting a parameter
+        let test_key = "test_param";
+        let test_value = "test_value\0";
+        unsafe {
+            baton.set_parameter(test_key, test_value.as_ptr() as *const _);
+            let retrieved = baton.get_parameter(test_key);
+            assert!(!retrieved.is_null());
+        }
+    }
+
+    #[test]
+    fn test_ssl_server_cert_info_dup() {
+        // We can't easily create a real SslServerCertInfo without a complex setup,
+        // but we can test the structure exists and has proper Send marker
+        fn _assert_send<T: Send>() {}
+        _assert_send::<SslServerCertInfo>();
+    }
+
+    #[test]
+    fn test_ssl_server_trust_dup() {
+        // Test that SslServerTrust has proper Send marker
+        fn _assert_send<T: Send>() {}
+        _assert_send::<SslServerTrust>();
+    }
+
+    #[test]
+    fn test_ssl_client_cert_credentials_dup() {
+        // Test that SslClientCertCredentials has proper Send marker
+        fn _assert_send<T: Send>() {}
+        _assert_send::<SslClientCertCredentials>();
+    }
+
+    #[test]
+    fn test_platform_specific_providers() {
+        // This may return empty on some platforms
+        let providers = get_platform_specific_client_providers();
+        assert!(providers.is_ok());
+        // Just check it doesn't crash - may be empty
+        let _ = providers.unwrap();
+    }
+
+    #[test]
+    fn test_simple_prompt_provider() {
+        let prompt_fn = |_realm: &str, _username: Option<&str>, _may_save: bool| {
+            let pool = apr::Pool::new();
+            Ok::<_, Error>(SimpleCredentials::new(
+                "prompted_user".to_string(),
+                "prompted_pass".to_string(),
+                true,
+                &pool,
+            ))
+        };
+        
+        let provider = get_simple_prompt_provider(&prompt_fn, 3);
+        assert!(!provider.ptr.is_null());
+    }
+
+    #[test]
+    fn test_username_prompt_provider() {
+        let prompt_fn = |_realm: &str, _may_save: bool| {
+            Ok::<_, Error>("prompted_username".to_string())
+        };
+        
+        let provider = get_username_prompt_provider(&prompt_fn, 3);
+        assert!(!provider.ptr.is_null());
+    }
+
+    #[test]
+    fn test_ssl_client_cert_prompt_provider() {
+        let prompt_fn = |_realm: &str, _may_save: bool| {
+            let pool = apr::Pool::new();
+            let cred: *mut subversion_sys::svn_auth_cred_ssl_client_cert_t = pool.calloc();
+            unsafe {
+                (*cred).cert_file = apr::strings::pstrdup_raw("/path/to/cert", &pool).unwrap() as *mut _;
+                (*cred).may_save = 1;
+            }
+            Ok::<_, Error>(SslClientCertCredentials {
+                ptr: cred,
+                pool,
+                _phantom: PhantomData,
+            })
+        };
+        
+        let provider = get_ssl_client_cert_prompt_provider(&prompt_fn, 3);
+        assert!(!provider.ptr.is_null());
+    }
+
+    #[test]
+    fn test_auth_provider_as_trait() {
+        let provider = get_username_provider();
+        
+        // Test that AuthProvider implements AsAuthProvider
+        let pool = apr::Pool::new();
+        let ptr = provider.as_auth_provider(&pool);
+        assert!(!ptr.is_null());
+        assert_eq!(ptr, provider.ptr);
+        
+        // Test reference also works
+        let ptr2 = (&provider).as_auth_provider(&pool);
+        assert_eq!(ptr, ptr2);
+    }
+}
