@@ -591,4 +591,151 @@ mod tests {
             std::path::Path::new("/home/user/project")
         );
     }
+
+    #[test]
+    fn test_crash_resistance_problematic_inputs() {
+        // Test null bytes - should be rejected, not crash
+        let result = Dirent::new("path\0with\0nulls");
+        assert!(result.is_err(), "Should reject null bytes");
+
+        // Test control characters - should be rejected, not crash
+        let result = Dirent::new("path\x7fwith\rcontrol\nchars");
+        assert!(result.is_err(), "Should reject control characters");
+
+        // Test extremely long path - should be rejected, not crash
+        let long_path = "a".repeat(5000);
+        let result = Dirent::new(&long_path);
+        assert!(result.is_err(), "Should reject overly long paths");
+
+        // Test empty path - should work
+        let dirent = Dirent::new("").unwrap();
+        assert_eq!(dirent.as_str(), "");
+
+        // Test single character paths
+        let dirent = Dirent::new("a").unwrap();
+        assert_eq!(dirent.as_str(), "a");
+    }
+
+    #[test]
+    fn test_relative_absolute_mixed_paths() {
+        // Absolute paths
+        let abs_dirent = Dirent::new("/home/user/project").unwrap();
+        assert!(abs_dirent.is_absolute());
+        assert!(!abs_dirent.is_root());
+
+        // Relative paths
+        let rel_dirent = Dirent::new("project/subdir").unwrap();
+        assert!(!rel_dirent.is_absolute());
+        assert!(!rel_dirent.is_root());
+
+        // Root path
+        let root_dirent = Dirent::new("/").unwrap();
+        assert!(root_dirent.is_absolute());
+        assert!(root_dirent.is_root());
+
+        // Test operations mixing relative and absolute
+        let abs_base = Dirent::new("/home/user").unwrap();
+        let joined = abs_base.join("project").unwrap();
+        assert!(joined.is_absolute());
+        assert_eq!(joined.as_str(), "/home/user/project");
+
+        let rel_base = Dirent::new("home/user").unwrap();
+        let joined = rel_base.join("project").unwrap();
+        assert!(!joined.is_absolute());
+        assert_eq!(joined.as_str(), "home/user/project");
+    }
+
+    #[test]
+    fn test_dirent_path_conversions() {
+        let original_path = std::path::Path::new("/home/user//project/");
+
+        // Path -> Dirent
+        let dirent = Dirent::new(original_path).unwrap();
+        assert_eq!(dirent.as_str(), "/home/user/project"); // Canonicalized
+
+        // Dirent -> &Path
+        let path_ref: &std::path::Path = dirent.as_path();
+        assert_eq!(path_ref, std::path::Path::new("/home/user/project"));
+
+        // Dirent -> PathBuf
+        let path_buf: std::path::PathBuf = dirent.as_path().to_path_buf();
+        assert_eq!(path_buf, std::path::PathBuf::from("/home/user/project"));
+
+        // Test AsRef<Path> trait
+        let path_ref: &std::path::Path = dirent.as_ref();
+        assert_eq!(path_ref, std::path::Path::new("/home/user/project"));
+
+        // Test that we can use Dirent anywhere Path is expected
+        fn takes_path(p: &std::path::Path) -> String {
+            p.to_string_lossy().to_string()
+        }
+        let result = takes_path(dirent.as_ref());
+        assert_eq!(result, "/home/user/project");
+
+        // Test Display trait
+        let displayed = format!("{}", dirent);
+        assert_eq!(displayed, "/home/user/project");
+    }
+
+    #[test]
+    fn test_edge_cases_all_functions() {
+        // Test with various path types
+        let test_paths = vec![
+            "/",          // Root
+            "",           // Empty
+            "single",     // Single component
+            "/single",    // Absolute single
+            "a/b/c/d/e",  // Deep relative
+            "/a/b/c/d/e", // Deep absolute
+        ];
+
+        for path in test_paths {
+            let dirent = Dirent::new(path).unwrap();
+
+            // All these should not crash, even if they return errors
+            let _ = dirent.basename();
+            let _ = dirent.dirname();
+            let _ = dirent.split();
+            let _ = dirent.join("test");
+
+            // These should never crash since dirent is validated
+            let _ = dirent.is_absolute();
+            let _ = dirent.is_root();
+            let _ = dirent.is_canonical();
+        }
+    }
+
+    #[test]
+    fn test_function_pairs_consistency() {
+        let test_cases = vec!["/home/user/project", "relative/path", "/", "", "single"];
+
+        for path in test_cases {
+            let dirent = Dirent::new(path).unwrap();
+
+            // Test that basename + dirname operations are consistent with split
+            if let (Ok(basename), Ok(dirname)) = (dirent.basename(), dirent.dirname()) {
+                if let Ok((split_dirname, split_basename)) = dirent.split() {
+                    assert_eq!(
+                        basename.as_str(),
+                        split_basename.as_str(),
+                        "basename() and split() basename should match for path: {}",
+                        path
+                    );
+                    assert_eq!(
+                        dirname.as_str(),
+                        split_dirname.as_str(),
+                        "dirname() and split() dirname should match for path: {}",
+                        path
+                    );
+                }
+            }
+
+            // Test that join operations are safe
+            let joined = dirent.join("test").unwrap();
+            assert!(
+                joined.as_str().contains("test"),
+                "Join should include component"
+            );
+        }
+    }
 }
