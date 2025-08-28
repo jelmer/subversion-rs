@@ -128,6 +128,84 @@ impl Revnum {
 
 pub use error::Error;
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_revnum_conversions() {
+        // Test from u64
+        let rev = Revnum::from(42u64);
+        assert_eq!(rev.as_u64(), 42);
+        assert_eq!(rev.as_i64(), 42);
+
+        // Test from u32
+        let rev = Revnum::from(100u32);
+        assert_eq!(rev.as_u64(), 100);
+        assert_eq!(rev.as_i64(), 100);
+
+        // Test from usize
+        let rev = Revnum::from(1000usize);
+        assert_eq!(rev.as_u64(), 1000);
+        assert_eq!(rev.as_i64(), 1000);
+    }
+
+    #[test]
+    fn test_revnum_from_raw() {
+        // Valid revision
+        let rev = Revnum::from_raw(42);
+        assert!(rev.is_some());
+        assert_eq!(rev.unwrap().as_i64(), 42);
+
+        // Invalid revision (negative)
+        let rev = Revnum::from_raw(-1);
+        assert!(rev.is_none());
+    }
+
+    #[test]
+    fn test_revnum_into_conversions() {
+        let rev = Revnum::from(42u64);
+
+        // Test into usize
+        let val: usize = rev.into();
+        assert_eq!(val, 42);
+
+        // Test into svn_revnum_t
+        let rev = Revnum::from(100u64);
+        let val: subversion_sys::svn_revnum_t = rev.into();
+        assert_eq!(val, 100);
+    }
+
+    #[test]
+    fn test_fs_path_change_kind_conversions() {
+        // Test all variants convert properly
+        assert_eq!(
+            FsPathChangeKind::from(
+                subversion_sys::svn_fs_path_change_kind_t_svn_fs_path_change_modify
+            ),
+            FsPathChangeKind::Modify
+        );
+        assert_eq!(
+            FsPathChangeKind::from(
+                subversion_sys::svn_fs_path_change_kind_t_svn_fs_path_change_add
+            ),
+            FsPathChangeKind::Add
+        );
+        assert_eq!(
+            FsPathChangeKind::from(
+                subversion_sys::svn_fs_path_change_kind_t_svn_fs_path_change_delete
+            ),
+            FsPathChangeKind::Delete
+        );
+        assert_eq!(
+            FsPathChangeKind::from(
+                subversion_sys::svn_fs_path_change_kind_t_svn_fs_path_change_replace
+            ),
+            FsPathChangeKind::Replace
+        );
+    }
+}
+
 #[derive(Debug, Default, Clone, Copy)]
 pub enum Revision {
     #[default]
