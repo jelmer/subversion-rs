@@ -386,6 +386,12 @@ pub struct RevisionRange {
     pub end: Revision,
 }
 
+impl RevisionRange {
+    pub fn new(start: Revision, end: Revision) -> Self {
+        Self { start, end }
+    }
+}
+
 impl From<&RevisionRange> for subversion_sys::svn_opt_revision_range_t {
     fn from(range: &RevisionRange) -> Self {
         Self {
