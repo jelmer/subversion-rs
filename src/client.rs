@@ -1864,7 +1864,12 @@ impl<'a> ListBuilder<'a> {
             revision: Revision::Head,
             patterns: None,
             depth: Depth::Infinity,
-            dirent_fields: subversion_sys::SVN_DIRENT_ALL,
+            dirent_fields: subversion_sys::SVN_DIRENT_KIND
+                | subversion_sys::SVN_DIRENT_SIZE
+                | subversion_sys::SVN_DIRENT_HAS_PROPS
+                | subversion_sys::SVN_DIRENT_CREATED_REV
+                | subversion_sys::SVN_DIRENT_TIME
+                | subversion_sys::SVN_DIRENT_LAST_AUTHOR,
             fetch_locks: false,
             include_externals: false,
         }
@@ -2398,14 +2403,7 @@ mod tests {
         let wc_path = td.path().join("wc");
 
         // Create a test repository
-        crate::repos::create(
-            &repo_path,
-            None,
-            None,
-            None,
-            Some(&apr::hash::Hash::<&str, &str>::new()),
-        )
-        .unwrap();
+        crate::repos::Repos::create(&repo_path).unwrap();
 
         // Check out working copy
         let mut ctx = Context::new().unwrap();
@@ -2455,14 +2453,7 @@ mod tests {
         let wc_path = td.path().join("wc");
 
         // Create a test repository
-        crate::repos::create(
-            &repo_path,
-            None,
-            None,
-            None,
-            Some(&apr::hash::Hash::<&str, &str>::new()),
-        )
-        .unwrap();
+        crate::repos::Repos::create(&repo_path).unwrap();
 
         // Check out working copy
         let mut ctx = Context::new().unwrap();
@@ -2505,14 +2496,7 @@ mod tests {
         let wc_path = td.path().join("wc");
 
         // Create a test repository
-        crate::repos::create(
-            &repo_path,
-            None,
-            None,
-            None,
-            Some(&apr::hash::Hash::<&str, &str>::new()),
-        )
-        .unwrap();
+        crate::repos::Repos::create(&repo_path).unwrap();
 
         // Check out working copy
         let mut ctx = Context::new().unwrap();
@@ -2579,14 +2563,7 @@ mod tests {
         let wc_path = td.path().join("wc");
 
         // Create a test repository
-        crate::repos::create(
-            &repo_path,
-            None,
-            None,
-            None,
-            Some(&apr::hash::Hash::<&str, &str>::new()),
-        )
-        .unwrap();
+        crate::repos::Repos::create(&repo_path).unwrap();
 
         // Check out working copy
         let mut ctx = Context::new().unwrap();
@@ -2633,14 +2610,7 @@ mod tests {
         let wc_path = td.path().join("wc");
 
         // Create a test repository
-        crate::repos::create(
-            &repo_path,
-            None,
-            None,
-            None,
-            Some(&apr::hash::Hash::<&str, &str>::new()),
-        )
-        .unwrap();
+        crate::repos::Repos::create(&repo_path).unwrap();
 
         // Check out working copy
         let mut ctx = Context::new().unwrap();
@@ -2699,14 +2669,7 @@ mod tests {
         let wc_path = td.path().join("wc");
 
         // Create a test repository
-        crate::repos::create(
-            &repo_path,
-            None,
-            None,
-            None,
-            Some(&apr::hash::Hash::<&str, &str>::new()),
-        )
-        .unwrap();
+        crate::repos::Repos::create(&repo_path).unwrap();
 
         // Check out working copy
         let mut ctx = Context::new().unwrap();
@@ -2748,14 +2711,7 @@ mod tests {
         let repo_path = td.path().join("repo");
 
         // Create a test repository
-        crate::repos::create(
-            &repo_path,
-            None,
-            None,
-            None,
-            Some(&apr::hash::Hash::<&str, &str>::new()),
-        )
-        .unwrap();
+        crate::repos::Repos::create(&repo_path).unwrap();
 
         let mut ctx = Context::new().unwrap();
         let url_str = format!("file://{}", repo_path.to_str().unwrap());
@@ -2768,7 +2724,12 @@ mod tests {
             &Revision::Head,
             None, // patterns
             Depth::Infinity,
-            subversion_sys::SVN_DIRENT_ALL,
+            subversion_sys::SVN_DIRENT_KIND
+                | subversion_sys::SVN_DIRENT_SIZE
+                | subversion_sys::SVN_DIRENT_HAS_PROPS
+                | subversion_sys::SVN_DIRENT_CREATED_REV
+                | subversion_sys::SVN_DIRENT_TIME
+                | subversion_sys::SVN_DIRENT_LAST_AUTHOR,
             false, // fetch_locks
             false, // include_externals
             &mut |path, dirent, _lock| {
@@ -2787,14 +2748,7 @@ mod tests {
         let repo_path = td.path().join("repo");
 
         // Create a test repository
-        crate::repos::create(
-            &repo_path,
-            None,
-            None,
-            None,
-            Some(&apr::hash::Hash::<&str, &str>::new()),
-        )
-        .unwrap();
+        crate::repos::Repos::create(&repo_path).unwrap();
 
         let mut ctx = Context::new().unwrap();
         let url_str = format!("file://{}", repo_path.to_str().unwrap());
@@ -2821,14 +2775,7 @@ mod tests {
         let wc_path = td.path().join("wc");
 
         // Create a test repository
-        crate::repos::create(
-            &repo_path,
-            None,
-            None,
-            None,
-            Some(&apr::hash::Hash::<&str, &str>::new()),
-        )
-        .unwrap();
+        crate::repos::Repos::create(&repo_path).unwrap();
 
         // Check out working copy
         let mut ctx = Context::new().unwrap();
@@ -2873,14 +2820,7 @@ mod tests {
         let repo_path = td.path().join("repo");
 
         // Create a test repository
-        crate::repos::create(
-            &repo_path,
-            None,
-            None,
-            None,
-            Some(&apr::hash::Hash::<&str, &str>::new()),
-        )
-        .unwrap();
+        crate::repos::Repos::create(&repo_path).unwrap();
 
         let mut ctx = Context::new().unwrap();
         let url_str = format!("file://{}", repo_path.to_str().unwrap());
@@ -2906,14 +2846,7 @@ mod tests {
         let wc_path = td.path().join("wc");
 
         // Create a test repository
-        crate::repos::create(
-            &repo_path,
-            None,
-            None,
-            None,
-            Some(&apr::hash::Hash::<&str, &str>::new()),
-        )
-        .unwrap();
+        crate::repos::Repos::create(&repo_path).unwrap();
 
         // Check out working copy
         let mut ctx = Context::new().unwrap();
