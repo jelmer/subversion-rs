@@ -82,11 +82,17 @@ extern "C" fn wrap_proplist_receiver2(
         let path: &str = std::ffi::CStr::from_ptr(path).to_str().unwrap();
         let mut props = apr::hash::Hash::<&str, *mut subversion_sys::svn_string_t>::from_ptr(props);
         let props = props
-            .iter(&*scratch_pool)
+            .iter(&scratch_pool)
             .map(|(k, v)| {
                 (
                     String::from_utf8_lossy(k).to_string(),
-                    Vec::from_raw_parts((**v).data as *mut u8, (**v).len, (**v).len),
+                    if (*v).is_null() {
+                        Vec::new()
+                    } else {
+                        unsafe {
+                            std::slice::from_raw_parts((**v).data as *const u8, (**v).len).to_vec()
+                        }
+                    },
                 )
             })
             .collect::<HashMap<_, _>>();
@@ -1038,7 +1044,7 @@ impl Context {
             Error::from_raw(err)?;
             let mut props = apr::hash::Hash::<&str, &[u8]>::from_ptr(props);
             Ok(props
-                .iter(&*pool)
+                .iter(&pool)
                 .map(|(k, v)| (String::from_utf8_lossy(k).to_string(), v.to_vec()))
                 .collect())
         }
@@ -1050,7 +1056,7 @@ impl Context {
             .iter()
             .map(|s| std::ffi::CString::new(*s).unwrap())
             .collect::<Vec<_>>();
-        let mut targets_array = apr::tables::ArrayHeader::<*const i8>::new(&*pool);
+        let mut targets_array = apr::tables::ArrayHeader::<*const i8>::new(&pool);
         for target in targets.iter() {
             targets_array.push(target.as_ptr());
         }
@@ -1074,7 +1080,7 @@ impl Context {
             .iter()
             .map(|s| std::ffi::CString::new(*s).unwrap())
             .collect::<Vec<_>>();
-        let mut targets_array = apr::tables::ArrayHeader::<*const i8>::new(&*pool);
+        let mut targets_array = apr::tables::ArrayHeader::<*const i8>::new(&pool);
         for target in targets.iter() {
             targets_array.push(target.as_ptr());
         }
@@ -1267,10 +1273,16 @@ impl Context {
         // TODO: Add proper externals_to_pin support
     ) -> Result<(), Error> {
         with_tmp_pool(|pool| {
+            // Keep CStrings alive for the duration of the function
+            let path_cstrings: Vec<std::ffi::CString> = sources
+                .iter()
+                .map(|(path, _)| std::ffi::CString::new(*path).unwrap())
+                .collect();
+
             let sources_array = sources
                 .iter()
-                .map(|(path, rev)| {
-                    let path_c = std::ffi::CString::new(*path).unwrap();
+                .zip(path_cstrings.iter())
+                .map(|((_, rev), path_c)| {
                     let src: *mut subversion_sys::svn_client_copy_source_t = pool.calloc();
                     unsafe {
                         (*src).path = path_c.as_ptr();
@@ -1395,18 +1407,22 @@ impl Context {
                 *revnum = Revnum(actual_rev);
             }
 
+            if props.is_null() {
+                return Ok(std::collections::HashMap::new());
+            }
+
             // Convert apr hash to Rust HashMap
-            let mut hash =
-                apr::hash::Hash::<&[u8], *const subversion_sys::svn_string_t>::from_ptr(props);
+            // The hash values are svn_string_t structs (not pointers)
+            let mut hash = apr::hash::Hash::<&[u8], subversion_sys::svn_string_t>::from_ptr(props);
             let mut result = std::collections::HashMap::new();
             for (k, v) in hash.iter(pool) {
                 let key = String::from_utf8_lossy(k).into_owned();
-                let value = if v.is_null() {
+                let data_ptr = v.data;
+                let data_len = v.len;
+                let value = if data_ptr.is_null() || data_len == 0 {
                     Vec::new()
                 } else {
-                    unsafe {
-                        std::slice::from_raw_parts((**v).data as *const u8, (**v).len).to_vec()
-                    }
+                    unsafe { std::slice::from_raw_parts(data_ptr as *const u8, data_len).to_vec() }
                 };
                 result.insert(key, value);
             }
@@ -1645,14 +1661,24 @@ impl Context {
         with_tmp_pool(|pool| {
             let path_or_url_c = std::ffi::CString::new(path_or_url).unwrap();
 
-            let patterns = patterns.map(|p| {
+            // Keep CStrings alive for the duration of the function
+            let pattern_cstrings: Vec<std::ffi::CString> = patterns
+                .unwrap_or(&[])
+                .iter()
+                .map(|p| std::ffi::CString::new(*p).unwrap())
+                .collect();
+
+            let patterns = if !pattern_cstrings.is_empty() {
                 let mut array = apr::tables::ArrayHeader::<*const i8>::new(pool);
-                for pattern in p.iter() {
-                    let pattern_c = std::ffi::CString::new(*pattern).unwrap();
+                for pattern_c in pattern_cstrings.iter() {
                     array.push(pattern_c.as_ptr());
                 }
-                array
-            });
+                Some(array)
+            } else if patterns.is_some() {
+                Some(apr::tables::ArrayHeader::<*const i8>::new(pool))
+            } else {
+                None
+            };
 
             extern "C" fn list_receiver(
                 baton: *mut std::ffi::c_void,
@@ -2898,8 +2924,8 @@ mod tests {
 
         // Test copy operation (would need a commit first in real scenario)
         let copy_result = ctx.copy(
-            &[(&test_file.to_str().unwrap(), None)],
-            &wc_path.join("test_copy.txt").to_str().unwrap(),
+            &[(test_file.to_str().unwrap(), None)],
+            wc_path.join("test_copy.txt").to_str().unwrap(),
             false, // copy_as_child
             false, // make_parents
             false, // ignore_externals
@@ -3172,9 +3198,9 @@ mod tests {
         // Test diff using builder pattern - much cleaner!
         let result = ctx
             .diff_builder(
-                &url.to_string(),
+                url.to_string(),
                 Revision::Head,
-                &url.to_string(),
+                url.to_string(),
                 Revision::Head,
             )
             .depth(Depth::Infinity)

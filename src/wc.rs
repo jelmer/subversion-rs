@@ -396,7 +396,7 @@ mod tests {
     fn test_context_creation() {
         let context = Context::new();
         assert!(context.is_ok());
-        let mut context = context.unwrap();
+        let context = context.unwrap();
         assert!(!context.ptr.is_null());
     }
 
@@ -456,6 +456,7 @@ mod tests {
         let _ = result;
     }
 
+    // Note: Context cannot be Send because it contains raw pointers to C structures
     #[test]
     fn test_text_modified() {
         let dir = tempdir().unwrap();
