@@ -182,6 +182,21 @@ pub struct IterState<C: Credentials> {
 }
 
 impl<C: Credentials> IterState<C> {
+    /// Get a reference to the underlying pool
+    pub fn pool(&self) -> &apr::Pool {
+        &self.pool
+    }
+
+    /// Get the raw pointer to the iterator state (use with caution)
+    pub fn as_ptr(&self) -> *const subversion_sys::svn_auth_iterstate_t {
+        self.ptr
+    }
+
+    /// Get the mutable raw pointer to the iterator state (use with caution)
+    pub fn as_mut_ptr(&mut self) -> *mut subversion_sys::svn_auth_iterstate_t {
+        self.ptr
+    }
+
     pub fn save_credentials(&mut self) -> Result<(), Error> {
         let pool = apr::pool::Pool::new();
         let err = unsafe { subversion_sys::svn_auth_save_credentials(self.ptr, pool.as_mut_ptr()) };
@@ -350,6 +365,21 @@ pub struct SslServerTrust {
 unsafe impl Send for SslServerTrust {}
 
 impl SslServerTrust {
+    /// Get a reference to the underlying pool
+    pub fn pool(&self) -> &apr::Pool {
+        &self.pool
+    }
+
+    /// Get the raw pointer to the SSL server trust credentials (use with caution)
+    pub fn as_ptr(&self) -> *const subversion_sys::svn_auth_cred_ssl_server_trust_t {
+        self.ptr
+    }
+
+    /// Get the mutable raw pointer to the SSL server trust credentials (use with caution)
+    pub fn as_mut_ptr(&mut self) -> *mut subversion_sys::svn_auth_cred_ssl_server_trust_t {
+        self.ptr
+    }
+
     pub fn dup(&self) -> Self {
         let pool = apr::Pool::new();
         let cred = pool.calloc();
@@ -444,6 +474,21 @@ pub struct SslClientCertCredentials {
 unsafe impl Send for SslClientCertCredentials {}
 
 impl SslClientCertCredentials {
+    /// Get a reference to the underlying pool
+    pub fn pool(&self) -> &apr::Pool {
+        &self.pool
+    }
+
+    /// Get the raw pointer to the SSL client cert credentials (use with caution)
+    pub fn as_ptr(&self) -> *const subversion_sys::svn_auth_cred_ssl_client_cert_t {
+        self.ptr
+    }
+
+    /// Get the mutable raw pointer to the SSL client cert credentials (use with caution)
+    pub fn as_mut_ptr(&mut self) -> *mut subversion_sys::svn_auth_cred_ssl_client_cert_t {
+        self.ptr
+    }
+
     pub fn dup(&self) -> Self {
         let pool = apr::Pool::new();
         let cred: *mut subversion_sys::svn_auth_cred_ssl_client_cert_t = pool.calloc();
@@ -848,14 +893,15 @@ mod tests {
 
     #[test]
     fn test_simple_prompt_provider() {
-        let prompt_fn = |_realm: &str, _username: Option<&str>, _may_save: bool| {
-            let pool = apr::Pool::new();
-            Ok::<_, Error>(SimpleCredentials::new(
-                "prompted_user".to_string(),
-                "prompted_pass".to_string(),
-                true,
-                &pool,
-            ))
+        // Note: This test can only verify the provider is created, not actually used
+        // due to lifetime constraints with the pool in the callback
+        let prompt_fn = |_realm: &str,
+                         _username: Option<&str>,
+                         _may_save: bool|
+         -> Result<SimpleCredentials, Error> {
+            // This would need a pool with appropriate lifetime
+            // For testing, we just create a minimal failing response
+            Err(Error::from_str("Not implemented"))
         };
 
         let provider = get_simple_prompt_provider(&prompt_fn, 3);

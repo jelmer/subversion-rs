@@ -350,6 +350,16 @@ impl Context {
         }
     }
 
+    /// Get a reference to the underlying pool
+    pub fn pool(&self) -> &apr::Pool {
+        &self.pool
+    }
+
+    /// Get the raw pointer to the context (use with caution)
+    pub fn as_ptr(&self) -> *const svn_client_ctx_t {
+        self.ptr
+    }
+
     /// Checkout a working copy from url to path.
     pub fn checkout<'a>(
         &mut self,
@@ -1229,7 +1239,7 @@ impl Context {
                 .iter()
                 .map(|(path, rev)| {
                     let path_c = std::ffi::CString::new(*path).unwrap();
-                    let mut src: *mut subversion_sys::svn_client_copy_source_t = pool.calloc();
+                    let src: *mut subversion_sys::svn_client_copy_source_t = pool.calloc();
                     unsafe {
                         (*src).path = path_c.as_ptr();
                         (*src).revision = Box::into_raw(Box::new(
@@ -1354,9 +1364,8 @@ impl Context {
             }
 
             // Convert apr hash to Rust HashMap
-            let hash = unsafe {
-                apr::hash::Hash::<&[u8], *const subversion_sys::svn_string_t>::from_ptr(props)
-            };
+            let mut hash =
+                apr::hash::Hash::<&[u8], *const subversion_sys::svn_string_t>::from_ptr(props);
             let mut result = std::collections::HashMap::new();
             for (k, v) in hash.iter(pool) {
                 let key = String::from_utf8_lossy(k).into_owned();
@@ -1463,9 +1472,8 @@ impl Context {
                 let path_str = unsafe { std::ffi::CStr::from_ptr(path).to_str().unwrap() };
 
                 // Convert props hash
-                let hash = unsafe {
-                    apr::hash::Hash::<&[u8], *const subversion_sys::svn_string_t>::from_ptr(props)
-                };
+                let mut hash =
+                    apr::hash::Hash::<&[u8], *const subversion_sys::svn_string_t>::from_ptr(props);
                 let mut prop_hash = std::collections::HashMap::new();
                 let pool = apr::Pool::new();
                 for (k, v) in hash.iter(&pool) {
@@ -1554,9 +1562,9 @@ impl Context {
                 subversion_sys::svn_client_diff6(
                     diff_options_array.as_ptr(),
                     path1_c.as_ptr(),
-                    &revision1.into(),
+                    &(*revision1).into(),
                     path2_c.as_ptr(),
-                    &revision2.into(),
+                    &(*revision2).into(),
                     relative_to_dir_c
                         .as_ref()
                         .map_or(std::ptr::null(), |c| c.as_ptr()),
@@ -1629,11 +1637,11 @@ impl Context {
                         ) -> Result<(), Error>)
                 };
                 let path_str = unsafe { std::ffi::CStr::from_ptr(path).to_str().unwrap() };
-                let dirent = unsafe { crate::ra::Dirent::from_raw(dirent as *mut _) };
+                let dirent = crate::ra::Dirent::from_raw(dirent as *mut _);
                 let lock = if lock.is_null() {
                     None
                 } else {
-                    Some(unsafe { crate::Lock::from_raw(lock as *mut _) })
+                    Some(crate::Lock::from_raw(lock as *mut _))
                 };
 
                 match list_func(path_str, &dirent, lock.as_ref()) {
@@ -2095,6 +2103,375 @@ impl<'a> InfoBuilder<'a> {
     }
 }
 
+/// Builder for commit operations
+pub struct CommitBuilder<'a> {
+    ctx: &'a mut Context,
+    targets: Vec<String>,
+    depth: Depth,
+    keep_locks: bool,
+    keep_changelists: bool,
+    commit_as_operations: bool,
+    include_file_externals: bool,
+    include_dir_externals: bool,
+    changelists: Option<Vec<String>>,
+    revprop_table: std::collections::HashMap<String, String>,
+}
+
+impl<'a> CommitBuilder<'a> {
+    pub fn new(ctx: &'a mut Context) -> Self {
+        Self {
+            ctx,
+            targets: Vec::new(),
+            depth: Depth::Infinity,
+            keep_locks: false,
+            keep_changelists: false,
+            commit_as_operations: true,
+            include_file_externals: false,
+            include_dir_externals: false,
+            changelists: None,
+            revprop_table: std::collections::HashMap::new(),
+        }
+    }
+
+    pub fn add_target(mut self, target: impl Into<String>) -> Self {
+        self.targets.push(target.into());
+        self
+    }
+
+    pub fn targets(mut self, targets: Vec<String>) -> Self {
+        self.targets = targets;
+        self
+    }
+
+    pub fn depth(mut self, depth: Depth) -> Self {
+        self.depth = depth;
+        self
+    }
+
+    pub fn keep_locks(mut self, keep: bool) -> Self {
+        self.keep_locks = keep;
+        self
+    }
+
+    pub fn keep_changelists(mut self, keep: bool) -> Self {
+        self.keep_changelists = keep;
+        self
+    }
+
+    pub fn commit_as_operations(mut self, as_ops: bool) -> Self {
+        self.commit_as_operations = as_ops;
+        self
+    }
+
+    pub fn include_file_externals(mut self, include: bool) -> Self {
+        self.include_file_externals = include;
+        self
+    }
+
+    pub fn include_dir_externals(mut self, include: bool) -> Self {
+        self.include_dir_externals = include;
+        self
+    }
+
+    pub fn changelists(mut self, lists: Vec<String>) -> Self {
+        self.changelists = Some(lists);
+        self
+    }
+
+    pub fn add_revprop(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.revprop_table.insert(name.into(), value.into());
+        self
+    }
+
+    pub fn revprops(mut self, props: std::collections::HashMap<String, String>) -> Self {
+        self.revprop_table = props;
+        self
+    }
+
+    pub fn execute(
+        self,
+        commit_callback: &dyn FnMut(&crate::CommitInfo) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        let targets_ref: Vec<&str> = self.targets.iter().map(|s| s.as_str()).collect();
+        let revprop_ref: std::collections::HashMap<&str, &str> = self
+            .revprop_table
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+
+        let changelists_vec = self
+            .changelists
+            .as_ref()
+            .map(|cl| cl.iter().map(|s| s.as_str()).collect::<Vec<_>>());
+        let options = CommitOptions {
+            depth: self.depth,
+            keep_locks: self.keep_locks,
+            keep_changelists: self.keep_changelists,
+            commit_as_operations: self.commit_as_operations,
+            include_file_externals: self.include_file_externals,
+            include_dir_externals: self.include_dir_externals,
+            changelists: changelists_vec.as_deref(),
+        };
+
+        self.ctx
+            .commit(&targets_ref, &options, revprop_ref, commit_callback)
+    }
+}
+
+/// Builder for log operations
+pub struct LogBuilder<'a> {
+    ctx: &'a mut Context,
+    targets: Vec<String>,
+    peg_revision: Revision,
+    revision_ranges: Vec<RevisionRange>,
+    limit: i32,
+    discover_changed_paths: bool,
+    strict_node_history: bool,
+    include_merged_revisions: bool,
+    revprops: Vec<String>,
+}
+
+impl<'a> LogBuilder<'a> {
+    pub fn new(ctx: &'a mut Context) -> Self {
+        Self {
+            ctx,
+            targets: Vec::new(),
+            peg_revision: Revision::Head,
+            revision_ranges: vec![RevisionRange::new(
+                Revision::Number(Revnum(1)),
+                Revision::Head,
+            )],
+            limit: 0, // no limit
+            discover_changed_paths: false,
+            strict_node_history: true,
+            include_merged_revisions: false,
+            revprops: Vec::new(),
+        }
+    }
+
+    pub fn add_target(mut self, target: impl Into<String>) -> Self {
+        self.targets.push(target.into());
+        self
+    }
+
+    pub fn targets(mut self, targets: Vec<String>) -> Self {
+        self.targets = targets;
+        self
+    }
+
+    pub fn peg_revision(mut self, rev: Revision) -> Self {
+        self.peg_revision = rev;
+        self
+    }
+
+    pub fn add_revision_range(mut self, start: Revision, end: Revision) -> Self {
+        self.revision_ranges.push(RevisionRange::new(start, end));
+        self
+    }
+
+    pub fn revision_ranges(mut self, ranges: Vec<RevisionRange>) -> Self {
+        self.revision_ranges = ranges;
+        self
+    }
+
+    pub fn limit(mut self, limit: i32) -> Self {
+        self.limit = limit;
+        self
+    }
+
+    pub fn discover_changed_paths(mut self, discover: bool) -> Self {
+        self.discover_changed_paths = discover;
+        self
+    }
+
+    pub fn strict_node_history(mut self, strict: bool) -> Self {
+        self.strict_node_history = strict;
+        self
+    }
+
+    pub fn include_merged_revisions(mut self, include: bool) -> Self {
+        self.include_merged_revisions = include;
+        self
+    }
+
+    pub fn add_revprop(mut self, prop: impl Into<String>) -> Self {
+        self.revprops.push(prop.into());
+        self
+    }
+
+    pub fn revprops(mut self, props: Vec<String>) -> Self {
+        self.revprops = props;
+        self
+    }
+
+    pub fn execute(
+        self,
+        log_entry_receiver: &dyn FnMut(&LogEntry) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        let targets_ref: Vec<&str> = self.targets.iter().map(|s| s.as_str()).collect();
+        let revprops_ref: Vec<&str> = self.revprops.iter().map(|s| s.as_str()).collect();
+
+        self.ctx.log(
+            &targets_ref,
+            self.peg_revision,
+            &self.revision_ranges,
+            self.limit,
+            self.discover_changed_paths,
+            self.strict_node_history,
+            self.include_merged_revisions,
+            &revprops_ref,
+            log_entry_receiver,
+        )
+    }
+}
+
+/// Builder for update operations
+pub struct UpdateBuilder<'a> {
+    ctx: &'a mut Context,
+    paths: Vec<String>,
+    revision: Revision,
+    depth: Depth,
+    depth_is_sticky: bool,
+    ignore_externals: bool,
+    allow_unver_obstructions: bool,
+    adds_as_modifications: bool,
+    make_parents: bool,
+}
+
+impl<'a> UpdateBuilder<'a> {
+    pub fn new(ctx: &'a mut Context) -> Self {
+        Self {
+            ctx,
+            paths: Vec::new(),
+            revision: Revision::Head,
+            depth: Depth::Infinity,
+            depth_is_sticky: false,
+            ignore_externals: false,
+            allow_unver_obstructions: false,
+            adds_as_modifications: false,
+            make_parents: false,
+        }
+    }
+
+    pub fn add_path(mut self, path: impl Into<String>) -> Self {
+        self.paths.push(path.into());
+        self
+    }
+
+    pub fn paths(mut self, paths: Vec<String>) -> Self {
+        self.paths = paths;
+        self
+    }
+
+    pub fn revision(mut self, rev: Revision) -> Self {
+        self.revision = rev;
+        self
+    }
+
+    pub fn depth(mut self, depth: Depth) -> Self {
+        self.depth = depth;
+        self
+    }
+
+    pub fn depth_is_sticky(mut self, sticky: bool) -> Self {
+        self.depth_is_sticky = sticky;
+        self
+    }
+
+    pub fn ignore_externals(mut self, ignore: bool) -> Self {
+        self.ignore_externals = ignore;
+        self
+    }
+
+    pub fn allow_unver_obstructions(mut self, allow: bool) -> Self {
+        self.allow_unver_obstructions = allow;
+        self
+    }
+
+    pub fn adds_as_modification(mut self, as_mod: bool) -> Self {
+        self.adds_as_modifications = as_mod;
+        self
+    }
+
+    pub fn make_parents(mut self, make: bool) -> Self {
+        self.make_parents = make;
+        self
+    }
+
+    pub fn execute(self) -> Result<Vec<Revnum>, Error> {
+        let paths_ref: Vec<&str> = self.paths.iter().map(|s| s.as_str()).collect();
+        let options = UpdateOptions {
+            depth: self.depth,
+            depth_is_sticky: self.depth_is_sticky,
+            ignore_externals: self.ignore_externals,
+            allow_unver_obstructions: self.allow_unver_obstructions,
+            adds_as_modifications: self.adds_as_modifications,
+            make_parents: self.make_parents,
+        };
+
+        self.ctx.update(&paths_ref, self.revision, &options)
+    }
+}
+
+/// Builder for mkdir operations
+pub struct MkdirBuilder<'a> {
+    ctx: &'a mut Context,
+    paths: Vec<String>,
+    make_parents: bool,
+    revprop_table: std::collections::HashMap<String, Vec<u8>>,
+}
+
+impl<'a> MkdirBuilder<'a> {
+    pub fn new(ctx: &'a mut Context) -> Self {
+        Self {
+            ctx,
+            paths: Vec::new(),
+            make_parents: false,
+            revprop_table: std::collections::HashMap::new(),
+        }
+    }
+
+    pub fn add_path(mut self, path: impl Into<String>) -> Self {
+        self.paths.push(path.into());
+        self
+    }
+
+    pub fn paths(mut self, paths: Vec<String>) -> Self {
+        self.paths = paths;
+        self
+    }
+
+    pub fn make_parents(mut self, make: bool) -> Self {
+        self.make_parents = make;
+        self
+    }
+
+    pub fn add_revprop(mut self, name: impl Into<String>, value: Vec<u8>) -> Self {
+        self.revprop_table.insert(name.into(), value);
+        self
+    }
+
+    pub fn revprops(mut self, props: std::collections::HashMap<String, Vec<u8>>) -> Self {
+        self.revprop_table = props;
+        self
+    }
+
+    pub fn execute(
+        self,
+        commit_callback: &dyn FnMut(&crate::CommitInfo) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        let paths_ref: Vec<&str> = self.paths.iter().map(|s| s.as_str()).collect();
+        let revprop_ref: std::collections::HashMap<&str, &[u8]> = self
+            .revprop_table
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_slice()))
+            .collect();
+
+        self.ctx
+            .mkdir(&paths_ref, self.make_parents, revprop_ref, commit_callback)
+    }
+}
+
 impl Context {
     /// Create a builder for diff operations
     pub fn diff_builder<'a>(
@@ -2120,6 +2497,26 @@ impl Context {
     /// Create a builder for info operations
     pub fn info_builder<'a>(&'a mut self, abspath_or_url: impl Into<String>) -> InfoBuilder<'a> {
         InfoBuilder::new(self, abspath_or_url)
+    }
+
+    /// Create a builder for commit operations
+    pub fn commit_builder<'a>(&'a mut self) -> CommitBuilder<'a> {
+        CommitBuilder::new(self)
+    }
+
+    /// Create a builder for log operations
+    pub fn log_builder<'a>(&'a mut self) -> LogBuilder<'a> {
+        LogBuilder::new(self)
+    }
+
+    /// Create a builder for update operations
+    pub fn update_builder<'a>(&'a mut self) -> UpdateBuilder<'a> {
+        UpdateBuilder::new(self)
+    }
+
+    /// Create a builder for mkdir operations
+    pub fn mkdir_builder<'a>(&'a mut self) -> MkdirBuilder<'a> {
+        MkdirBuilder::new(self)
     }
 }
 
@@ -2222,8 +2619,13 @@ impl Status {
         unsafe { (*self.0).file_external != 0 }
     }
 
-    pub fn lock(&self) -> Option<&crate::Lock> {
-        todo!()
+    pub fn lock(&self) -> Option<crate::Lock> {
+        let lock_ptr = unsafe { (*self.0).lock };
+        if lock_ptr.is_null() {
+            None
+        } else {
+            Some(crate::Lock::from_raw(lock_ptr))
+        }
     }
 
     pub fn changelist(&self) -> Option<&str> {
@@ -2261,7 +2663,12 @@ impl Status {
     }
 
     pub fn repos_lock(&self) -> Option<crate::Lock> {
-        todo!()
+        let lock_ptr = unsafe { (*self.0).repos_lock };
+        if lock_ptr.is_null() {
+            None
+        } else {
+            Some(crate::Lock::from_raw(lock_ptr))
+        }
     }
 
     pub fn ood_changed_rev(&self) -> Option<Revnum> {
@@ -2325,6 +2732,20 @@ impl Drop for Conflict {
 }
 
 impl Conflict {
+    /// Get a reference to the underlying pool
+    pub fn pool(&self) -> &apr::Pool {
+        &self.pool
+    }
+
+    /// Get the raw pointer to the conflict (use with caution)
+    pub fn as_ptr(&self) -> *const subversion_sys::svn_client_conflict_t {
+        self.ptr
+    }
+
+    /// Get the mutable raw pointer to the conflict (use with caution)
+    pub fn as_mut_ptr(&mut self) -> *mut subversion_sys::svn_client_conflict_t {
+        self.ptr
+    }
     pub(crate) unsafe fn from_ptr_and_pool(
         ptr: *mut subversion_sys::svn_client_conflict_t,
         pool: apr::Pool,
@@ -2427,8 +2848,17 @@ mod tests {
         // Create a test file
         let test_file = wc_path.join("test.txt");
         std::fs::write(&test_file, "test content").unwrap();
-        ctx.add(&test_file, Depth::Empty, false, false, false)
-            .unwrap();
+        ctx.add(
+            &test_file,
+            &AddOptions {
+                depth: Depth::Empty,
+                force: false,
+                no_ignore: false,
+                no_autoprops: false,
+                add_parents: false,
+            },
+        )
+        .unwrap();
 
         // Test copy operation (would need a commit first in real scenario)
         let copy_result = ctx.copy(
@@ -2520,8 +2950,17 @@ mod tests {
         // Create a test file
         let test_file = wc_path.join("test.txt");
         std::fs::write(&test_file, "test content").unwrap();
-        ctx.add(&test_file, Depth::Empty, false, false, false)
-            .unwrap();
+        ctx.add(
+            &test_file,
+            &AddOptions {
+                depth: Depth::Empty,
+                force: false,
+                no_ignore: false,
+                no_autoprops: false,
+                add_parents: false,
+            },
+        )
+        .unwrap();
 
         // Test setting a property
         let propset_result = ctx.propset(
@@ -2529,9 +2968,9 @@ mod tests {
             Some(b"test value"),
             test_file.to_str().unwrap(),
             Depth::Empty,
-            false, // skip_checks
-            Revnum::INVALID,
-            None, // changelists
+            false,      // skip_checks
+            Revnum(-1), // INVALID
+            None,       // changelists
         );
 
         // Setting properties should work on added files
@@ -2619,7 +3058,7 @@ mod tests {
         let url = crate::uri::Uri::from_str(&url_str, &pool);
 
         ctx.checkout(
-            url.clone(),
+            crate::uri::Uri::from_str(&url.to_string(), &pool),
             &wc_path,
             &CheckoutOptions {
                 peg_revision: Revision::Head,
@@ -2638,9 +3077,9 @@ mod tests {
         // Test diff between repository revisions using direct function
         let diff_result = ctx.diff(
             &[], // diff_options
-            url.as_str(),
+            &url.to_string(),
             &Revision::Head,
-            url.as_str(),
+            &url.to_string(),
             &Revision::Head,
             None, // relative_to_dir
             Depth::Infinity,
@@ -2678,7 +3117,7 @@ mod tests {
         let url = crate::uri::Uri::from_str(&url_str, &pool);
 
         ctx.checkout(
-            url.clone(),
+            crate::uri::Uri::from_str(&url.to_string(), &pool),
             &wc_path,
             &CheckoutOptions {
                 peg_revision: Revision::Head,
@@ -2696,7 +3135,12 @@ mod tests {
 
         // Test diff using builder pattern - much cleaner!
         let result = ctx
-            .diff_builder(url.as_str(), Revision::Head, url.as_str(), Revision::Head)
+            .diff_builder(
+                &url.to_string(),
+                Revision::Head,
+                &url.to_string(),
+                Revision::Head,
+            )
             .depth(Depth::Infinity)
             .ignore_ancestry(true)
             .use_git_diff_format(true)
@@ -2799,8 +3243,17 @@ mod tests {
         // Create a test file
         let test_file = wc_path.join("test.txt");
         std::fs::write(&test_file, "test content").unwrap();
-        ctx.add(&test_file, Depth::Empty, false, false, false)
-            .unwrap();
+        ctx.add(
+            &test_file,
+            &AddOptions {
+                depth: Depth::Empty,
+                force: false,
+                no_ignore: false,
+                no_autoprops: false,
+                add_parents: false,
+            },
+        )
+        .unwrap();
 
         // Test copy using builder pattern
         let result = ctx
@@ -2876,5 +3329,220 @@ mod tests {
 
         // Should succeed even with no conflicts
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_commit_builder() {
+        let td = tempfile::tempdir().unwrap();
+        let repo_path = td.path().join("repo");
+        let wc_path = td.path().join("wc");
+
+        // Create a test repository
+        crate::repos::Repos::create(&repo_path).unwrap();
+
+        // Check out working copy
+        let mut ctx = Context::new().unwrap();
+        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        let pool = apr::Pool::new();
+        let url = crate::uri::Uri::from_str(&url_str, &pool);
+
+        ctx.checkout(
+            url,
+            &wc_path,
+            &CheckoutOptions {
+                peg_revision: Revision::Head,
+                revision: Revision::Head,
+                depth: Depth::Infinity,
+                ignore_externals: false,
+                allow_unver_obstructions: false,
+            },
+        )
+        .unwrap();
+
+        // Create and add a test file
+        let test_file = wc_path.join("test.txt");
+        std::fs::write(&test_file, "test content").unwrap();
+        ctx.add(
+            &test_file,
+            &AddOptions {
+                depth: Depth::Empty,
+                force: false,
+                no_ignore: false,
+                no_autoprops: false,
+                add_parents: false,
+            },
+        )
+        .unwrap();
+
+        // Test commit using builder pattern
+        let result = ctx
+            .commit_builder()
+            .add_target(wc_path.to_str().unwrap())
+            .add_revprop("svn:log", "Test commit using builder")
+            .depth(Depth::Infinity)
+            .keep_locks(false)
+            .keep_changelists(false)
+            .commit_as_operations(false)
+            .execute(&|_info| Ok(()));
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_log_builder() {
+        let td = tempfile::tempdir().unwrap();
+        let repo_path = td.path().join("repo");
+        let wc_path = td.path().join("wc");
+
+        // Create a test repository
+        crate::repos::Repos::create(&repo_path).unwrap();
+
+        // Check out working copy and make a commit
+        let mut ctx = Context::new().unwrap();
+        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        let pool = apr::Pool::new();
+        let url = crate::uri::Uri::from_str(&url_str, &pool);
+
+        ctx.checkout(
+            url,
+            &wc_path,
+            &CheckoutOptions {
+                peg_revision: Revision::Head,
+                revision: Revision::Head,
+                depth: Depth::Infinity,
+                ignore_externals: false,
+                allow_unver_obstructions: false,
+            },
+        )
+        .unwrap();
+
+        let test_file = wc_path.join("test.txt");
+        std::fs::write(&test_file, "test content").unwrap();
+        ctx.add(
+            &test_file,
+            &AddOptions {
+                depth: Depth::Empty,
+                force: false,
+                no_ignore: false,
+                no_autoprops: false,
+                add_parents: false,
+            },
+        )
+        .unwrap();
+        ctx.commit(
+            &[wc_path.to_str().unwrap()],
+            &CommitOptions {
+                depth: Depth::Infinity,
+                keep_locks: false,
+                keep_changelists: false,
+                commit_as_operations: false,
+                include_file_externals: false,
+                include_dir_externals: false,
+                changelists: None,
+            },
+            [("svn:log", "Initial commit")].iter().cloned().collect(),
+            &|_info| Ok(()),
+        )
+        .unwrap();
+
+        // Test log using builder pattern
+        let mut log_entries = Vec::new();
+        let result = ctx
+            .log_builder()
+            .add_target(url_str)
+            .add_revision_range(Revision::Number(Revnum(1)), Revision::Head)
+            .discover_changed_paths(true)
+            .strict_node_history(false)
+            .include_merged_revisions(false)
+            .execute(&|_entry| {
+                log_entries.push(());
+                Ok(())
+            });
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_update_builder() {
+        let td = tempfile::tempdir().unwrap();
+        let repo_path = td.path().join("repo");
+        let wc_path = td.path().join("wc");
+
+        // Create a test repository
+        crate::repos::Repos::create(&repo_path).unwrap();
+
+        // Check out working copy
+        let mut ctx = Context::new().unwrap();
+        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        let pool = apr::Pool::new();
+        let url = crate::uri::Uri::from_str(&url_str, &pool);
+
+        ctx.checkout(
+            url,
+            &wc_path,
+            &CheckoutOptions {
+                peg_revision: Revision::Head,
+                revision: Revision::Head,
+                depth: Depth::Infinity,
+                ignore_externals: false,
+                allow_unver_obstructions: false,
+            },
+        )
+        .unwrap();
+
+        // Test update using builder pattern
+        let result = ctx
+            .update_builder()
+            .add_path(wc_path.to_str().unwrap())
+            .revision(Revision::Head)
+            .depth(Depth::Infinity)
+            .depth_is_sticky(false)
+            .ignore_externals(false)
+            .allow_unver_obstructions(false)
+            .adds_as_modification(false)
+            .make_parents(false)
+            .execute();
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_mkdir_builder() {
+        let td = tempfile::tempdir().unwrap();
+        let repo_path = td.path().join("repo");
+        let wc_path = td.path().join("wc");
+
+        // Create a test repository
+        crate::repos::Repos::create(&repo_path).unwrap();
+
+        // Check out working copy
+        let mut ctx = Context::new().unwrap();
+        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        let pool = apr::Pool::new();
+        let url = crate::uri::Uri::from_str(&url_str, &pool);
+
+        ctx.checkout(
+            url,
+            &wc_path,
+            &CheckoutOptions {
+                peg_revision: Revision::Head,
+                revision: Revision::Head,
+                depth: Depth::Infinity,
+                ignore_externals: false,
+                allow_unver_obstructions: false,
+            },
+        )
+        .unwrap();
+
+        // Test mkdir using builder pattern
+        let new_dir = wc_path.join("new_dir");
+        let result = ctx
+            .mkdir_builder()
+            .add_path(new_dir.to_str().unwrap())
+            .make_parents(true)
+            .execute(&|_info| Ok(()));
+
+        assert!(result.is_ok());
+        assert!(new_dir.exists());
     }
 }
