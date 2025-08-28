@@ -16,6 +16,8 @@ pub mod auth;
 #[cfg(feature = "client")]
 pub mod client;
 pub mod config;
+#[cfg(feature = "client")]
+pub mod conflict;
 #[cfg(feature = "delta")]
 pub mod delta;
 pub mod dirent;
