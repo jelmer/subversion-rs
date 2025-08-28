@@ -44,7 +44,7 @@ impl<'pool> BStr<'pool> {
     /// Get bytes as slice
     pub fn as_bytes(&self) -> &[u8] {
         let ptr = unsafe { (*self.ptr).data };
-        let len = unsafe { (*self.ptr).len as usize };
+        let len = unsafe { (*self.ptr).len };
         unsafe { std::slice::from_raw_parts(ptr as *const u8, len) }
     }
 
@@ -115,7 +115,7 @@ mod tests {
         let pool = apr::Pool::new();
         let empty = BStr::from_bytes(b"", &pool);
         assert!(empty.as_bytes().is_empty());
-        
+
         let non_empty = BStr::from_bytes(b"data", &pool);
         assert!(!non_empty.as_bytes().is_empty());
     }

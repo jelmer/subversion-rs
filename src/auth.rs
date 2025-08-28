@@ -786,12 +786,8 @@ mod tests {
     #[test]
     fn test_simple_credentials_creation() {
         let pool = apr::Pool::new();
-        let creds = SimpleCredentials::new(
-            "testuser".to_string(),
-            "testpass".to_string(),
-            true,
-            &pool,
-        );
+        let creds =
+            SimpleCredentials::new("testuser".to_string(), "testpass".to_string(), true, &pool);
         assert_eq!(creds.username(), "testuser");
         assert_eq!(creds.password(), "testpass");
         assert!(creds.may_save());
@@ -800,12 +796,8 @@ mod tests {
     #[test]
     fn test_simple_credentials_set_username() {
         let pool = apr::Pool::new();
-        let mut creds = SimpleCredentials::new(
-            "olduser".to_string(),
-            "pass".to_string(),
-            false,
-            &pool,
-        );
+        let mut creds =
+            SimpleCredentials::new("olduser".to_string(), "pass".to_string(), false, &pool);
         creds.set_username("newuser", &pool);
         assert_eq!(creds.username(), "newuser");
         assert!(!creds.may_save());
@@ -822,15 +814,15 @@ mod tests {
         // Test username provider
         let username_provider = get_username_provider();
         assert!(!username_provider.ptr.is_null());
-        
+
         // Test simple provider
         let simple_provider = get_simple_provider(None::<&fn(&str) -> Result<bool, Error>>);
         assert!(!simple_provider.ptr.is_null());
-        
+
         // Test SSL providers
         let ssl_trust_provider = get_ssl_server_trust_file_provider();
         assert!(!ssl_trust_provider.ptr.is_null());
-        
+
         let ssl_cert_provider = get_ssl_client_cert_file_provider();
         assert!(!ssl_cert_provider.ptr.is_null());
     }
@@ -848,7 +840,7 @@ mod tests {
             get_username_provider(),
             get_simple_provider(None::<&fn(&str) -> Result<bool, Error>>),
         ];
-        
+
         let baton = AuthBaton::open(&providers);
         assert!(baton.is_ok());
     }
@@ -857,7 +849,7 @@ mod tests {
     fn test_auth_baton_parameter_safety() {
         let providers = vec![get_username_provider()];
         let mut baton = AuthBaton::open(&providers).unwrap();
-        
+
         // Test setting and getting a parameter
         let test_key = "test_param";
         let test_value = "test_value\0";
@@ -903,22 +895,24 @@ mod tests {
     fn test_simple_prompt_provider() {
         // Note: This test can only verify the provider is created, not actually used
         // due to lifetime constraints with the pool in the callback
-        let prompt_fn = |_realm: &str, _username: Option<&str>, _may_save: bool| -> Result<SimpleCredentials, Error> {
+        let prompt_fn = |_realm: &str,
+                         _username: Option<&str>,
+                         _may_save: bool|
+         -> Result<SimpleCredentials, Error> {
             // This would need a pool with appropriate lifetime
             // For testing, we just create a minimal failing response
             Err(Error::from_str("Not implemented"))
         };
-        
+
         let provider = get_simple_prompt_provider(&prompt_fn, 3);
         assert!(!provider.ptr.is_null());
     }
 
     #[test]
     fn test_username_prompt_provider() {
-        let prompt_fn = |_realm: &str, _may_save: bool| {
-            Ok::<_, Error>("prompted_username".to_string())
-        };
-        
+        let prompt_fn =
+            |_realm: &str, _may_save: bool| Ok::<_, Error>("prompted_username".to_string());
+
         let provider = get_username_prompt_provider(&prompt_fn, 3);
         assert!(!provider.ptr.is_null());
     }
@@ -929,7 +923,8 @@ mod tests {
             let pool = apr::Pool::new();
             let cred: *mut subversion_sys::svn_auth_cred_ssl_client_cert_t = pool.calloc();
             unsafe {
-                (*cred).cert_file = apr::strings::pstrdup_raw("/path/to/cert", &pool).unwrap() as *mut _;
+                (*cred).cert_file =
+                    apr::strings::pstrdup_raw("/path/to/cert", &pool).unwrap() as *mut _;
                 (*cred).may_save = 1;
             }
             Ok::<_, Error>(SslClientCertCredentials {
@@ -938,7 +933,7 @@ mod tests {
                 _phantom: PhantomData,
             })
         };
-        
+
         let provider = get_ssl_client_cert_prompt_provider(&prompt_fn, 3);
         assert!(!provider.ptr.is_null());
     }
@@ -946,15 +941,15 @@ mod tests {
     #[test]
     fn test_auth_provider_as_trait() {
         let provider = get_username_provider();
-        
+
         // Test that AuthProvider implements AsAuthProvider
         let pool = apr::Pool::new();
         let ptr = provider.as_auth_provider(&pool);
         assert!(!ptr.is_null());
         assert_eq!(ptr, provider.ptr);
-        
+
         // Test reference also works
-        let ptr2 = (&provider).as_auth_provider(&pool);
+        let ptr2 = provider.as_auth_provider(&pool);
         assert_eq!(ptr, ptr2);
     }
 }

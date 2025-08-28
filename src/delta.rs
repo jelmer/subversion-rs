@@ -105,7 +105,7 @@ impl<'a, 'pool> DirectoryEditor for WrapDirectoryEditor<'a, 'pool> {
                 } else {
                     std::ptr::null()
                 },
-                copyfrom_rev.into(),
+                copyfrom_rev,
                 pool.as_mut_ptr(),
                 &mut baton,
             );
@@ -197,7 +197,7 @@ impl<'a, 'pool> DirectoryEditor for WrapDirectoryEditor<'a, 'pool> {
                 } else {
                     std::ptr::null()
                 },
-                copyfrom_rev.into(),
+                copyfrom_rev,
                 pool.as_mut_ptr(),
                 &mut baton,
             );
@@ -431,6 +431,12 @@ impl Drop for TxDeltaWindow {
     }
 }
 
+impl Default for TxDeltaWindow {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TxDeltaWindow {
     /// Get a reference to the underlying pool
     pub fn pool(&self) -> &apr::Pool {
@@ -444,7 +450,6 @@ impl TxDeltaWindow {
     pub fn as_ptr(&self) -> *const subversion_sys::svn_txdelta_window_t {
         self.ptr
     }
-
 
     pub fn new() -> Self {
         let pool = apr::Pool::new();
@@ -604,7 +609,7 @@ extern "C" fn wrap_editor_change_dir_prop(
 ) -> *mut subversion_sys::svn_error_t {
     let name = unsafe { std::ffi::CStr::from_ptr(name) };
     let value =
-        unsafe { std::slice::from_raw_parts((*value).data as *const u8, (*value).len as usize) };
+        unsafe { std::slice::from_raw_parts((*value).data as *const u8, (*value).len) };
     let editor: &mut dyn DirectoryEditor = unsafe { *(baton as *mut &mut dyn DirectoryEditor) };
     match editor.change_prop(name.to_str().unwrap(), value) {
         Ok(()) => std::ptr::null_mut(),
@@ -719,7 +724,7 @@ extern "C" fn wrap_editor_change_file_prop(
 ) -> *mut subversion_sys::svn_error_t {
     let name = unsafe { std::ffi::CStr::from_ptr(name) };
     let value =
-        unsafe { std::slice::from_raw_parts((*value).data as *const u8, (*value).len as usize) };
+        unsafe { std::slice::from_raw_parts((*value).data as *const u8, (*value).len) };
     let editor: &mut dyn FileEditor = unsafe { *(baton as *mut &mut dyn FileEditor) };
     match editor.change_prop(name.to_str().unwrap(), value) {
         Ok(()) => std::ptr::null_mut(),

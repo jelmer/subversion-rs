@@ -82,7 +82,7 @@ mod tests {
         // Test creating Mergeinfo from raw pointer and pool
         let pool = apr::Pool::new();
         let ptr = pool.calloc::<svn_mergeinfo_t>();
-        
+
         let mergeinfo = unsafe { Mergeinfo::from_ptr_and_pool(ptr, pool) };
         assert_eq!(mergeinfo.as_ptr(), ptr);
         assert!(!mergeinfo.as_ptr().is_null());
@@ -123,7 +123,9 @@ mod tests {
             subversion_sys::svn_mergeinfo_inheritance_t_svn_mergeinfo_inherited
         );
         assert_eq!(
-            subversion_sys::svn_mergeinfo_inheritance_t::from(MergeinfoInheritance::NearestAncestor),
+            subversion_sys::svn_mergeinfo_inheritance_t::from(
+                MergeinfoInheritance::NearestAncestor
+            ),
             subversion_sys::svn_mergeinfo_inheritance_t_svn_mergeinfo_nearest_ancestor
         );
     }
@@ -136,9 +138,9 @@ mod tests {
             MergeinfoInheritance::Inherited,
             MergeinfoInheritance::NearestAncestor,
         ];
-        
+
         for variant in variants {
-            let svn_val = subversion_sys::svn_mergeinfo_inheritance_t::from(variant.clone());
+            let svn_val = subversion_sys::svn_mergeinfo_inheritance_t::from(variant);
             let back = MergeinfoInheritance::from(svn_val);
             assert_eq!(variant, back);
         }
@@ -149,26 +151,32 @@ mod tests {
         // Test that Mergeinfo can be dropped without panic
         let pool = apr::Pool::new();
         let ptr = pool.calloc::<svn_mergeinfo_t>();
-        
+
         {
             let _mergeinfo = unsafe { Mergeinfo::from_ptr_and_pool(ptr, apr::Pool::new()) };
             // mergeinfo is dropped here
         }
-        
+
         // No panic should occur
     }
 
     #[test]
     fn test_mergeinfo_not_send_not_sync() {
         // Verify that Mergeinfo is !Send and !Sync due to PhantomData<*mut ()>
-        fn assert_not_send<T>() where T: ?Sized {
+        fn assert_not_send<T>()
+        where
+            T: ?Sized,
+        {
             // This function body is empty - the check happens at compile time
         }
-        
-        fn assert_not_sync<T>() where T: ?Sized {
+
+        fn assert_not_sync<T>()
+        where
+            T: ?Sized,
+        {
             // This function body is empty - the check happens at compile time
         }
-        
+
         // These will compile only if Mergeinfo is !Send and !Sync
         assert_not_send::<Mergeinfo>();
         assert_not_sync::<Mergeinfo>();
@@ -178,7 +186,7 @@ mod tests {
     fn test_mergeinfo_as_mut_ptr() {
         let pool = apr::Pool::new();
         let ptr = pool.calloc::<svn_mergeinfo_t>();
-        
+
         let mut mergeinfo = unsafe { Mergeinfo::from_ptr_and_pool(ptr, pool) };
         let mut_ptr = mergeinfo.as_mut_ptr();
         assert_eq!(mut_ptr, ptr);

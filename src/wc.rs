@@ -81,8 +81,6 @@ impl Context {
         }
     }
 
-
-
     pub fn check_wc(&mut self, path: &str) -> Result<i32, crate::Error> {
         let path = std::ffi::CString::new(path).unwrap();
         let mut wc_format = 0;
@@ -229,7 +227,7 @@ pub fn text_modified(path: &std::path::Path, force_comparison: bool) -> Result<b
     let path_str = path.to_string_lossy();
     let path_cstr = std::ffi::CString::new(path_str.as_ref()).unwrap();
     let mut modified = 0;
-    
+
     with_tmp_pool(|pool| -> Result<(), crate::Error> {
         let mut ctx = std::ptr::null_mut();
         with_tmp_pool(|scratch_pool| {
@@ -243,7 +241,7 @@ pub fn text_modified(path: &std::path::Path, force_comparison: bool) -> Result<b
             };
             svn_result(err)
         })?;
-        
+
         let err = unsafe {
             subversion_sys::svn_wc_text_modified_p2(
                 &mut modified,
@@ -256,7 +254,7 @@ pub fn text_modified(path: &std::path::Path, force_comparison: bool) -> Result<b
         Error::from_raw(err)?;
         Ok(())
     })?;
-    
+
     Ok(modified != 0)
 }
 
@@ -265,7 +263,7 @@ pub fn props_modified(path: &std::path::Path) -> Result<bool, crate::Error> {
     let path_str = path.to_string_lossy();
     let path_cstr = std::ffi::CString::new(path_str.as_ref()).unwrap();
     let mut modified = 0;
-    
+
     with_tmp_pool(|pool| -> Result<(), crate::Error> {
         let mut ctx = std::ptr::null_mut();
         with_tmp_pool(|scratch_pool| {
@@ -279,7 +277,7 @@ pub fn props_modified(path: &std::path::Path) -> Result<bool, crate::Error> {
             };
             svn_result(err)
         })?;
-        
+
         let err = unsafe {
             subversion_sys::svn_wc_props_modified_p2(
                 &mut modified,
@@ -291,18 +289,16 @@ pub fn props_modified(path: &std::path::Path) -> Result<bool, crate::Error> {
         Error::from_raw(err)?;
         Ok(())
     })?;
-    
+
     Ok(modified != 0)
 }
-
 
 /// Check if directory name is an administrative directory
 pub fn is_adm_dir(name: &str) -> bool {
     let name_cstr = std::ffi::CString::new(name).unwrap();
     let pool = apr::Pool::new();
-    let result = unsafe {
-        subversion_sys::svn_wc_is_adm_dir(name_cstr.as_ptr(), pool.as_mut_ptr())
-    };
+    let result =
+        unsafe { subversion_sys::svn_wc_is_adm_dir(name_cstr.as_ptr(), pool.as_mut_ptr()) };
     result != 0
 }
 
@@ -311,7 +307,7 @@ pub fn check_wc(path: &std::path::Path) -> Result<Option<i32>, crate::Error> {
     let path_str = path.to_string_lossy();
     let path_cstr = std::ffi::CString::new(path_str.as_ref()).unwrap();
     let mut wc_format = 0;
-    
+
     with_tmp_pool(|pool| -> Result<(), crate::Error> {
         let mut ctx = std::ptr::null_mut();
         with_tmp_pool(|scratch_pool| {
@@ -325,7 +321,7 @@ pub fn check_wc(path: &std::path::Path) -> Result<Option<i32>, crate::Error> {
             };
             svn_result(err)
         })?;
-        
+
         let err = unsafe {
             subversion_sys::svn_wc_check_wc2(
                 &mut wc_format,
@@ -337,7 +333,7 @@ pub fn check_wc(path: &std::path::Path) -> Result<Option<i32>, crate::Error> {
         Error::from_raw(err)?;
         Ok(())
     })?;
-    
+
     // Return None if not a working copy (format would be 0)
     if wc_format == 0 {
         Ok(None)
@@ -347,13 +343,19 @@ pub fn check_wc(path: &std::path::Path) -> Result<Option<i32>, crate::Error> {
 }
 
 /// Ensure administrative directory exists
-pub fn ensure_adm(path: &std::path::Path, uuid: &str, url: &str, repos_root: &str, revision: i64) -> Result<(), crate::Error> {
+pub fn ensure_adm(
+    path: &std::path::Path,
+    uuid: &str,
+    url: &str,
+    repos_root: &str,
+    revision: i64,
+) -> Result<(), crate::Error> {
     let path_str = path.to_string_lossy();
     let path_cstr = std::ffi::CString::new(path_str.as_ref()).unwrap();
     let uuid_cstr = std::ffi::CString::new(uuid).unwrap();
     let url_cstr = std::ffi::CString::new(url).unwrap();
     let repos_root_cstr = std::ffi::CString::new(repos_root).unwrap();
-    
+
     with_tmp_pool(|pool| -> Result<(), crate::Error> {
         let mut ctx = std::ptr::null_mut();
         with_tmp_pool(|scratch_pool| {
@@ -367,7 +369,7 @@ pub fn ensure_adm(path: &std::path::Path, uuid: &str, url: &str, repos_root: &st
             };
             svn_result(err)
         })?;
-        
+
         let err = unsafe {
             subversion_sys::svn_wc_ensure_adm4(
                 ctx,
@@ -385,7 +387,6 @@ pub fn ensure_adm(path: &std::path::Path, uuid: &str, url: &str, repos_root: &st
     })
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -395,7 +396,7 @@ mod tests {
     fn test_context_creation() {
         let context = Context::new();
         assert!(context.is_ok());
-        let mut context = context.unwrap();
+        let context = context.unwrap();
         assert!(!context.ptr.is_null());
     }
 
@@ -406,12 +407,11 @@ mod tests {
         assert_eq!(dir, ".svn");
     }
 
-
     #[test]
     fn test_is_adm_dir() {
         // Test standard admin directory name
         assert!(is_adm_dir(".svn"));
-        
+
         // Test non-admin directory names
         assert!(!is_adm_dir("src"));
         assert!(!is_adm_dir("test"));
@@ -430,7 +430,7 @@ mod tests {
     fn test_check_wc() {
         let dir = tempdir().unwrap();
         let wc_path = dir.path();
-        
+
         // Non-working-copy directory should return None
         let wc_format = check_wc(wc_path);
         assert!(wc_format.is_ok());
@@ -441,23 +441,20 @@ mod tests {
     fn test_ensure_adm() {
         let dir = tempdir().unwrap();
         let wc_path = dir.path();
-        
+
         // Try to ensure admin area
         let result = ensure_adm(
             wc_path,
-            "",  // uuid
-            "file:///test/repo",  // url
-            "file:///test/repo",  // repos
-            0,  // revision
+            "",                  // uuid
+            "file:///test/repo", // url
+            "file:///test/repo", // repos
+            0,                   // revision
         );
-        
+
         // This might fail if the directory already exists or other reasons
         // Just ensure it doesn't panic
         let _ = result;
     }
-
-
-
 
     // Note: Context cannot be Send because it contains raw pointers to C structures
 
@@ -466,7 +463,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("test.txt");
         std::fs::write(&file_path, "test content").unwrap();
-        
+
         // This will fail without a working copy, but shouldn't panic
         let result = text_modified(&file_path, false);
         assert!(result.is_err()); // Expected to fail without WC
@@ -477,7 +474,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("test.txt");
         std::fs::write(&file_path, "test content").unwrap();
-        
+
         // This will fail without a working copy, but shouldn't panic
         let result = props_modified(&file_path);
         assert!(result.is_err()); // Expected to fail without WC

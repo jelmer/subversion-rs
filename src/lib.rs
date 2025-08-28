@@ -762,7 +762,8 @@ pub(crate) extern "C" fn wrap_commit_callback2(
     _pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     unsafe {
-        let callback = &mut *(baton as *mut &mut dyn FnMut(&crate::CommitInfo) -> Result<(), Error>);
+        let callback =
+            &mut *(baton as *mut &mut dyn FnMut(&crate::CommitInfo) -> Result<(), Error>);
         let commit_info = crate::CommitInfo::from_raw(commit_info);
         match callback(&commit_info) {
             Ok(()) => std::ptr::null_mut(),
@@ -814,14 +815,30 @@ pub enum ConflictChoice {
 impl From<ConflictChoice> for subversion_sys::svn_wc_conflict_choice_t {
     fn from(choice: ConflictChoice) -> Self {
         match choice {
-            ConflictChoice::Postpone => subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_postpone,
-            ConflictChoice::Base => subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_base,
-            ConflictChoice::TheirsFull => subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_theirs_full,
-            ConflictChoice::MineFull => subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_mine_full,
-            ConflictChoice::TheirsConflict => subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_theirs_conflict,
-            ConflictChoice::MineConflict => subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_mine_conflict,
-            ConflictChoice::Merged => subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_merged,
-            ConflictChoice::Unspecified => subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_unspecified,
+            ConflictChoice::Postpone => {
+                subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_postpone
+            }
+            ConflictChoice::Base => {
+                subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_base
+            }
+            ConflictChoice::TheirsFull => {
+                subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_theirs_full
+            }
+            ConflictChoice::MineFull => {
+                subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_mine_full
+            }
+            ConflictChoice::TheirsConflict => {
+                subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_theirs_conflict
+            }
+            ConflictChoice::MineConflict => {
+                subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_mine_conflict
+            }
+            ConflictChoice::Merged => {
+                subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_merged
+            }
+            ConflictChoice::Unspecified => {
+                subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_unspecified
+            }
         }
     }
 }
