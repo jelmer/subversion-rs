@@ -211,6 +211,123 @@ mod tests {
             FsPathChangeKind::Replace
         );
     }
+
+    #[test]
+    fn test_checksum_operations() {
+        let pool = apr::Pool::new();
+        let data = b"Hello, World!";
+        
+        // Test creating a checksum
+        let checksum1 = checksum(ChecksumKind::SHA1, data, &pool).unwrap();
+        assert_eq!(checksum1.kind(), ChecksumKind::SHA1);
+        assert!(!checksum1.is_empty());
+        assert_eq!(checksum1.size(), 20); // SHA1 is 20 bytes
+        
+        // Test creating another checksum with same data
+        let checksum2 = Checksum::create(ChecksumKind::SHA1, data, &pool).unwrap();
+        
+        // Test matching checksums
+        assert!(checksum1.matches(&checksum2));
+        
+        // Test different data produces different checksum
+        let checksum3 = checksum(ChecksumKind::SHA1, b"Different data", &pool).unwrap();
+        assert!(!checksum1.matches(&checksum3));
+        
+        // Test empty checksum
+        let empty = Checksum::empty(ChecksumKind::SHA1, &pool).unwrap();
+        assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn test_checksum_serialization() {
+        let pool = apr::Pool::new();
+        let data = b"Test data for serialization";
+        
+        // Create a checksum
+        let checksum1 = checksum(ChecksumKind::MD5, data, &pool).unwrap();
+        
+        // Serialize it
+        let serialized = checksum1.serialize(&pool).unwrap();
+        assert!(!serialized.is_empty());
+        
+        // Deserialize it
+        let checksum2 = Checksum::deserialize(&serialized, &pool).unwrap();
+        
+        // They should match
+        assert!(checksum1.matches(&checksum2));
+    }
+
+    #[test]
+    fn test_checksum_hex_conversion() {
+        let pool = apr::Pool::new();
+        let data = b"Test";
+        
+        // Create a checksum
+        let checksum = checksum(ChecksumKind::MD5, data, &pool).unwrap();
+        
+        // Convert to hex
+        let hex = checksum.to_hex(&pool);
+        assert!(!hex.is_empty());
+        
+        // Parse from hex
+        let checksum2 = Checksum::parse_hex(ChecksumKind::MD5, &hex, &pool).unwrap();
+        
+        // They should match
+        assert!(checksum.matches(&checksum2));
+    }
+
+    #[test]
+    fn test_checksum_context() {
+        let pool = apr::Pool::new();
+        
+        // Create a context
+        let mut ctx = ChecksumContext::new(ChecksumKind::SHA1, &pool).unwrap();
+        
+        // Update with data in chunks
+        ctx.update(b"Hello, ").unwrap();
+        ctx.update(b"World!").unwrap();
+        
+        // Finish and get checksum
+        let checksum1 = ctx.finish(&pool).unwrap();
+        
+        // Compare with single-shot checksum
+        let checksum2 = checksum(ChecksumKind::SHA1, b"Hello, World!", &pool).unwrap();
+        assert!(checksum1.matches(&checksum2));
+    }
+
+    #[test]
+    fn test_checksum_dup() {
+        let pool1 = apr::Pool::new();
+        let pool2 = apr::Pool::new();
+        let data = b"Duplicate me";
+        
+        // Create a checksum (use SHA1 instead of SHA256)
+        let checksum1 = checksum(ChecksumKind::SHA1, data, &pool1).unwrap();
+        
+        // Duplicate to another pool
+        let checksum2 = checksum1.dup(&pool2).unwrap();
+        
+        // They should match
+        assert!(checksum1.matches(&checksum2));
+        assert_eq!(checksum1.kind(), checksum2.kind());
+    }
+
+    #[test]
+    fn test_checksum_has_known_size() {
+        let pool = apr::Pool::new();
+        
+        let md5 = Checksum::empty(ChecksumKind::MD5, &pool).unwrap();
+        assert!(md5.has_known_size(16));
+        assert!(!md5.has_known_size(20));
+        
+        let sha1 = Checksum::empty(ChecksumKind::SHA1, &pool).unwrap();
+        assert!(sha1.has_known_size(20));
+        assert!(!sha1.has_known_size(16));
+        
+        let fnv = Checksum::empty(ChecksumKind::Fnv1a32, &pool).unwrap();
+        assert!(fnv.has_known_size(4));
+        assert!(!fnv.has_known_size(16));
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -813,6 +930,7 @@ impl<'pool> Lock<'pool> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChecksumKind {
     MD5,
     SHA1,
@@ -1019,6 +1137,104 @@ impl<'pool> Checksum<'pool> {
         unsafe {
             let checksum = subversion_sys::svn_checksum_empty_checksum(kind, pool.as_mut_ptr());
             Ok(Self::from_raw(checksum))
+        }
+    }
+
+    /// Create a new checksum from data
+    pub fn create(kind: ChecksumKind, data: &[u8], pool: &'pool apr::Pool) -> Result<Self, Error> {
+        checksum(kind, data, pool)
+    }
+
+    /// Compare two checksums for equality
+    pub fn matches(&self, other: &Checksum) -> bool {
+        unsafe {
+            subversion_sys::svn_checksum_match(self.ptr, other.ptr) != 0
+        }
+    }
+
+    /// Duplicate this checksum into a new pool
+    pub fn dup(&self, pool: &'pool apr::Pool) -> Result<Checksum<'pool>, Error> {
+        unsafe {
+            let new_checksum = subversion_sys::svn_checksum_dup(self.ptr, pool.as_mut_ptr());
+            if new_checksum.is_null() {
+                Err(Error::from_str("Failed to duplicate checksum"))
+            } else {
+                Ok(Checksum::from_raw(new_checksum))
+            }
+        }
+    }
+
+    /// Serialize checksum to a string representation
+    pub fn serialize(&self, pool: &apr::Pool) -> Result<String, Error> {
+        unsafe {
+            let serialized = subversion_sys::svn_checksum_serialize(
+                self.ptr,
+                pool.as_mut_ptr(),
+                pool.as_mut_ptr()
+            );
+            if serialized.is_null() {
+                Err(Error::from_str("Failed to serialize checksum"))
+            } else {
+                let cstr = std::ffi::CStr::from_ptr(serialized);
+                Ok(cstr.to_string_lossy().into_owned())
+            }
+        }
+    }
+
+    /// Deserialize checksum from a string representation
+    pub fn deserialize(data: &str, pool: &'pool apr::Pool) -> Result<Self, Error> {
+        let data_cstr = std::ffi::CString::new(data)?;
+        let mut checksum = std::ptr::null();
+        unsafe {
+            let err = subversion_sys::svn_checksum_deserialize(
+                &mut checksum,
+                data_cstr.as_ptr(),
+                pool.as_mut_ptr(),
+                pool.as_mut_ptr()
+            );
+            Error::from_raw(err)?;
+            if checksum.is_null() {
+                Err(Error::from_str("Failed to deserialize checksum"))
+            } else {
+                Ok(Checksum::from_raw(checksum))
+            }
+        }
+    }
+
+    /// Convert checksum to hexadecimal string
+    pub fn to_hex(&self, pool: &apr::Pool) -> String {
+        unsafe {
+            let hex = subversion_sys::svn_checksum_to_cstring(self.ptr, pool.as_mut_ptr());
+            if hex.is_null() {
+                String::new()
+            } else {
+                let cstr = std::ffi::CStr::from_ptr(hex);
+                cstr.to_string_lossy().into_owned()
+            }
+        }
+    }
+
+    /// Convert checksum for display
+    pub fn to_display(&self, pool: &apr::Pool) -> String {
+        unsafe {
+            let display = subversion_sys::svn_checksum_to_cstring_display(self.ptr, pool.as_mut_ptr());
+            if display.is_null() {
+                String::new()
+            } else {
+                let cstr = std::ffi::CStr::from_ptr(display);
+                cstr.to_string_lossy().into_owned()
+            }
+        }
+    }
+
+    /// Check if this checksum has a known size for its type
+    pub fn has_known_size(&self, size: usize) -> bool {
+        let kind = self.kind();
+        match kind {
+            ChecksumKind::MD5 => size == 16,
+            ChecksumKind::SHA1 => size == 20,
+            ChecksumKind::Fnv1a32 => size == 4,
+            ChecksumKind::Fnv1a32x4 => size == 16,
         }
     }
 }
