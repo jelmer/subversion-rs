@@ -20,6 +20,7 @@ pub mod config;
 pub mod conflict;
 #[cfg(feature = "delta")]
 pub mod delta;
+pub mod diff;
 pub mod dirent;
 pub mod error;
 pub mod fs;
