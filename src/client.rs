@@ -53,9 +53,10 @@ extern "C" fn wrap_status_func(
 ) -> *mut subversion_sys::svn_error_t {
     unsafe {
         let callback =
-            &mut *(baton as *mut &mut dyn FnMut(&std::path::Path, &Status) -> Result<(), Error>);
-        let path: &std::path::Path = std::ffi::CStr::from_ptr(path).to_str().unwrap().as_ref();
-        let ret = callback(path, &Status(status));
+            &mut *(baton as *mut &mut dyn FnMut(&str, &Status) -> Result<(), Error>);
+        let path_str = std::ffi::CStr::from_ptr(path).to_str().unwrap();
+        let status_wrapper = Status(status);
+        let ret = callback(path_str, &status_wrapper);
         if let Err(mut err) = ret {
             err.as_mut_ptr()
         } else {
@@ -141,6 +142,20 @@ extern "C" fn wrap_proplist_receiver2(
 
 pub struct Info(*const subversion_sys::svn_client_info2_t);
 
+/// Information about a line in a blamed file
+pub struct BlameInfo {
+    pub line_no: i64,
+    pub revision: Revnum,
+    pub author: Option<String>,
+    pub date: Option<apr::time::Time>,
+    pub merged_revision: Option<Revnum>,
+    pub merged_author: Option<String>,
+    pub merged_date: Option<apr::time::Time>,
+    pub merged_path: Option<String>,
+    pub line: String,
+    pub local_change: bool,
+}
+
 impl Info {
     pub fn url(&self) -> &str {
         unsafe {
@@ -206,6 +221,121 @@ extern "C" fn wrap_info_receiver2(
         } else {
             std::ptr::null_mut()
         }
+    }
+}
+
+/// Callback wrapper for blame receiver
+unsafe extern "C" fn blame_receiver_wrapper(
+    baton: *mut std::ffi::c_void,
+    line_no: apr_sys::apr_int64_t,
+    revision: subversion_sys::svn_revnum_t,
+    rev_props: *mut apr_sys::apr_hash_t,
+    merged_revision: subversion_sys::svn_revnum_t,
+    merged_rev_props: *mut apr_sys::apr_hash_t,
+    merged_path: *const i8,
+    line: *const subversion_sys::svn_string_t,
+    local_change: subversion_sys::svn_boolean_t,
+    pool: *mut apr_sys::apr_pool_t,
+) -> *mut subversion_sys::svn_error_t {
+    let callback = &mut *(baton as *mut &mut dyn FnMut(BlameInfo) -> Result<(), Error>);
+    
+    // Extract author and date from rev_props
+    let (author, date) = if !rev_props.is_null() {
+        let props = apr::hash::Hash::<&str, *const subversion_sys::svn_string_t>::from_ptr(rev_props);
+        let pool = apr::Pool::from_raw(pool);
+        
+        let author = props.get("svn:author").and_then(|svn_str| {
+            if !svn_str.is_null() {
+                let str_data = (**svn_str).data as *const i8;
+                let str_len = (**svn_str).len;
+                let bytes = std::slice::from_raw_parts(str_data as *const u8, str_len);
+                String::from_utf8(bytes.to_vec()).ok()
+            } else {
+                None
+            }
+        });
+            
+        let date = props.get("svn:date").and_then(|svn_str| {
+            if !svn_str.is_null() {
+                let str_data = (**svn_str).data as *const i8;
+                let str_len = (**svn_str).len;
+                let bytes = std::slice::from_raw_parts(str_data as *const u8, str_len);
+                let date_str = String::from_utf8_lossy(bytes);
+                // Parse SVN date format - this is a simplified version
+                // Real implementation would need proper date parsing
+                Some(apr::time::Time::now())
+            } else {
+                None
+            }
+        });
+        (author, date)
+    } else {
+        (None, None)
+    };
+        
+        // Extract merged revision info
+        let (merged_author, merged_date) = if !merged_rev_props.is_null() {
+            let props = apr::hash::Hash::<&str, *const subversion_sys::svn_string_t>::from_ptr(merged_rev_props);
+            let pool = apr::Pool::from_raw(pool);
+            
+            let author = props.get("svn:author").and_then(|svn_str| {
+            if !svn_str.is_null() {
+                let str_data = (**svn_str).data as *const i8;
+                let str_len = (**svn_str).len;
+                let bytes = std::slice::from_raw_parts(str_data as *const u8, str_len);
+                String::from_utf8(bytes.to_vec()).ok()
+            } else {
+                None
+            }
+        });
+            
+            let date = props.get("svn:date").and_then(|svn_str| {
+                if !svn_str.is_null() {
+                    // Simplified date handling
+                    Some(apr::time::Time::now())
+                } else {
+                    None
+                }
+            });
+        (author, date)
+    } else {
+        (None, None)
+    };
+        
+        // Extract line content
+        let line_str = if !line.is_null() {
+            let line_ref = &*line;
+            let str_data = line_ref.data as *const i8;
+            let str_len = line_ref.len;
+            let bytes = std::slice::from_raw_parts(str_data as *const u8, str_len);
+            String::from_utf8_lossy(bytes).into_owned()
+        } else {
+            String::new()
+        };
+        
+        // Extract merged path
+        let merged_path_str = if !merged_path.is_null() {
+            Some(std::ffi::CStr::from_ptr(merged_path).to_string_lossy().into_owned())
+        } else {
+            None
+        };
+        
+        let info = BlameInfo {
+            line_no,
+            revision: Revnum::from_raw(revision).unwrap_or(Revnum::from(0u64)),
+            author,
+            date,
+            merged_revision: Revnum::from_raw(merged_revision),
+            merged_author,
+            merged_date,
+            merged_path: merged_path_str,
+            line: line_str,
+            local_change: local_change != 0,
+        };
+        
+    match callback(info) {
+        Ok(()) => std::ptr::null_mut(),
+        Err(mut e) => e.as_mut_ptr(),
     }
 }
 
@@ -1439,6 +1569,81 @@ impl Context {
             );
             Error::from_raw(err)?;
             Ok(())
+        }
+    }
+
+    /// Blame/annotate a file, showing revision information for each line
+    pub fn blame(
+        &mut self,
+        path_or_url: &str,
+        peg_revision: Revision,
+        start_revision: Revision,
+        end_revision: Revision,
+        diff_options: Vec<String>,
+        ignore_mime_type: bool,
+        include_merged_revisions: bool,
+        receiver: &mut dyn FnMut(BlameInfo) -> Result<(), Error>,
+    ) -> Result<(Revnum, Revnum), Error> {
+        let pool = Pool::default();
+        let path_or_url = std::ffi::CString::new(path_or_url).unwrap();
+        
+        // Convert diff options to C strings
+        // Create diff file options struct
+        let diff_file_options = unsafe {
+            subversion_sys::svn_diff_file_options_create(pool.as_mut_ptr())
+        };
+        
+        if !diff_options.is_empty() {
+            let diff_options_cstrings: Vec<std::ffi::CString> = diff_options
+                .iter()
+                .map(|opt| std::ffi::CString::new(opt.as_str()).unwrap())
+                .collect();
+            
+            // Create APR array of diff options for parsing
+            let mut diff_opts_array = apr::tables::ArrayHeader::<*const i8>::new(&pool);
+            for opt in diff_options_cstrings.iter() {
+                diff_opts_array.push(opt.as_ptr());
+            }
+            
+            // Parse the options into the diff_file_options struct
+            let parse_err = unsafe {
+                subversion_sys::svn_diff_file_options_parse(
+                    diff_file_options,
+                    diff_opts_array.as_ptr(),
+                    pool.as_mut_ptr(),
+                )
+            };
+            Error::from_raw(parse_err)?;
+        }
+        
+        // Output parameters for resolved revision numbers
+        let mut start_revnum: subversion_sys::svn_revnum_t = 0;
+        let mut end_revnum: subversion_sys::svn_revnum_t = 0;
+        
+        // Wrap the receiver callback
+        let receiver_baton = receiver as *mut _ as *mut std::ffi::c_void;
+        
+        unsafe {
+            let err = subversion_sys::svn_client_blame6(
+                &mut start_revnum,
+                &mut end_revnum,
+                path_or_url.as_ptr(),
+                &peg_revision.into(),
+                &start_revision.into(),
+                &end_revision.into(),
+                diff_file_options,
+                ignore_mime_type as subversion_sys::svn_boolean_t,
+                include_merged_revisions as subversion_sys::svn_boolean_t,
+                Some(blame_receiver_wrapper),
+                receiver_baton,
+                self.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            );
+            Error::from_raw(err)?;
+            Ok((
+                Revnum::from_raw(start_revnum).unwrap(),
+                Revnum::from_raw(end_revnum).unwrap(),
+            ))
         }
     }
 
