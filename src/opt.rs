@@ -35,7 +35,7 @@ pub fn parse_revision(arg: &str) -> Result<(Revision, Revision), Error> {
     }
 }
 
-/// Parse a path@revision string into path and revision components  
+/// Parse a path@revision string into path and revision components
 ///
 /// This function parses strings like "path@123" or "path@HEAD" into
 /// separate path and revision components.
