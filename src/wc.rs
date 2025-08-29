@@ -519,6 +519,235 @@ pub fn match_ignore_list(
     })
 }
 
+/// Get the actual target for a path (anchor/target split)
+pub fn get_actual_target(path: &std::path::Path) -> Result<(String, String), crate::Error> {
+    let path_str = path.to_string_lossy();
+    let path_cstr = std::ffi::CString::new(path_str.as_ref()).unwrap();
+    let mut anchor: *const i8 = std::ptr::null();
+    let mut target: *const i8 = std::ptr::null();
+
+    with_tmp_pool(|pool| -> Result<(), crate::Error> {
+        let mut ctx = std::ptr::null_mut();
+        with_tmp_pool(|scratch_pool| {
+            let err = unsafe {
+                subversion_sys::svn_wc_context_create(
+                    &mut ctx,
+                    std::ptr::null_mut(),
+                    pool.as_mut_ptr(),
+                    scratch_pool.as_mut_ptr(),
+                )
+            };
+            svn_result(err)
+        })?;
+
+        let err = unsafe {
+            subversion_sys::svn_wc_get_actual_target2(
+                &mut anchor,
+                &mut target,
+                ctx,
+                path_cstr.as_ptr(),
+                pool.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        Ok(())
+    })?;
+
+    let anchor_str = if anchor.is_null() {
+        String::new()
+    } else {
+        unsafe { std::ffi::CStr::from_ptr(anchor) }
+            .to_string_lossy()
+            .into_owned()
+    };
+
+    let target_str = if target.is_null() {
+        String::new()
+    } else {
+        unsafe { std::ffi::CStr::from_ptr(target) }
+            .to_string_lossy()
+            .into_owned()
+    };
+
+    Ok((anchor_str, target_str))
+}
+
+/// Get pristine contents of a file
+pub fn get_pristine_contents(path: &std::path::Path) -> Result<Option<crate::io::Stream>, crate::Error> {
+    let path_str = path.to_string_lossy();
+    let path_cstr = std::ffi::CString::new(path_str.as_ref()).unwrap();
+    let mut contents: *mut subversion_sys::svn_stream_t = std::ptr::null_mut();
+
+    with_tmp_pool(|pool| -> Result<(), crate::Error> {
+        let mut ctx = std::ptr::null_mut();
+        with_tmp_pool(|scratch_pool| {
+            let err = unsafe {
+                subversion_sys::svn_wc_context_create(
+                    &mut ctx,
+                    std::ptr::null_mut(),
+                    pool.as_mut_ptr(),
+                    scratch_pool.as_mut_ptr(),
+                )
+            };
+            svn_result(err)
+        })?;
+
+        let err = unsafe {
+            subversion_sys::svn_wc_get_pristine_contents2(
+                &mut contents,
+                ctx,
+                path_cstr.as_ptr(),
+                pool.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        Ok(())
+    })?;
+
+    if contents.is_null() {
+        Ok(None)
+    } else {
+        Ok(Some(unsafe { crate::io::Stream::from_ptr_and_pool(contents, apr::Pool::new()) }))
+    }
+}
+
+/// Get pristine copy path (deprecated - for backwards compatibility)
+pub fn get_pristine_copy_path(path: &std::path::Path) -> Result<std::path::PathBuf, crate::Error> {
+    let path_str = path.to_string_lossy();
+    let path_cstr = std::ffi::CString::new(path_str.as_ref()).unwrap();
+    let mut pristine_path: *const i8 = std::ptr::null();
+
+    with_tmp_pool(|pool| -> Result<(), crate::Error> {
+        let err = unsafe {
+            subversion_sys::svn_wc_get_pristine_copy_path(
+                path_cstr.as_ptr(),
+                &mut pristine_path,
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        Ok(())
+    })?;
+
+    let pristine_path_str = if pristine_path.is_null() {
+        String::new()
+    } else {
+        unsafe { std::ffi::CStr::from_ptr(pristine_path) }
+            .to_string_lossy()
+            .into_owned()
+    };
+
+    Ok(std::path::PathBuf::from(pristine_path_str))
+}
+
+impl Context {
+    /// Get the actual target for a path using this working copy context
+    pub fn get_actual_target(&mut self, path: &str) -> Result<(String, String), crate::Error> {
+        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let mut anchor: *const i8 = std::ptr::null();
+        let mut target: *const i8 = std::ptr::null();
+
+        let pool = apr::Pool::new();
+        let err = unsafe {
+            subversion_sys::svn_wc_get_actual_target2(
+                &mut anchor,
+                &mut target,
+                self.ptr,
+                path_cstr.as_ptr(),
+                pool.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+
+        let anchor_str = if anchor.is_null() {
+            String::new()
+        } else {
+            unsafe { std::ffi::CStr::from_ptr(anchor) }
+                .to_string_lossy()
+                .into_owned()
+        };
+
+        let target_str = if target.is_null() {
+            String::new()
+        } else {
+            unsafe { std::ffi::CStr::from_ptr(target) }
+                .to_string_lossy()
+                .into_owned()
+        };
+
+        Ok((anchor_str, target_str))
+    }
+
+    /// Get pristine contents of a file using this working copy context
+    pub fn get_pristine_contents(&mut self, path: &str) -> Result<Option<crate::io::Stream>, crate::Error> {
+        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let mut contents: *mut subversion_sys::svn_stream_t = std::ptr::null_mut();
+
+        let pool = apr::Pool::new();
+        let err = unsafe {
+            subversion_sys::svn_wc_get_pristine_contents2(
+                &mut contents,
+                self.ptr,
+                path_cstr.as_ptr(),
+                pool.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+
+        if contents.is_null() {
+            Ok(None)
+        } else {
+            Ok(Some(unsafe { crate::io::Stream::from_ptr_and_pool(contents, pool) }))
+        }
+    }
+
+    /// Get pristine properties for a path
+    pub fn get_pristine_props(&mut self, path: &str) -> Result<Option<std::collections::HashMap<String, Vec<u8>>>, crate::Error> {
+        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let mut props: *mut apr_sys::apr_hash_t = std::ptr::null_mut();
+
+        let pool = apr::Pool::new();
+        let err = unsafe {
+            subversion_sys::svn_wc_get_pristine_props(
+                &mut props,
+                self.ptr,
+                path_cstr.as_ptr(),
+                pool.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+
+        if props.is_null() {
+            return Ok(None);
+        }
+
+        let props_hash = unsafe {
+            apr::hash::Hash::<&str, *mut subversion_sys::svn_string_t>::from_ptr(props)
+        };
+
+        let mut result = std::collections::HashMap::new();
+        for (key, svn_str) in props_hash.iter(&pool) {
+            let value = unsafe {
+                let svn_str = *svn_str;
+                if !svn_str.is_null() {
+                    std::slice::from_raw_parts((*svn_str).data as *const u8, (*svn_str).len)
+                        .to_vec()
+                } else {
+                    Vec::new()
+                }
+            };
+            result.insert(String::from_utf8_lossy(key).to_string(), value);
+        }
+
+        Ok(Some(result))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
