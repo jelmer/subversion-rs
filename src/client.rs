@@ -342,123 +342,372 @@ unsafe extern "C" fn blame_receiver_wrapper(
 /// Options for cat
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CatOptions {
-    revision: Revision,
-    peg_revision: Revision,
-    expand_keywords: bool,
+    pub revision: Revision,
+    pub peg_revision: Revision,
+    pub expand_keywords: bool,
 }
 
 /// Options for cleanup
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CleanupOptions {
-    break_locks: bool,
-    fix_recorded_timestamps: bool,
-    clear_dav_cache: bool,
-    vacuum_pristines: bool,
-    include_externals: bool,
+    pub break_locks: bool,
+    pub fix_recorded_timestamps: bool,
+    pub clear_dav_cache: bool,
+    pub vacuum_pristines: bool,
+    pub include_externals: bool,
 }
 
 /// Options for proplist
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ProplistOptions<'a> {
-    peg_revision: Revision,
-    revision: Revision,
-    depth: Depth,
-    changelists: Option<&'a [&'a str]>,
-    get_target_inherited_props: bool,
+    pub peg_revision: Revision,
+    pub revision: Revision,
+    pub depth: Depth,
+    pub changelists: Option<&'a [&'a str]>,
+    pub get_target_inherited_props: bool,
 }
 
 /// Options for export
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ExportOptions {
-    peg_revision: Revision,
-    revision: Revision,
-    overwrite: bool,
-    ignore_externals: bool,
-    ignore_keywords: bool,
-    depth: Depth,
-    native_eol: crate::NativeEOL,
+    pub peg_revision: Revision,
+    pub revision: Revision,
+    pub overwrite: bool,
+    pub ignore_externals: bool,
+    pub ignore_keywords: bool,
+    pub depth: Depth,
+    pub native_eol: crate::NativeEOL,
 }
 
 /// Options for vacuum
 #[derive(Debug, Clone, Copy, Default)]
 pub struct VacuumOptions {
-    remove_unversioned_items: bool,
-    remove_ignored_items: bool,
-    fix_recorded_timestamps: bool,
-    vacuum_pristines: bool,
-    include_externals: bool,
+    pub remove_unversioned_items: bool,
+    pub remove_ignored_items: bool,
+    pub fix_recorded_timestamps: bool,
+    pub vacuum_pristines: bool,
+    pub include_externals: bool,
 }
 
 /// Options for a checkout
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CheckoutOptions {
-    peg_revision: Revision,
-    revision: Revision,
-    depth: Depth,
-    ignore_externals: bool,
-    allow_unver_obstructions: bool,
+    pub peg_revision: Revision,
+    pub revision: Revision,
+    pub depth: Depth,
+    pub ignore_externals: bool,
+    pub allow_unver_obstructions: bool,
 }
 
 /// Options for an update
 #[derive(Debug, Clone, Copy, Default)]
 pub struct UpdateOptions {
-    depth: Depth,
-    depth_is_sticky: bool,
-    ignore_externals: bool,
-    allow_unver_obstructions: bool,
-    adds_as_modifications: bool,
-    make_parents: bool,
+    pub depth: Depth,
+    pub depth_is_sticky: bool,
+    pub ignore_externals: bool,
+    pub allow_unver_obstructions: bool,
+    pub adds_as_modifications: bool,
+    pub make_parents: bool,
 }
 
 /// Options for a switch
+#[derive(Debug, Clone, Copy)]
 pub struct SwitchOptions {
-    peg_revision: Revision,
-    revision: Revision,
-    depth: Depth,
-    depth_is_sticky: bool,
-    ignore_externals: bool,
-    allow_unver_obstructions: bool,
-    make_parents: bool,
+    pub peg_revision: Revision,
+    pub revision: Revision,
+    pub depth: Depth,
+    pub depth_is_sticky: bool,
+    pub ignore_externals: bool,
+    pub allow_unver_obstructions: bool,
+    pub make_parents: bool,
+}
+
+impl Default for SwitchOptions {
+    fn default() -> Self {
+        Self {
+            peg_revision: Revision::Unspecified,
+            revision: Revision::Head,
+            depth: Depth::Infinity,
+            depth_is_sticky: false,
+            ignore_externals: false,
+            allow_unver_obstructions: false,
+            make_parents: false,
+        }
+    }
+}
+
+impl SwitchOptions {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_peg_revision(mut self, peg_revision: Revision) -> Self {
+        self.peg_revision = peg_revision;
+        self
+    }
+
+    pub fn with_revision(mut self, revision: Revision) -> Self {
+        self.revision = revision;
+        self
+    }
+
+    pub fn with_depth(mut self, depth: Depth) -> Self {
+        self.depth = depth;
+        self
+    }
+
+    pub fn with_depth_is_sticky(mut self, depth_is_sticky: bool) -> Self {
+        self.depth_is_sticky = depth_is_sticky;
+        self
+    }
+
+    pub fn with_ignore_externals(mut self, ignore_externals: bool) -> Self {
+        self.ignore_externals = ignore_externals;
+        self
+    }
+
+    pub fn with_allow_unver_obstructions(mut self, allow_unver_obstructions: bool) -> Self {
+        self.allow_unver_obstructions = allow_unver_obstructions;
+        self
+    }
+
+    pub fn with_make_parents(mut self, make_parents: bool) -> Self {
+        self.make_parents = make_parents;
+        self
+    }
 }
 
 /// Options for add
+#[derive(Debug, Clone, Copy)]
 pub struct AddOptions {
-    depth: Depth,
-    force: bool,
-    no_ignore: bool,
-    no_autoprops: bool,
-    add_parents: bool,
+    pub depth: Depth,
+    pub force: bool,
+    pub no_ignore: bool,
+    pub no_autoprops: bool,
+    pub add_parents: bool,
+}
+
+impl Default for AddOptions {
+    fn default() -> Self {
+        Self {
+            depth: Depth::Infinity,
+            force: false,
+            no_ignore: false,
+            no_autoprops: false,
+            add_parents: false,
+        }
+    }
+}
+
+impl AddOptions {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_depth(mut self, depth: Depth) -> Self {
+        self.depth = depth;
+        self
+    }
+
+    pub fn with_force(mut self, force: bool) -> Self {
+        self.force = force;
+        self
+    }
+
+    pub fn with_no_ignore(mut self, no_ignore: bool) -> Self {
+        self.no_ignore = no_ignore;
+        self
+    }
+
+    pub fn with_no_autoprops(mut self, no_autoprops: bool) -> Self {
+        self.no_autoprops = no_autoprops;
+        self
+    }
+
+    pub fn with_add_parents(mut self, add_parents: bool) -> Self {
+        self.add_parents = add_parents;
+        self
+    }
 }
 
 /// Options for delete
-pub struct DeleteOptions<'a> {
-    force: bool,
-    keep_local: bool,
-    commit_callback: &'a dyn FnMut(&crate::CommitInfo) -> Result<(), Error>,
+#[derive(Debug, Clone, Copy)]
+pub struct DeleteOptions {
+    pub force: bool,
+    pub keep_local: bool,
+}
+
+impl Default for DeleteOptions {
+    fn default() -> Self {
+        Self {
+            force: false,
+            keep_local: false,
+        }
+    }
+}
+
+impl DeleteOptions {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_force(mut self, force: bool) -> Self {
+        self.force = force;
+        self
+    }
+
+    pub fn with_keep_local(mut self, keep_local: bool) -> Self {
+        self.keep_local = keep_local;
+        self
+    }
 }
 
 /// Options for commit
-pub struct CommitOptions<'a> {
-    depth: Depth,
-    keep_locks: bool,
-    keep_changelists: bool,
-    commit_as_operations: bool,
-    include_file_externals: bool,
-    include_dir_externals: bool,
-    changelists: Option<&'a [&'a str]>,
+#[derive(Debug, Clone)]
+pub struct CommitOptions {
+    pub depth: Depth,
+    pub keep_locks: bool,
+    pub keep_changelists: bool,
+    pub commit_as_operations: bool,
+    pub include_file_externals: bool,
+    pub include_dir_externals: bool,
+    pub changelists: Option<Vec<String>>,
+}
+
+impl Default for CommitOptions {
+    fn default() -> Self {
+        Self {
+            depth: Depth::Infinity,
+            keep_locks: false,
+            keep_changelists: false,
+            commit_as_operations: true,
+            include_file_externals: false,
+            include_dir_externals: false,
+            changelists: None,
+        }
+    }
+}
+
+impl CommitOptions {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_depth(mut self, depth: Depth) -> Self {
+        self.depth = depth;
+        self
+    }
+
+    pub fn with_keep_locks(mut self, keep_locks: bool) -> Self {
+        self.keep_locks = keep_locks;
+        self
+    }
+
+    pub fn with_keep_changelists(mut self, keep_changelists: bool) -> Self {
+        self.keep_changelists = keep_changelists;
+        self
+    }
+
+    pub fn with_commit_as_operations(mut self, commit_as_operations: bool) -> Self {
+        self.commit_as_operations = commit_as_operations;
+        self
+    }
+
+    pub fn with_include_file_externals(mut self, include_file_externals: bool) -> Self {
+        self.include_file_externals = include_file_externals;
+        self
+    }
+
+    pub fn with_include_dir_externals(mut self, include_dir_externals: bool) -> Self {
+        self.include_dir_externals = include_dir_externals;
+        self
+    }
+
+    pub fn with_changelists(mut self, changelists: Vec<String>) -> Self {
+        self.changelists = Some(changelists);
+        self
+    }
 }
 
 /// Options for status
-pub struct StatusOptions<'a> {
-    revision: Revision,
-    depth: Depth,
-    get_all: bool,
-    check_out_of_date: bool,
-    check_working_copy: bool,
-    no_ignore: bool,
-    ignore_externals: bool,
-    depth_as_sticky: bool,
-    changelists: Option<&'a [&'a str]>,
+#[derive(Debug, Clone)]
+pub struct StatusOptions {
+    pub revision: Revision,
+    pub depth: Depth,
+    pub get_all: bool,
+    pub check_out_of_date: bool,
+    pub check_working_copy: bool,
+    pub no_ignore: bool,
+    pub ignore_externals: bool,
+    pub depth_as_sticky: bool,
+    pub changelists: Option<Vec<String>>,
+}
+
+impl Default for StatusOptions {
+    fn default() -> Self {
+        Self {
+            revision: Revision::Working,
+            depth: Depth::Infinity,
+            get_all: false,
+            check_out_of_date: false,
+            check_working_copy: true,
+            no_ignore: false,
+            ignore_externals: false,
+            depth_as_sticky: false,
+            changelists: None,
+        }
+    }
+}
+
+impl StatusOptions {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_revision(mut self, revision: Revision) -> Self {
+        self.revision = revision;
+        self
+    }
+
+    pub fn with_depth(mut self, depth: Depth) -> Self {
+        self.depth = depth;
+        self
+    }
+
+    pub fn with_get_all(mut self, get_all: bool) -> Self {
+        self.get_all = get_all;
+        self
+    }
+
+    pub fn with_check_out_of_date(mut self, check_out_of_date: bool) -> Self {
+        self.check_out_of_date = check_out_of_date;
+        self
+    }
+
+    pub fn with_check_working_copy(mut self, check_working_copy: bool) -> Self {
+        self.check_working_copy = check_working_copy;
+        self
+    }
+
+    pub fn with_no_ignore(mut self, no_ignore: bool) -> Self {
+        self.no_ignore = no_ignore;
+        self
+    }
+
+    pub fn with_ignore_externals(mut self, ignore_externals: bool) -> Self {
+        self.ignore_externals = ignore_externals;
+        self
+    }
+
+    pub fn with_depth_as_sticky(mut self, depth_as_sticky: bool) -> Self {
+        self.depth_as_sticky = depth_as_sticky;
+        self
+    }
+
+    pub fn with_changelists(mut self, changelists: Vec<String>) -> Self {
+        self.changelists = Some(changelists);
+        self
+    }
 }
 
 /// A client context.
@@ -800,7 +1049,8 @@ impl Context {
             for path in &path_cstrings {
                 ps.push(path.as_ptr() as *mut std::ffi::c_void);
             }
-            let commit_callback = Box::into_raw(Box::new(options.commit_callback));
+            // Note: commit_callback parameter removed from DeleteOptions for simplicity
+            let commit_callback = std::ptr::null_mut();
             let err = svn_client_delete4(
                 ps.as_ptr(),
                 options.force.into(),
@@ -961,10 +1211,10 @@ impl Context {
             }
 
             let changelist_cstrings: Vec<std::ffi::CString> =
-                if let Some(changelists) = options.changelists {
+                if let Some(changelists) = &options.changelists {
                     changelists
                         .iter()
-                        .map(|c| std::ffi::CString::new(*c).unwrap())
+                        .map(|c| std::ffi::CString::new(c.as_str()).unwrap())
                         .collect()
                 } else {
                     Vec::new()
@@ -1002,12 +1252,16 @@ impl Context {
         status_func: &dyn FnMut(&'_ str, &'_ Status) -> Result<(), Error>,
     ) -> Result<Revnum, Error> {
         let mut pool = std::rc::Rc::new(Pool::default());
-        let mut cl = apr::tables::ArrayHeader::new_with_capacity(&pool, 0);
-        if let Some(changelists) = options.changelists {
-            for changelist in changelists {
-                let changelist = std::ffi::CString::new(*changelist).unwrap();
-                cl.push(changelist.as_ptr() as *mut std::ffi::c_void);
-            }
+        let changelist_cstrings: Vec<std::ffi::CString> = if let Some(changelists) = &options.changelists {
+            changelists.iter()
+                .map(|cl| std::ffi::CString::new(cl.as_str()).unwrap())
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let mut cl = apr::tables::ArrayHeader::new_with_capacity(&pool, changelist_cstrings.len());
+        for changelist in &changelist_cstrings {
+            cl.push(changelist.as_ptr() as *mut std::ffi::c_void);
         }
 
         unsafe {
@@ -2651,7 +2905,7 @@ impl<'a> CommitBuilder<'a> {
         let changelists_vec = self
             .changelists
             .as_ref()
-            .map(|cl| cl.iter().map(|s| s.as_str()).collect::<Vec<_>>());
+            .map(|cl| cl.iter().map(|s| s.to_string()).collect::<Vec<_>>());
         let options = CommitOptions {
             depth: self.depth,
             keep_locks: self.keep_locks,
@@ -2659,7 +2913,7 @@ impl<'a> CommitBuilder<'a> {
             commit_as_operations: self.commit_as_operations,
             include_file_externals: self.include_file_externals,
             include_dir_externals: self.include_dir_externals,
-            changelists: changelists_vec.as_deref(),
+            changelists: changelists_vec,
         };
 
         self.ctx
