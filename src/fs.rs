@@ -228,7 +228,7 @@ impl Fs {
             return Ok(std::collections::HashMap::new());
         }
 
-        let mut revprops = apr::hash::Hash::<&[u8], subversion_sys::svn_string_t>::from_ptr(props);
+        let revprops = apr::hash::Hash::<&[u8], subversion_sys::svn_string_t>::from_ptr(props);
 
         let revprops = revprops
             .iter(&pool)
@@ -469,8 +469,7 @@ impl Root {
 
             let mut result = std::collections::HashMap::new();
             if !props.is_null() {
-                let mut hash =
-                    apr::hash::Hash::<&[u8], subversion_sys::svn_string_t>::from_ptr(props);
+                let hash = apr::hash::Hash::<&[u8], subversion_sys::svn_string_t>::from_ptr(props);
                 for (k, v) in hash.iter(pool) {
                     let key = String::from_utf8_lossy(k).into_owned();
                     let value = if v.data.is_null() || v.len == 0 {
@@ -498,7 +497,7 @@ impl Root {
 
             let mut result = std::collections::HashMap::new();
             if !changed_paths.is_null() {
-                let mut hash =
+                let hash =
                     apr::hash::Hash::<&[u8], *mut subversion_sys::svn_fs_path_change2_t>::from_ptr(
                         changed_paths,
                     );
@@ -546,10 +545,9 @@ impl Root {
 
             let mut result = std::collections::HashMap::new();
             if !entries.is_null() {
-                let mut hash =
-                    apr::hash::Hash::<&[u8], *mut subversion_sys::svn_fs_dirent_t>::from_ptr(
-                        entries,
-                    );
+                let hash = apr::hash::Hash::<&[u8], *mut subversion_sys::svn_fs_dirent_t>::from_ptr(
+                    entries,
+                );
                 for (k, v) in hash.iter(pool) {
                     let name = String::from_utf8_lossy(k).into_owned();
                     let entry = FsDirEntry::from_raw(*v);
@@ -624,7 +622,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let fs_path = dir.path().join("test-fs");
 
-        let mut fs = Fs::create(&fs_path).unwrap();
+        let fs = Fs::create(&fs_path).unwrap();
         let root = fs.revision_root(crate::Revnum(0));
         assert!(root.is_ok(), "Failed to get revision root");
     }
@@ -720,8 +718,6 @@ mod tests {
         // Test FsPathChange accessors with a mock pointer
         // Note: This is a basic test since we can't easily create real path changes
         // without complex repository operations
-        use super::FsPathChange;
-
         // We can at least test the structure exists and compiles
         // Real integration tests would require creating actual commits
     }
@@ -730,8 +726,6 @@ mod tests {
     fn test_fs_dir_entry_accessors() {
         // Test FsDirEntry accessors
         // Note: This is a basic test since we need actual directory entries
-        use super::FsDirEntry;
-
         // We can at least test the structure exists and compiles
         // Real integration tests would require creating actual files/directories
     }

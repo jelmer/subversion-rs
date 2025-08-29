@@ -24,10 +24,12 @@ pub mod diff;
 pub mod dirent;
 pub mod error;
 pub mod fs;
+pub mod hash;
 pub mod io;
 #[cfg(feature = "client")]
 pub mod merge;
 pub mod mergeinfo;
+pub mod opt;
 pub mod props;
 #[cfg(feature = "ra")]
 pub mod ra;
@@ -458,6 +460,28 @@ impl From<Revision> for svn_opt_revision_t {
                 kind: subversion_sys::svn_opt_revision_kind_svn_opt_revision_head,
                 value: svn_opt_revision_value_t::default(),
             },
+        }
+    }
+}
+
+impl From<svn_opt_revision_t> for Revision {
+    fn from(revision: svn_opt_revision_t) -> Self {
+        match revision.kind {
+            subversion_sys::svn_opt_revision_kind_svn_opt_revision_unspecified => {
+                Revision::Unspecified
+            }
+            subversion_sys::svn_opt_revision_kind_svn_opt_revision_number => unsafe {
+                Revision::Number(Revnum(*revision.value.number.as_ref()))
+            },
+            subversion_sys::svn_opt_revision_kind_svn_opt_revision_date => unsafe {
+                Revision::Date(*revision.value.date.as_ref())
+            },
+            subversion_sys::svn_opt_revision_kind_svn_opt_revision_committed => Revision::Committed,
+            subversion_sys::svn_opt_revision_kind_svn_opt_revision_previous => Revision::Previous,
+            subversion_sys::svn_opt_revision_kind_svn_opt_revision_base => Revision::Base,
+            subversion_sys::svn_opt_revision_kind_svn_opt_revision_working => Revision::Working,
+            subversion_sys::svn_opt_revision_kind_svn_opt_revision_head => Revision::Head,
+            _ => Revision::Unspecified,
         }
     }
 }
