@@ -299,8 +299,7 @@ impl Session {
         let err = unsafe {
             subversion_sys::svn_ra_rev_proplist(self.ptr, rev.into(), &mut props, pool.as_mut_ptr())
         };
-        let mut hash =
-            apr::hash::Hash::<&str, *const subversion_sys::svn_string_t>::from_ptr(props);
+        let hash = apr::hash::Hash::<&str, *const subversion_sys::svn_string_t>::from_ptr(props);
         Error::from_raw(err)?;
         let pool = apr::pool::Pool::new();
         Ok(hash
@@ -354,12 +353,12 @@ impl Session {
             apr::hash::Hash::<&str, *const subversion_sys::svn_string_t>::in_pool(&pool);
         for (k, v) in revprop_table.iter() {
             let v: crate::string::String = v.as_slice().into();
-            hash_revprop_table.set(k, &v.as_ptr());
+            hash_revprop_table.insert(k, &v.as_ptr());
         }
         let mut hash_lock_tokens =
             apr::hash::Hash::<&str, *const std::os::raw::c_char>::in_pool(&pool);
         for (k, v) in lock_tokens.iter() {
-            hash_lock_tokens.set(k, &(v.as_ptr() as *const _));
+            hash_lock_tokens.insert(k, &(v.as_ptr() as *const _));
         }
         let result_pool = Pool::new();
         let err = unsafe {
@@ -405,8 +404,7 @@ impl Session {
             )
         };
         crate::Error::from_raw(err)?;
-        let mut hash =
-            apr::hash::Hash::<&str, *const subversion_sys::svn_string_t>::from_ptr(props);
+        let hash = apr::hash::Hash::<&str, *const subversion_sys::svn_string_t>::from_ptr(props);
         let pool = apr::pool::Pool::new();
         Ok((
             Revnum::from_raw(fetched_rev).unwrap(),
@@ -449,9 +447,9 @@ impl Session {
         };
         let rc_pool = std::rc::Rc::new(pool);
         crate::Error::from_raw(err)?;
-        let mut props_hash =
+        let props_hash =
             apr::hash::Hash::<&str, *const subversion_sys::svn_string_t>::from_ptr(props);
-        let mut dirents_hash =
+        let dirents_hash =
             apr::hash::Hash::<&str, *mut subversion_sys::svn_dirent_t>::from_ptr(dirents);
         let iter_pool = apr::pool::Pool::new();
         let props = props_hash
@@ -545,7 +543,7 @@ impl Session {
         };
         Error::from_raw(err)?;
         let pool = std::rc::Rc::new(pool);
-        let mut mergeinfo =
+        let mergeinfo =
             apr::hash::Hash::<&[u8], *mut subversion_sys::svn_mergeinfo_t>::from_ptr(mergeinfo);
         let iter_pool = apr::pool::Pool::new();
         Ok(mergeinfo
@@ -872,7 +870,7 @@ impl Session {
         };
         Error::from_raw(err)?;
 
-        let mut iter = apr::hash::Hash::<&Revnum, *const std::os::raw::c_char>::from_ptr(locations);
+        let iter = apr::hash::Hash::<&Revnum, *const std::os::raw::c_char>::from_ptr(locations);
 
         let mut locations = HashMap::new();
         let pool = apr::pool::Pool::new();
@@ -924,7 +922,7 @@ impl Session {
         let mut hash =
             apr::hash::Hash::<&str, subversion_sys::svn_revnum_t>::in_pool(&scratch_pool);
         for (k, v) in path_revs.iter() {
-            hash.set(k, &v.0);
+            hash.insert(k, &v.0);
         }
         let comment = std::ffi::CString::new(comment).unwrap();
         let err = unsafe {
@@ -952,7 +950,7 @@ impl Session {
         let scratch_pool = std::rc::Rc::new(Pool::new());
         let mut hash = apr::hash::Hash::<&str, *const std::os::raw::c_char>::in_pool(&scratch_pool);
         for (k, v) in path_tokens.iter() {
-            hash.set(k, &(v.as_ptr() as *const _));
+            hash.insert(k, &(v.as_ptr() as *const _));
         }
         let err = unsafe {
             subversion_sys::svn_ra_unlock(
@@ -1001,7 +999,7 @@ impl Session {
         };
         Error::from_raw(err)?;
         let _pool = std::rc::Rc::new(pool);
-        let mut hash = apr::hash::Hash::<&str, *mut subversion_sys::svn_lock_t>::from_ptr(locks);
+        let hash = apr::hash::Hash::<&str, *mut subversion_sys::svn_lock_t>::from_ptr(locks);
         let iter_pool = apr::pool::Pool::new();
         Ok(hash
             .iter(&iter_pool)
@@ -1059,7 +1057,7 @@ impl Session {
                     .as_mut()
                     .unwrap()
             };
-            let mut revprops =
+            let revprops =
                 apr::hash::Hash::<&str, *const subversion_sys::svn_string_t>::from_ptr(rev_props);
 
             let pool = apr::pool::Pool::new();
@@ -1117,7 +1115,7 @@ impl Session {
                 _pool: std::marker::PhantomData,
             };
 
-            let mut revprops =
+            let revprops =
                 apr::hash::Hash::<&str, *const subversion_sys::svn_string_t>::from_ptr(rev_props);
 
             let pool = apr::pool::Pool::new();
