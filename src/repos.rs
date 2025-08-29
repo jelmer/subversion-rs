@@ -79,7 +79,7 @@ impl Repos {
         let config_hash = if let Some(cfg) = config {
             let mut hash = apr::hash::Hash::<&[u8], &[u8]>::new(&pool);
             for (k, v) in cfg.iter() {
-                hash.set(&k.as_bytes(), &v.as_bytes());
+                hash.insert(&k.as_bytes(), &v.as_bytes());
             }
             unsafe { hash.as_mut_ptr() }
         } else {
@@ -90,7 +90,7 @@ impl Repos {
         let fs_config_hash = if let Some(cfg) = fs_config {
             let mut hash = apr::hash::Hash::<&[u8], &[u8]>::new(&pool);
             for (k, v) in cfg.iter() {
-                hash.set(&k.as_bytes(), &v.as_bytes());
+                hash.insert(&k.as_bytes(), &v.as_bytes());
             }
             unsafe { hash.as_mut_ptr() }
         } else {
@@ -146,7 +146,7 @@ impl Repos {
             )
         };
         Error::from_raw(ret)?;
-        let mut capabilities_hash = apr::hash::Hash::<&str, &str>::from_ptr(capabilities);
+        let capabilities_hash = apr::hash::Hash::<&str, &str>::from_ptr(capabilities);
         Ok(capabilities_hash
             .keys(&pool)
             .map(|k| String::from_utf8_lossy(k).to_string())
@@ -283,6 +283,18 @@ impl Repos {
         notify_func: Option<&impl Fn(&Notify)>,
     ) -> Result<(), Error> {
         let pool = apr::Pool::new();
+
+        // Handle empty parent_dir properly to avoid segfault
+        let parent_dir_cstring = if parent_dir.as_os_str().is_empty() {
+            None
+        } else {
+            Some(std::ffi::CString::new(parent_dir.to_str().unwrap())?)
+        };
+        let parent_dir_cstr = match &parent_dir_cstring {
+            Some(cstr) => cstr.as_ptr(),
+            None => std::ptr::null(),
+        };
+
         let ret = unsafe {
             subversion_sys::svn_repos_load_fs6(
                 self.ptr,
@@ -290,7 +302,7 @@ impl Repos {
                 start_rev.0,
                 end_rev.0,
                 uuid_action.into(),
-                parent_dir.to_str().unwrap().as_ptr() as *const i8,
+                parent_dir_cstr,
                 use_pre_commit_hook.into(),
                 use_post_commit_hook.into(),
                 validate_props.into(),
@@ -602,6 +614,7 @@ pub fn hotcopy(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     #[test]
     fn test_create_delete() {
         let td = tempfile::tempdir().unwrap();
@@ -618,6 +631,36 @@ mod tests {
         assert!(!repos.capabilities().unwrap().contains("mergeinfo2"));
         assert!(repos.has_capability("mergeinfo").unwrap());
         assert!(repos.has_capability("unknown").is_err());
+    }
+
+    #[test]
+    fn test_load_fs_segfault_reproduction() {
+        // Create a test repository
+        let temp_dir = tempfile::tempdir().unwrap();
+        let repo_path = temp_dir.path().join("test_repo");
+        let repo = Repos::create(&repo_path).unwrap();
+
+        // Create a simple dump data to load
+        let dump_data = b"SVN-fs-dump-format-version: 3\nUUID: test-uuid-1234\n\nRevision-number: 0\nProp-content-length: 56\nContent-length: 56\n\nK 8\nsvn:date\nV 27\n2023-01-01T12:00:00.000000Z\nPROPS-END\n\n";
+        let mut stream = crate::io::Stream::from(dump_data.as_slice());
+
+        // This should trigger the segfault - use both invalid revnums
+        let result = repo.load_fs(
+            &mut stream,
+            Revnum(-1),
+            Revnum(-1),
+            LoadUUID::Default,
+            std::path::Path::new(""),
+            false,
+            false,
+            None::<&fn() -> bool>,
+            true,
+            false,
+            false,
+            None::<&fn(&Notify)>,
+        );
+
+        println!("load_fs result: {:?}", result);
     }
 
     #[test]
