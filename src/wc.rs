@@ -6,6 +6,28 @@ pub fn version() -> crate::Version {
     unsafe { crate::Version(svn_wc_version()) }
 }
 
+// Status constants for Python compatibility
+pub const STATUS_NONE: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_none;
+pub const STATUS_UNVERSIONED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_unversioned;
+pub const STATUS_NORMAL: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_normal;
+pub const STATUS_ADDED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_added;
+pub const STATUS_MISSING: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_missing;
+pub const STATUS_DELETED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_deleted;
+pub const STATUS_REPLACED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_replaced;
+pub const STATUS_MODIFIED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_modified;
+pub const STATUS_MERGED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_merged;
+pub const STATUS_CONFLICTED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_conflicted;
+pub const STATUS_IGNORED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_ignored;
+pub const STATUS_OBSTRUCTED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_obstructed;
+pub const STATUS_EXTERNAL: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_external;
+pub const STATUS_INCOMPLETE: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_incomplete;
+
+// Schedule constants for Python compatibility
+pub const SCHEDULE_NORMAL: u32 = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_normal;
+pub const SCHEDULE_ADD: u32 = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_add;
+pub const SCHEDULE_DELETE: u32 = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_delete;
+pub const SCHEDULE_REPLACE: u32 = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_replace;
+
 /// Working copy status types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
@@ -746,6 +768,107 @@ impl Context {
 
         Ok(Some(result))
     }
+}
+
+/// Clean up a working copy
+pub fn cleanup(
+    wc_path: &std::path::Path,
+    break_locks: bool,
+    fix_recorded_timestamps: bool,
+    clear_dav_cache: bool,
+    vacuum_pristines: bool,
+    include_externals: bool,
+) -> Result<(), Error> {
+    let path_str = wc_path.to_string_lossy();
+    let path_cstr = std::ffi::CString::new(path_str.as_ref()).unwrap();
+    
+    with_tmp_pool(|pool| -> Result<(), Error> {
+        let mut ctx = std::ptr::null_mut();
+        with_tmp_pool(|scratch_pool| {
+            let err = unsafe {
+                subversion_sys::svn_wc_context_create(
+                    &mut ctx,
+                    std::ptr::null_mut(),
+                    pool.as_mut_ptr(),
+                    scratch_pool.as_mut_ptr(),
+                )
+            };
+            svn_result(err)
+        })?;
+
+        let err = unsafe {
+            subversion_sys::svn_wc_cleanup4(
+                ctx,
+                path_cstr.as_ptr(),
+                break_locks as i32,
+                fix_recorded_timestamps as i32,
+                clear_dav_cache as i32,
+                vacuum_pristines as i32,
+                None, // cancel_func
+                std::ptr::null_mut(), // cancel_baton
+                None, // notify_func
+                std::ptr::null_mut(), // notify_baton
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        Ok(())
+    })
+}
+
+/// Get the working copy revision status
+pub fn revision_status(
+    wc_path: &std::path::Path,
+    trail_url: Option<&str>,
+    committed: bool,
+) -> Result<(i64, i64, bool, bool), Error> {
+    let path_str = wc_path.to_string_lossy();
+    let path_cstr = std::ffi::CString::new(path_str.as_ref()).unwrap();
+    let trail_cstr = trail_url.map(|s| std::ffi::CString::new(s).unwrap());
+    
+    with_tmp_pool(|pool| -> Result<(i64, i64, bool, bool), Error> {
+        let mut ctx = std::ptr::null_mut();
+        with_tmp_pool(|scratch_pool| {
+            let err = unsafe {
+                subversion_sys::svn_wc_context_create(
+                    &mut ctx,
+                    std::ptr::null_mut(),
+                    pool.as_mut_ptr(),
+                    scratch_pool.as_mut_ptr(),
+                )
+            };
+            svn_result(err)
+        })?;
+
+        let mut status_ptr: *mut subversion_sys::svn_wc_revision_status_t = std::ptr::null_mut();
+        
+        with_tmp_pool(|scratch_pool| {
+            let err = unsafe {
+                subversion_sys::svn_wc_revision_status2(
+                    &mut status_ptr,
+                    ctx,
+                    path_cstr.as_ptr(),
+                    trail_cstr.as_ref().map_or(std::ptr::null(), |c| c.as_ptr()),
+                    committed as i32,
+                    None, // cancel_func
+                    std::ptr::null_mut(), // cancel_baton
+                    pool.as_mut_ptr(),
+                    scratch_pool.as_mut_ptr(),
+                )
+            };
+            Error::from_raw(err)
+        })?;
+        
+        if status_ptr.is_null() {
+            return Err(Error::from(std::io::Error::new(
+                std::io::ErrorKind::Other, 
+                "Failed to get revision status"
+            )));
+        }
+        
+        let status = unsafe { *status_ptr };
+        Ok((status.min_rev, status.max_rev, status.switched != 0, status.modified != 0))
+    })
 }
 
 #[cfg(test)]
