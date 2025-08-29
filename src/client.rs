@@ -13,8 +13,8 @@ use subversion_sys::{
     svn_client_add5, svn_client_checkout3, svn_client_cleanup2, svn_client_commit6,
     svn_client_conflict_get, svn_client_create_context2, svn_client_ctx_t, svn_client_delete4,
     svn_client_export5, svn_client_import5, svn_client_log5, svn_client_mkdir4,
-    svn_client_proplist4, svn_client_relocate2, svn_client_status6, svn_client_switch3,
-    svn_client_update4, svn_client_vacuum, svn_client_version,
+    svn_client_proplist4, svn_client_status6, svn_client_switch3, svn_client_update4,
+    svn_client_vacuum, svn_client_version,
 };
 
 pub fn version() -> Version {
@@ -52,8 +52,7 @@ extern "C" fn wrap_status_func(
     _pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     unsafe {
-        let callback =
-            &mut *(baton as *mut &mut dyn FnMut(&str, &Status) -> Result<(), Error>);
+        let callback = &mut *(baton as *mut &mut dyn FnMut(&str, &Status) -> Result<(), Error>);
         let path_str = std::ffi::CStr::from_ptr(path).to_str().unwrap();
         let status_wrapper = Status(status);
         let ret = callback(path_str, &status_wrapper);
@@ -238,12 +237,13 @@ unsafe extern "C" fn blame_receiver_wrapper(
     pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     let callback = &mut *(baton as *mut &mut dyn FnMut(BlameInfo) -> Result<(), Error>);
-    
+
     // Extract author and date from rev_props
     let (author, date) = if !rev_props.is_null() {
-        let props = apr::hash::Hash::<&str, *const subversion_sys::svn_string_t>::from_ptr(rev_props);
+        let props =
+            apr::hash::Hash::<&str, *const subversion_sys::svn_string_t>::from_ptr(rev_props);
         let pool = apr::Pool::from_raw(pool);
-        
+
         let author = props.get("svn:author").and_then(|svn_str| {
             if !svn_str.is_null() {
                 let str_data = (**svn_str).data as *const i8;
@@ -254,7 +254,7 @@ unsafe extern "C" fn blame_receiver_wrapper(
                 None
             }
         });
-            
+
         let date = props.get("svn:date").and_then(|svn_str| {
             if !svn_str.is_null() {
                 let str_data = (**svn_str).data as *const i8;
@@ -272,13 +272,15 @@ unsafe extern "C" fn blame_receiver_wrapper(
     } else {
         (None, None)
     };
-        
-        // Extract merged revision info
-        let (merged_author, merged_date) = if !merged_rev_props.is_null() {
-            let props = apr::hash::Hash::<&str, *const subversion_sys::svn_string_t>::from_ptr(merged_rev_props);
-            let pool = apr::Pool::from_raw(pool);
-            
-            let author = props.get("svn:author").and_then(|svn_str| {
+
+    // Extract merged revision info
+    let (merged_author, merged_date) = if !merged_rev_props.is_null() {
+        let props = apr::hash::Hash::<&str, *const subversion_sys::svn_string_t>::from_ptr(
+            merged_rev_props,
+        );
+        let pool = apr::Pool::from_raw(pool);
+
+        let author = props.get("svn:author").and_then(|svn_str| {
             if !svn_str.is_null() {
                 let str_data = (**svn_str).data as *const i8;
                 let str_len = (**svn_str).len;
@@ -288,51 +290,55 @@ unsafe extern "C" fn blame_receiver_wrapper(
                 None
             }
         });
-            
-            let date = props.get("svn:date").and_then(|svn_str| {
-                if !svn_str.is_null() {
-                    // Simplified date handling
-                    Some(apr::time::Time::now())
-                } else {
-                    None
-                }
-            });
+
+        let date = props.get("svn:date").and_then(|svn_str| {
+            if !svn_str.is_null() {
+                // Simplified date handling
+                Some(apr::time::Time::now())
+            } else {
+                None
+            }
+        });
         (author, date)
     } else {
         (None, None)
     };
-        
-        // Extract line content
-        let line_str = if !line.is_null() {
-            let line_ref = &*line;
-            let str_data = line_ref.data as *const i8;
-            let str_len = line_ref.len;
-            let bytes = std::slice::from_raw_parts(str_data as *const u8, str_len);
-            String::from_utf8_lossy(bytes).into_owned()
-        } else {
-            String::new()
-        };
-        
-        // Extract merged path
-        let merged_path_str = if !merged_path.is_null() {
-            Some(std::ffi::CStr::from_ptr(merged_path).to_string_lossy().into_owned())
-        } else {
-            None
-        };
-        
-        let info = BlameInfo {
-            line_no,
-            revision: Revnum::from_raw(revision).unwrap_or(Revnum::from(0u64)),
-            author,
-            date,
-            merged_revision: Revnum::from_raw(merged_revision),
-            merged_author,
-            merged_date,
-            merged_path: merged_path_str,
-            line: line_str,
-            local_change: local_change != 0,
-        };
-        
+
+    // Extract line content
+    let line_str = if !line.is_null() {
+        let line_ref = &*line;
+        let str_data = line_ref.data as *const i8;
+        let str_len = line_ref.len;
+        let bytes = std::slice::from_raw_parts(str_data as *const u8, str_len);
+        String::from_utf8_lossy(bytes).into_owned()
+    } else {
+        String::new()
+    };
+
+    // Extract merged path
+    let merged_path_str = if !merged_path.is_null() {
+        Some(
+            std::ffi::CStr::from_ptr(merged_path)
+                .to_string_lossy()
+                .into_owned(),
+        )
+    } else {
+        None
+    };
+
+    let info = BlameInfo {
+        line_no,
+        revision: Revnum::from_raw(revision).unwrap_or(Revnum::from(0u64)),
+        author,
+        date,
+        merged_revision: Revnum::from_raw(merged_revision),
+        merged_author,
+        merged_date,
+        merged_path: merged_path_str,
+        line: line_str,
+        local_change: local_change != 0,
+    };
+
     match callback(info) {
         Ok(()) => std::ptr::null_mut(),
         Err(mut e) => e.as_mut_ptr(),
@@ -1252,13 +1258,15 @@ impl Context {
         status_func: &dyn FnMut(&'_ str, &'_ Status) -> Result<(), Error>,
     ) -> Result<Revnum, Error> {
         let mut pool = std::rc::Rc::new(Pool::default());
-        let changelist_cstrings: Vec<std::ffi::CString> = if let Some(changelists) = &options.changelists {
-            changelists.iter()
-                .map(|cl| std::ffi::CString::new(cl.as_str()).unwrap())
-                .collect()
-        } else {
-            Vec::new()
-        };
+        let changelist_cstrings: Vec<std::ffi::CString> =
+            if let Some(changelists) = &options.changelists {
+                changelists
+                    .iter()
+                    .map(|cl| std::ffi::CString::new(cl.as_str()).unwrap())
+                    .collect()
+            } else {
+                Vec::new()
+            };
         let mut cl = apr::tables::ArrayHeader::new_with_capacity(&pool, changelist_cstrings.len());
         for changelist in &changelist_cstrings {
             cl.push(changelist.as_ptr() as *mut std::ffi::c_void);
@@ -1528,32 +1536,6 @@ impl Context {
             Error::from_raw(err)?;
             Ok(())
         }
-    }
-
-    pub fn relocate(
-        &mut self,
-        path: impl AsCanonicalDirent,
-        from: &str,
-        to: &str,
-        ignore_externals: bool,
-    ) -> Result<(), Error> {
-        let mut pool = std::rc::Rc::new(Pool::default());
-        let from = std::ffi::CString::new(from).unwrap();
-        let to = std::ffi::CString::new(to).unwrap();
-        let path = path.as_canonical_dirent()?;
-        with_tmp_pool(|tmp_pool| unsafe {
-            let path_cstr = std::ffi::CString::new(path.as_path().to_str().unwrap())?;
-            let err = svn_client_relocate2(
-                path_cstr.as_ptr(),
-                from.as_ptr(),
-                to.as_ptr(),
-                ignore_externals.into(),
-                self.ptr,
-                tmp_pool.as_mut_ptr(),
-            );
-            Error::from_raw(err)?;
-            Ok(())
-        })
     }
 
     pub fn conflict_get(
@@ -1840,25 +1822,24 @@ impl Context {
     ) -> Result<(Revnum, Revnum), Error> {
         let pool = Pool::default();
         let path_or_url = std::ffi::CString::new(path_or_url).unwrap();
-        
+
         // Convert diff options to C strings
         // Create diff file options struct
-        let diff_file_options = unsafe {
-            subversion_sys::svn_diff_file_options_create(pool.as_mut_ptr())
-        };
-        
+        let diff_file_options =
+            unsafe { subversion_sys::svn_diff_file_options_create(pool.as_mut_ptr()) };
+
         if !diff_options.is_empty() {
             let diff_options_cstrings: Vec<std::ffi::CString> = diff_options
                 .iter()
                 .map(|opt| std::ffi::CString::new(opt.as_str()).unwrap())
                 .collect();
-            
+
             // Create APR array of diff options for parsing
             let mut diff_opts_array = apr::tables::ArrayHeader::<*const i8>::new(&pool);
             for opt in diff_options_cstrings.iter() {
                 diff_opts_array.push(opt.as_ptr());
             }
-            
+
             // Parse the options into the diff_file_options struct
             let parse_err = unsafe {
                 subversion_sys::svn_diff_file_options_parse(
@@ -1869,14 +1850,14 @@ impl Context {
             };
             Error::from_raw(parse_err)?;
         }
-        
+
         // Output parameters for resolved revision numbers
         let mut start_revnum: subversion_sys::svn_revnum_t = 0;
         let mut end_revnum: subversion_sys::svn_revnum_t = 0;
-        
+
         // Wrap the receiver callback
         let receiver_baton = receiver as *mut _ as *mut std::ffi::c_void;
-        
+
         unsafe {
             let err = subversion_sys::svn_client_blame6(
                 &mut start_revnum,
@@ -3221,6 +3202,304 @@ impl Context {
     pub fn mkdir_builder<'a>(&'a mut self) -> MkdirBuilder<'a> {
         MkdirBuilder::new(self)
     }
+
+    /// Apply a patch to a working copy
+    ///
+    /// Applies a unified diff patch from `patch_path` to the working copy at `wc_dir_path`.
+    pub fn patch(
+        &mut self,
+        patch_path: &std::path::Path,
+        wc_dir_path: &std::path::Path,
+        dry_run: bool,
+        strip_count: i32,
+        reverse: bool,
+        ignore_whitespace: bool,
+        remove_tempfiles: bool,
+    ) -> Result<(), Error> {
+        let pool = apr::Pool::new();
+        let patch_path_cstr = std::ffi::CString::new(patch_path.to_str().unwrap())?;
+        let wc_dir_path_cstr = std::ffi::CString::new(wc_dir_path.to_str().unwrap())?;
+
+        unsafe {
+            let err = subversion_sys::svn_client_patch(
+                patch_path_cstr.as_ptr(),
+                wc_dir_path_cstr.as_ptr(),
+                dry_run as i32,
+                strip_count,
+                reverse as i32,
+                ignore_whitespace as i32,
+                remove_tempfiles as i32,
+                None,                 // patch_func - NULL for default behavior
+                std::ptr::null_mut(), // patch_baton
+                self.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            );
+            Error::from_raw(err)
+        }
+    }
+
+    /// Perform a reintegrate merge
+    ///
+    /// Merges all eligible revisions from the source URL to the working copy.
+    pub fn merge_reintegrate(
+        &mut self,
+        source_url: &str,
+        source_peg_revision: &Revision,
+        target_wcpath: &std::path::Path,
+        dry_run: bool,
+        merge_options: &[&str],
+    ) -> Result<(), Error> {
+        let pool = apr::Pool::new();
+        let source_url_cstr = std::ffi::CString::new(source_url)?;
+        let target_wcpath_cstr = std::ffi::CString::new(target_wcpath.to_str().unwrap())?;
+
+        // Convert merge options to APR array
+        let merge_options_array = unsafe {
+            let array = apr_sys::apr_array_make(
+                pool.as_mut_ptr(),
+                merge_options.len() as i32,
+                std::mem::size_of::<*const std::os::raw::c_char>() as i32,
+            );
+
+            for option in merge_options {
+                let option_ptr = pool.pstrdup(option);
+                let slot = apr_sys::apr_array_push(array) as *mut *const std::os::raw::c_char;
+                *slot = option_ptr;
+            }
+
+            array
+        };
+
+        unsafe {
+            let err = subversion_sys::svn_client_merge_reintegrate(
+                source_url_cstr.as_ptr(),
+                &(*source_peg_revision).into(),
+                target_wcpath_cstr.as_ptr(),
+                dry_run as i32,
+                merge_options_array,
+                self.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            );
+            Error::from_raw(err)
+        }
+    }
+
+    /// Relocate a working copy to a new repository URL
+    ///
+    /// Updates all references from `from_prefix` to `to_prefix` in the working copy.
+    pub fn relocate(
+        &mut self,
+        wcroot_path: &std::path::Path,
+        from_prefix: &str,
+        to_prefix: &str,
+        ignore_externals: bool,
+    ) -> Result<(), Error> {
+        let pool = apr::Pool::new();
+        let wcroot_path_cstr = std::ffi::CString::new(wcroot_path.to_str().unwrap())?;
+        let from_prefix_cstr = std::ffi::CString::new(from_prefix)?;
+        let to_prefix_cstr = std::ffi::CString::new(to_prefix)?;
+
+        unsafe {
+            let err = subversion_sys::svn_client_relocate2(
+                wcroot_path_cstr.as_ptr(),
+                from_prefix_cstr.as_ptr(),
+                to_prefix_cstr.as_ptr(),
+                ignore_externals as i32,
+                self.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            );
+            Error::from_raw(err)
+        }
+    }
+
+    /// Set a revision property on a repository
+    pub fn revprop_set(
+        &mut self,
+        propname: &str,
+        propval: Option<&[u8]>,
+        url: &str,
+        revision: &Revision,
+        original_propval: Option<&[u8]>,
+        force: bool,
+    ) -> Result<(), Error> {
+        let pool = apr::Pool::new();
+        let propname_cstr = std::ffi::CString::new(propname)?;
+        let url_cstr = std::ffi::CString::new(url)?;
+
+        let propval_svn = if let Some(val) = propval {
+            unsafe {
+                let svn_str = apr_sys::apr_palloc(
+                    pool.as_mut_ptr(),
+                    std::mem::size_of::<subversion_sys::svn_string_t>(),
+                ) as *mut subversion_sys::svn_string_t;
+                (*svn_str).data = val.as_ptr() as *const std::os::raw::c_char;
+                (*svn_str).len = val.len();
+                svn_str
+            }
+        } else {
+            std::ptr::null_mut()
+        };
+
+        let original_propval_svn = if let Some(val) = original_propval {
+            unsafe {
+                let svn_str = apr_sys::apr_palloc(
+                    pool.as_mut_ptr(),
+                    std::mem::size_of::<subversion_sys::svn_string_t>(),
+                ) as *mut subversion_sys::svn_string_t;
+                (*svn_str).data = val.as_ptr() as *const std::os::raw::c_char;
+                (*svn_str).len = val.len();
+                svn_str
+            }
+        } else {
+            std::ptr::null_mut()
+        };
+
+        unsafe {
+            let err = subversion_sys::svn_client_revprop_set2(
+                propname_cstr.as_ptr(),
+                propval_svn,
+                original_propval_svn,
+                url_cstr.as_ptr(),
+                &(*revision).into(),
+                std::ptr::null_mut(), // base_revision_for_url - not used
+                force as i32,
+                self.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            );
+            Error::from_raw(err)
+        }
+    }
+
+    /// Get a revision property from a repository
+    pub fn revprop_get(
+        &mut self,
+        propname: &str,
+        url: &str,
+        revision: &Revision,
+    ) -> Result<Option<Vec<u8>>, Error> {
+        let pool = apr::Pool::new();
+        let propname_cstr = std::ffi::CString::new(propname)?;
+        let url_cstr = std::ffi::CString::new(url)?;
+        let mut propval: *mut subversion_sys::svn_string_t = std::ptr::null_mut();
+        let mut actual_rev = 0;
+
+        unsafe {
+            let err = subversion_sys::svn_client_revprop_get(
+                propname_cstr.as_ptr(),
+                &mut propval,
+                url_cstr.as_ptr(),
+                &(*revision).into(),
+                &mut actual_rev,
+                self.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            );
+            Error::from_raw(err)?;
+
+            if propval.is_null() {
+                Ok(None)
+            } else {
+                let len = (*propval).len;
+                let data = (*propval).data as *const u8;
+                Ok(Some(std::slice::from_raw_parts(data, len).to_vec()))
+            }
+        }
+    }
+
+    /// List revision properties on a repository
+    pub fn revprop_list(
+        &mut self,
+        url: &str,
+        revision: &Revision,
+    ) -> Result<std::collections::HashMap<String, Vec<u8>>, Error> {
+        let pool = apr::Pool::new();
+        let url_cstr = std::ffi::CString::new(url)?;
+        let mut props_hash = std::ptr::null_mut();
+        let mut actual_rev = 0;
+
+        unsafe {
+            let err = subversion_sys::svn_client_revprop_list(
+                &mut props_hash,
+                url_cstr.as_ptr(),
+                &(*revision).into(),
+                &mut actual_rev,
+                self.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            );
+            Error::from_raw(err)?;
+
+            let mut result = std::collections::HashMap::new();
+            if !props_hash.is_null() {
+                let hash = apr::hash::Hash::<&[u8], *mut subversion_sys::svn_string_t>::from_ptr(
+                    props_hash,
+                );
+                for (key, value_ptr) in hash.iter(&pool) {
+                    if !(*value_ptr).is_null() {
+                        let value = *value_ptr;
+                        let len = (*value).len;
+                        let data = (*value).data as *const u8;
+                        let bytes = std::slice::from_raw_parts(data, len).to_vec();
+                        let key_str = String::from_utf8_lossy(key).to_string();
+                        result.insert(key_str, bytes);
+                    }
+                }
+            }
+
+            Ok(result)
+        }
+    }
+
+    /// Suggest possible merge sources for a repository path
+    pub fn suggest_merge_sources(
+        &mut self,
+        path_or_url: &str,
+        peg_revision: &Revision,
+    ) -> Result<Vec<String>, Error> {
+        let pool = apr::Pool::new();
+        let path_or_url_cstr = std::ffi::CString::new(path_or_url)?;
+        let mut sources_array = std::ptr::null_mut();
+
+        unsafe {
+            let err = subversion_sys::svn_client_suggest_merge_sources(
+                &mut sources_array,
+                path_or_url_cstr.as_ptr(),
+                &(*peg_revision).into(),
+                self.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            );
+            Error::from_raw(err)?;
+
+            let mut result = Vec::new();
+            if !sources_array.is_null() {
+                let array_len = (*sources_array).nelts as usize;
+                let array_data = (*sources_array).elts as *const *const std::os::raw::c_char;
+
+                for i in 0..array_len {
+                    let source_ptr = *array_data.add(i);
+                    if !source_ptr.is_null() {
+                        let source_str = std::ffi::CStr::from_ptr(source_ptr);
+                        result.push(source_str.to_string_lossy().into_owned());
+                    }
+                }
+            }
+
+            Ok(result)
+        }
+    }
+
+    /// Upgrade a working copy to a newer format
+    pub fn upgrade(&mut self, wcroot_path: &std::path::Path) -> Result<(), Error> {
+        let pool = apr::Pool::new();
+        let wcroot_path_cstr = std::ffi::CString::new(wcroot_path.to_str().unwrap())?;
+
+        unsafe {
+            let err = subversion_sys::svn_client_upgrade(
+                wcroot_path_cstr.as_ptr(),
+                self.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            );
+            Error::from_raw(err)
+        }
+    }
 }
 
 pub struct Status(pub(crate) *const subversion_sys::svn_client_status_t);
@@ -4266,5 +4545,139 @@ mod tests {
 
         assert!(result.is_ok(), "Mkdir failed: {:?}", result.err());
         assert!(new_dir.exists());
+    }
+
+    #[test]
+    fn test_patch_dry_run() {
+        let mut ctx = Context::new().unwrap();
+
+        // Create a simple patch file
+        let temp_dir = std::env::temp_dir();
+        let patch_file = temp_dir.join("test.patch");
+        std::fs::write(
+            &patch_file,
+            "--- a/test.txt\n+++ b/test.txt\n@@ -1 +1 @@\n-old\n+new\n",
+        )
+        .unwrap();
+
+        let wc_dir = temp_dir.join("test_wc_patch");
+        let _ = std::fs::remove_dir_all(&wc_dir);
+        std::fs::create_dir_all(&wc_dir).unwrap();
+
+        // Test dry run patch application (should not fail even without valid WC)
+        let result = ctx.patch(
+            &patch_file,
+            &wc_dir,
+            true,  // dry_run
+            0,     // strip_count
+            false, // reverse
+            false, // ignore_whitespace
+            true,  // remove_tempfiles
+        );
+
+        // Clean up
+        let _ = std::fs::remove_file(&patch_file);
+        let _ = std::fs::remove_dir_all(&wc_dir);
+
+        // Patch should succeed in dry run mode or return expected error
+        // Note: patch might fail with directory not being a working copy, which is expected
+        match result {
+            Ok(()) => println!("Patch succeeded in dry run"),
+            Err(e) => println!("Patch failed as expected: {}", e),
+        }
+    }
+
+    #[test]
+    fn test_relocate_invalid_path() {
+        let mut ctx = Context::new().unwrap();
+
+        let temp_dir = std::env::temp_dir();
+        let invalid_wc = temp_dir.join("non_existent_wc");
+
+        // Test relocate with invalid working copy path
+        let result = ctx.relocate(
+            &invalid_wc,
+            "http://old.example.com/repo",
+            "http://new.example.com/repo",
+            false, // ignore_externals
+        );
+
+        // Should fail for non-existent working copy
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_revprop_operations() {
+        let mut ctx = Context::new().unwrap();
+
+        // Test with invalid URL (should fail gracefully)
+        let result = ctx.revprop_get("svn:author", "file:///non/existent/repo", &Revision::Head);
+
+        // Should return error for invalid repository
+        assert!(result.is_err());
+
+        // Test revprop_list with invalid URL
+        let result = ctx.revprop_list("file:///non/existent/repo", &Revision::Head);
+
+        // Should return error for invalid repository
+        assert!(result.is_err());
+
+        // Test revprop_set with invalid URL
+        let result = ctx.revprop_set(
+            "test:property",
+            Some(b"test value"),
+            "file:///non/existent/repo",
+            &Revision::Head,
+            None,
+            false, // force
+        );
+
+        // Should return error for invalid repository
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_suggest_merge_sources_invalid_url() {
+        let mut ctx = Context::new().unwrap();
+
+        // Test with invalid URL
+        let result = ctx.suggest_merge_sources("file:///non/existent/repo/trunk", &Revision::Head);
+
+        // Should return error for invalid repository
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_upgrade_invalid_path() {
+        let mut ctx = Context::new().unwrap();
+
+        let temp_dir = std::env::temp_dir();
+        let invalid_wc = temp_dir.join("non_existent_wc_upgrade");
+
+        // Test upgrade with non-existent working copy
+        let result = ctx.upgrade(&invalid_wc);
+
+        // Should fail for non-existent working copy
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_merge_reintegrate_invalid_params() {
+        let mut ctx = Context::new().unwrap();
+
+        let temp_dir = std::env::temp_dir();
+        let invalid_wc = temp_dir.join("non_existent_merge_wc");
+
+        // Test merge reintegrate with invalid parameters
+        let result = ctx.merge_reintegrate(
+            "file:///non/existent/source",
+            &Revision::Head,
+            &invalid_wc,
+            true, // dry_run
+            &[],  // merge_options
+        );
+
+        // Should fail for invalid source and target
+        assert!(result.is_err());
     }
 }

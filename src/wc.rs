@@ -511,12 +511,9 @@ pub fn is_wc_prop(name: &str) -> bool {
 }
 
 /// Match a path against an ignore list
-pub fn match_ignore_list(
-    path: &str,
-    patterns: &[&str],
-) -> Result<bool, crate::Error> {
+pub fn match_ignore_list(path: &str, patterns: &[&str]) -> Result<bool, crate::Error> {
     let path_cstr = std::ffi::CString::new(path).unwrap();
-    
+
     with_tmp_pool(|pool| {
         // Create APR array of patterns
         let mut patterns_array = apr::tables::ArrayHeader::<*const i8>::new(&pool);
@@ -524,7 +521,7 @@ pub fn match_ignore_list(
             let pattern_cstr = std::ffi::CString::new(*pattern)?;
             patterns_array.push(pattern_cstr.as_ptr());
         }
-        
+
         let mut matched = 0;
         let err = unsafe {
             subversion_sys::svn_wc_match_ignore_list(
@@ -533,7 +530,7 @@ pub fn match_ignore_list(
                 pool.as_mut_ptr(),
             )
         };
-        
+
         // svn_wc_match_ignore_list returns a boolean, not an error
         // The return value indicates whether there was a match
         matched = err as i32;
@@ -596,7 +593,9 @@ pub fn get_actual_target(path: &std::path::Path) -> Result<(String, String), cra
 }
 
 /// Get pristine contents of a file
-pub fn get_pristine_contents(path: &std::path::Path) -> Result<Option<crate::io::Stream>, crate::Error> {
+pub fn get_pristine_contents(
+    path: &std::path::Path,
+) -> Result<Option<crate::io::Stream>, crate::Error> {
     let path_str = path.to_string_lossy();
     let path_cstr = std::ffi::CString::new(path_str.as_ref()).unwrap();
     let mut contents: *mut subversion_sys::svn_stream_t = std::ptr::null_mut();
@@ -631,7 +630,9 @@ pub fn get_pristine_contents(path: &std::path::Path) -> Result<Option<crate::io:
     if contents.is_null() {
         Ok(None)
     } else {
-        Ok(Some(unsafe { crate::io::Stream::from_ptr_and_pool(contents, apr::Pool::new()) }))
+        Ok(Some(unsafe {
+            crate::io::Stream::from_ptr_and_pool(contents, apr::Pool::new())
+        }))
     }
 }
 
@@ -704,7 +705,10 @@ impl Context {
     }
 
     /// Get pristine contents of a file using this working copy context
-    pub fn get_pristine_contents(&mut self, path: &str) -> Result<Option<crate::io::Stream>, crate::Error> {
+    pub fn get_pristine_contents(
+        &mut self,
+        path: &str,
+    ) -> Result<Option<crate::io::Stream>, crate::Error> {
         let path_cstr = std::ffi::CString::new(path).unwrap();
         let mut contents: *mut subversion_sys::svn_stream_t = std::ptr::null_mut();
 
@@ -723,12 +727,17 @@ impl Context {
         if contents.is_null() {
             Ok(None)
         } else {
-            Ok(Some(unsafe { crate::io::Stream::from_ptr_and_pool(contents, pool) }))
+            Ok(Some(unsafe {
+                crate::io::Stream::from_ptr_and_pool(contents, pool)
+            }))
         }
     }
 
     /// Get pristine properties for a path
-    pub fn get_pristine_props(&mut self, path: &str) -> Result<Option<std::collections::HashMap<String, Vec<u8>>>, crate::Error> {
+    pub fn get_pristine_props(
+        &mut self,
+        path: &str,
+    ) -> Result<Option<std::collections::HashMap<String, Vec<u8>>>, crate::Error> {
         let path_cstr = std::ffi::CString::new(path).unwrap();
         let mut props: *mut apr_sys::apr_hash_t = std::ptr::null_mut();
 
@@ -748,9 +757,8 @@ impl Context {
             return Ok(None);
         }
 
-        let props_hash = unsafe {
-            apr::hash::Hash::<&str, *mut subversion_sys::svn_string_t>::from_ptr(props)
-        };
+        let props_hash =
+            unsafe { apr::hash::Hash::<&str, *mut subversion_sys::svn_string_t>::from_ptr(props) };
 
         let mut result = std::collections::HashMap::new();
         for (key, svn_str) in props_hash.iter(&pool) {
@@ -781,7 +789,7 @@ pub fn cleanup(
 ) -> Result<(), Error> {
     let path_str = wc_path.to_string_lossy();
     let path_cstr = std::ffi::CString::new(path_str.as_ref()).unwrap();
-    
+
     with_tmp_pool(|pool| -> Result<(), Error> {
         let mut ctx = std::ptr::null_mut();
         with_tmp_pool(|scratch_pool| {
@@ -804,9 +812,9 @@ pub fn cleanup(
                 fix_recorded_timestamps as i32,
                 clear_dav_cache as i32,
                 vacuum_pristines as i32,
-                None, // cancel_func
+                None,                 // cancel_func
                 std::ptr::null_mut(), // cancel_baton
-                None, // notify_func
+                None,                 // notify_func
                 std::ptr::null_mut(), // notify_baton
                 pool.as_mut_ptr(),
             )
@@ -825,7 +833,7 @@ pub fn revision_status(
     let path_str = wc_path.to_string_lossy();
     let path_cstr = std::ffi::CString::new(path_str.as_ref()).unwrap();
     let trail_cstr = trail_url.map(|s| std::ffi::CString::new(s).unwrap());
-    
+
     with_tmp_pool(|pool| -> Result<(i64, i64, bool, bool), Error> {
         let mut ctx = std::ptr::null_mut();
         with_tmp_pool(|scratch_pool| {
@@ -841,7 +849,7 @@ pub fn revision_status(
         })?;
 
         let mut status_ptr: *mut subversion_sys::svn_wc_revision_status_t = std::ptr::null_mut();
-        
+
         with_tmp_pool(|scratch_pool| {
             let err = unsafe {
                 subversion_sys::svn_wc_revision_status2(
@@ -850,7 +858,7 @@ pub fn revision_status(
                     path_cstr.as_ptr(),
                     trail_cstr.as_ref().map_or(std::ptr::null(), |c| c.as_ptr()),
                     committed as i32,
-                    None, // cancel_func
+                    None,                 // cancel_func
                     std::ptr::null_mut(), // cancel_baton
                     pool.as_mut_ptr(),
                     scratch_pool.as_mut_ptr(),
@@ -858,16 +866,21 @@ pub fn revision_status(
             };
             Error::from_raw(err)
         })?;
-        
+
         if status_ptr.is_null() {
             return Err(Error::from(std::io::Error::new(
-                std::io::ErrorKind::Other, 
-                "Failed to get revision status"
+                std::io::ErrorKind::Other,
+                "Failed to get revision status",
             )));
         }
-        
+
         let status = unsafe { *status_ptr };
-        Ok((status.min_rev, status.max_rev, status.switched != 0, status.modified != 0))
+        Ok((
+            status.min_rev,
+            status.max_rev,
+            status.switched != 0,
+            status.modified != 0,
+        ))
     })
 }
 
@@ -967,10 +980,19 @@ mod tests {
     #[test]
     fn test_status_enum() {
         // Test Status enum conversions
-        assert_eq!(Status::Normal as u32, subversion_sys::svn_wc_status_kind_svn_wc_status_normal);
-        assert_eq!(Status::Added as u32, subversion_sys::svn_wc_status_kind_svn_wc_status_added);
-        assert_eq!(Status::Deleted as u32, subversion_sys::svn_wc_status_kind_svn_wc_status_deleted);
-        
+        assert_eq!(
+            Status::Normal as u32,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_normal
+        );
+        assert_eq!(
+            Status::Added as u32,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_added
+        );
+        assert_eq!(
+            Status::Deleted as u32,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_deleted
+        );
+
         // Test From conversion
         let status = Status::from(subversion_sys::svn_wc_status_kind_svn_wc_status_modified);
         assert_eq!(status, Status::Modified);
@@ -979,9 +1001,15 @@ mod tests {
     #[test]
     fn test_schedule_enum() {
         // Test Schedule enum conversions
-        assert_eq!(Schedule::Normal as u32, subversion_sys::svn_wc_schedule_t_svn_wc_schedule_normal);
-        assert_eq!(Schedule::Add as u32, subversion_sys::svn_wc_schedule_t_svn_wc_schedule_add);
-        
+        assert_eq!(
+            Schedule::Normal as u32,
+            subversion_sys::svn_wc_schedule_t_svn_wc_schedule_normal
+        );
+        assert_eq!(
+            Schedule::Add as u32,
+            subversion_sys::svn_wc_schedule_t_svn_wc_schedule_add
+        );
+
         // Test From conversion
         let schedule = Schedule::from(subversion_sys::svn_wc_schedule_t_svn_wc_schedule_delete);
         assert_eq!(schedule, Schedule::Delete);
@@ -994,7 +1022,7 @@ mod tests {
         assert!(is_normal_prop("svn:keywords"));
         assert!(is_normal_prop("svn:eol-style"));
         assert!(is_normal_prop("svn:mime-type"));
-        
+
         // Entry and WC properties are NOT normal
         assert!(!is_normal_prop("svn:entry:committed-rev"));
         assert!(!is_normal_prop("svn:wc:ra_dav:version-url"));
@@ -1005,7 +1033,7 @@ mod tests {
         // These should be entry properties
         assert!(is_entry_prop("svn:entry:committed-rev"));
         assert!(is_entry_prop("svn:entry:uuid"));
-        
+
         // These should not be entry properties
         assert!(!is_entry_prop("svn:keywords"));
         assert!(!is_entry_prop("user:custom"));
@@ -1015,7 +1043,7 @@ mod tests {
     fn test_is_wc_prop() {
         // These should be WC properties
         assert!(is_wc_prop("svn:wc:ra_dav:version-url"));
-        
+
         // These should not be WC properties
         assert!(!is_wc_prop("svn:keywords"));
         assert!(!is_wc_prop("user:custom"));

@@ -1,4 +1,4 @@
-use crate::{Error, svn_result, with_tmp_pool};
+use crate::{svn_result, with_tmp_pool, Error};
 
 /// Options for diff operations
 #[derive(Debug, Clone, Copy, Default)]
@@ -106,7 +106,7 @@ pub struct FileOptions {
     /// Ignore whitespace changes
     pub ignore_space: IgnoreSpace,
     /// Ignore end-of-line differences
-    pub ignore_eol_style: bool,  
+    pub ignore_eol_style: bool,
     /// Show function context
     pub show_c_function: bool,
 }
@@ -117,7 +117,11 @@ impl FileOptions {
     }
 
     pub fn with_ignore_whitespace(mut self, ignore: bool) -> Self {
-        self.ignore_space = if ignore { IgnoreSpace::Change } else { IgnoreSpace::None };
+        self.ignore_space = if ignore {
+            IgnoreSpace::Change
+        } else {
+            IgnoreSpace::None
+        };
         self
     }
 
@@ -147,13 +151,18 @@ pub enum IgnoreSpace {
 impl From<IgnoreSpace> for subversion_sys::svn_diff_file_ignore_space_t {
     fn from(ignore: IgnoreSpace) -> Self {
         match ignore {
-            IgnoreSpace::None => subversion_sys::svn_diff_file_ignore_space_t_svn_diff_file_ignore_space_none,
-            IgnoreSpace::Change => subversion_sys::svn_diff_file_ignore_space_t_svn_diff_file_ignore_space_change,
-            IgnoreSpace::All => subversion_sys::svn_diff_file_ignore_space_t_svn_diff_file_ignore_space_all,
+            IgnoreSpace::None => {
+                subversion_sys::svn_diff_file_ignore_space_t_svn_diff_file_ignore_space_none
+            }
+            IgnoreSpace::Change => {
+                subversion_sys::svn_diff_file_ignore_space_t_svn_diff_file_ignore_space_change
+            }
+            IgnoreSpace::All => {
+                subversion_sys::svn_diff_file_ignore_space_t_svn_diff_file_ignore_space_all
+            }
         }
     }
 }
-
 
 /// Diff two files
 pub fn file_diff(
@@ -163,10 +172,10 @@ pub fn file_diff(
 ) -> Result<Diff, Error> {
     let original_cstr = std::ffi::CString::new(original.to_string_lossy().as_ref())?;
     let modified_cstr = std::ffi::CString::new(modified.to_string_lossy().as_ref())?;
-    
+
     let pool = apr::Pool::new();
     let mut diff_ptr = std::ptr::null_mut();
-    
+
     // Create diff options
     let diff_options = unsafe { subversion_sys::svn_diff_file_options_create(pool.as_mut_ptr()) };
     unsafe {
@@ -184,7 +193,7 @@ pub fn file_diff(
             pool.as_mut_ptr(),
         )
     };
-    
+
     svn_result(err)?;
     Ok(unsafe { Diff::from_raw(diff_ptr, pool) })
 }
@@ -199,10 +208,10 @@ pub fn file_diff3(
     let original_cstr = std::ffi::CString::new(original.to_string_lossy().as_ref())?;
     let modified_cstr = std::ffi::CString::new(modified.to_string_lossy().as_ref())?;
     let latest_cstr = std::ffi::CString::new(latest.to_string_lossy().as_ref())?;
-    
+
     let pool = apr::Pool::new();
     let mut diff_ptr = std::ptr::null_mut();
-    
+
     // Create diff options
     let diff_options = unsafe { subversion_sys::svn_diff_file_options_create(pool.as_mut_ptr()) };
     unsafe {
@@ -221,7 +230,7 @@ pub fn file_diff3(
             pool.as_mut_ptr(),
         )
     };
-    
+
     svn_result(err)?;
     Ok(unsafe { Diff::from_raw(diff_ptr, pool) })
 }
@@ -238,10 +247,10 @@ pub fn file_diff4(
     let modified_cstr = std::ffi::CString::new(modified.to_string_lossy().as_ref())?;
     let latest_cstr = std::ffi::CString::new(latest.to_string_lossy().as_ref())?;
     let ancestor_cstr = std::ffi::CString::new(ancestor.to_string_lossy().as_ref())?;
-    
+
     let pool = apr::Pool::new();
     let mut diff_ptr = std::ptr::null_mut();
-    
+
     // Create diff options
     let diff_options = unsafe { subversion_sys::svn_diff_file_options_create(pool.as_mut_ptr()) };
     unsafe {
@@ -261,7 +270,7 @@ pub fn file_diff4(
             pool.as_mut_ptr(),
         )
     };
-    
+
     svn_result(err)?;
     Ok(unsafe { Diff::from_raw(diff_ptr, pool) })
 }
@@ -280,10 +289,14 @@ pub fn file_output_unified(
     let original_path_cstr = std::ffi::CString::new(original_path.to_string_lossy().as_ref())?;
     let modified_path_cstr = std::ffi::CString::new(modified_path.to_string_lossy().as_ref())?;
     let header_encoding_cstr = std::ffi::CString::new(header_encoding)?;
-    
-    let original_header_cstr = original_header.map(|h| std::ffi::CString::new(h)).transpose()?;
-    let modified_header_cstr = modified_header.map(|h| std::ffi::CString::new(h)).transpose()?;
-    
+
+    let original_header_cstr = original_header
+        .map(|h| std::ffi::CString::new(h))
+        .transpose()?;
+    let modified_header_cstr = modified_header
+        .map(|h| std::ffi::CString::new(h))
+        .transpose()?;
+
     with_tmp_pool(|scratch_pool| {
         let err = unsafe {
             subversion_sys::svn_diff_file_output_unified4(
@@ -291,18 +304,22 @@ pub fn file_output_unified(
                 diff.as_ptr(),
                 original_path_cstr.as_ptr(),
                 modified_path_cstr.as_ptr(),
-                original_header_cstr.as_ref().map_or(std::ptr::null(), |c| c.as_ptr()),
-                modified_header_cstr.as_ref().map_or(std::ptr::null(), |c| c.as_ptr()),
+                original_header_cstr
+                    .as_ref()
+                    .map_or(std::ptr::null(), |c| c.as_ptr()),
+                modified_header_cstr
+                    .as_ref()
+                    .map_or(std::ptr::null(), |c| c.as_ptr()),
                 header_encoding_cstr.as_ptr(),
                 std::ptr::null(), // relative_to_dir
-                1, // show_c_function
+                1,                // show_c_function
                 context_size,
-                None, // cancel_func
+                None,                 // cancel_func
                 std::ptr::null_mut(), // cancel_baton
                 scratch_pool.as_mut_ptr(),
             )
         };
-        
+
         svn_result(err)
     })
 }
@@ -315,18 +332,18 @@ pub fn mem_string_diff(
 ) -> Result<Diff, Error> {
     let pool = apr::Pool::new();
     let mut diff_ptr = std::ptr::null_mut();
-    
+
     // Create svn_string_t structures
     let original_svn_str = subversion_sys::svn_string_t {
         data: original.as_ptr() as *const std::os::raw::c_char,
         len: original.len(),
     };
-    
+
     let modified_svn_str = subversion_sys::svn_string_t {
         data: modified.as_ptr() as *const std::os::raw::c_char,
         len: modified.len(),
     };
-    
+
     // Create diff options
     let diff_options = unsafe { subversion_sys::svn_diff_file_options_create(pool.as_mut_ptr()) };
     unsafe {
@@ -344,7 +361,7 @@ pub fn mem_string_diff(
             pool.as_mut_ptr(),
         )
     };
-    
+
     svn_result(err)?;
     Ok(unsafe { Diff::from_raw(diff_ptr, pool) })
 }
@@ -352,8 +369,8 @@ pub fn mem_string_diff(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
     use std::io::Write;
+    use tempfile::tempdir;
 
     #[test]
     fn test_file_options() {
@@ -361,7 +378,7 @@ mod tests {
             .with_ignore_whitespace(true)
             .with_ignore_eol_style(true)
             .with_show_c_function(false);
-        
+
         // Test that the builder pattern works
         assert!(true);
     }
@@ -370,10 +387,10 @@ mod tests {
     fn test_mem_string_diff() {
         let original = "line 1\nline 2\nline 3\n";
         let modified = "line 1\nline 2 modified\nline 3\n";
-        
+
         let options = FileOptions::default();
         let diff = mem_string_diff(original, modified, options);
-        
+
         assert!(diff.is_ok());
         let diff = diff.unwrap();
         assert!(diff.contains_changes());
@@ -382,43 +399,43 @@ mod tests {
     #[test]
     fn test_file_diff() -> Result<(), Box<dyn std::error::Error>> {
         let temp_dir = tempdir()?;
-        
+
         // Create test files
         let original_path = temp_dir.path().join("original.txt");
         let modified_path = temp_dir.path().join("modified.txt");
-        
+
         let mut original_file = std::fs::File::create(&original_path)?;
         original_file.write_all(b"line 1\nline 2\nline 3\n")?;
-        
+
         let mut modified_file = std::fs::File::create(&modified_path)?;
         modified_file.write_all(b"line 1\nline 2 modified\nline 3\n")?;
-        
+
         let options = FileOptions::default();
         let diff = file_diff(&original_path, &modified_path, options)?;
-        
+
         assert!(diff.contains_changes());
         assert!(!diff.contains_conflicts());
-        
+
         Ok(())
     }
 
     #[test]
     fn test_diff_identical_files() -> Result<(), Box<dyn std::error::Error>> {
         let temp_dir = tempdir()?;
-        
+
         // Create identical test files
         let original_path = temp_dir.path().join("original.txt");
         let modified_path = temp_dir.path().join("modified.txt");
-        
+
         let content = b"line 1\nline 2\nline 3\n";
         std::fs::write(&original_path, content)?;
         std::fs::write(&modified_path, content)?;
-        
+
         let options = FileOptions::default();
         let diff = file_diff(&original_path, &modified_path, options)?;
-        
+
         assert!(!diff.contains_changes());
-        
+
         Ok(())
     }
 }

@@ -28,6 +28,7 @@ pub mod io;
 #[cfg(feature = "client")]
 pub mod merge;
 pub mod mergeinfo;
+pub mod opt;
 pub mod props;
 #[cfg(feature = "ra")]
 pub mod ra;
@@ -217,23 +218,23 @@ mod tests {
     fn test_checksum_operations() {
         let pool = apr::Pool::new();
         let data = b"Hello, World!";
-        
+
         // Test creating a checksum
         let checksum1 = checksum(ChecksumKind::SHA1, data, &pool).unwrap();
         assert_eq!(checksum1.kind(), ChecksumKind::SHA1);
         assert!(!checksum1.is_empty());
         assert_eq!(checksum1.size(), 20); // SHA1 is 20 bytes
-        
+
         // Test creating another checksum with same data
         let checksum2 = Checksum::create(ChecksumKind::SHA1, data, &pool).unwrap();
-        
+
         // Test matching checksums
         assert!(checksum1.matches(&checksum2));
-        
+
         // Test different data produces different checksum
         let checksum3 = checksum(ChecksumKind::SHA1, b"Different data", &pool).unwrap();
         assert!(!checksum1.matches(&checksum3));
-        
+
         // Test empty checksum
         let empty = Checksum::empty(ChecksumKind::SHA1, &pool).unwrap();
         assert!(empty.is_empty());
@@ -243,17 +244,17 @@ mod tests {
     fn test_checksum_serialization() {
         let pool = apr::Pool::new();
         let data = b"Test data for serialization";
-        
+
         // Create a checksum
         let checksum1 = checksum(ChecksumKind::MD5, data, &pool).unwrap();
-        
+
         // Serialize it
         let serialized = checksum1.serialize(&pool).unwrap();
         assert!(!serialized.is_empty());
-        
+
         // Deserialize it
         let checksum2 = Checksum::deserialize(&serialized, &pool).unwrap();
-        
+
         // They should match
         assert!(checksum1.matches(&checksum2));
     }
@@ -262,17 +263,17 @@ mod tests {
     fn test_checksum_hex_conversion() {
         let pool = apr::Pool::new();
         let data = b"Test";
-        
+
         // Create a checksum
         let checksum = checksum(ChecksumKind::MD5, data, &pool).unwrap();
-        
+
         // Convert to hex
         let hex = checksum.to_hex(&pool);
         assert!(!hex.is_empty());
-        
+
         // Parse from hex
         let checksum2 = Checksum::parse_hex(ChecksumKind::MD5, &hex, &pool).unwrap();
-        
+
         // They should match
         assert!(checksum.matches(&checksum2));
     }
@@ -280,17 +281,17 @@ mod tests {
     #[test]
     fn test_checksum_context() {
         let pool = apr::Pool::new();
-        
+
         // Create a context
         let mut ctx = ChecksumContext::new(ChecksumKind::SHA1, &pool).unwrap();
-        
+
         // Update with data in chunks
         ctx.update(b"Hello, ").unwrap();
         ctx.update(b"World!").unwrap();
-        
+
         // Finish and get checksum
         let checksum1 = ctx.finish(&pool).unwrap();
-        
+
         // Compare with single-shot checksum
         let checksum2 = checksum(ChecksumKind::SHA1, b"Hello, World!", &pool).unwrap();
         assert!(checksum1.matches(&checksum2));
@@ -301,13 +302,13 @@ mod tests {
         let pool1 = apr::Pool::new();
         let pool2 = apr::Pool::new();
         let data = b"Duplicate me";
-        
+
         // Create a checksum (use SHA1 instead of SHA256)
         let checksum1 = checksum(ChecksumKind::SHA1, data, &pool1).unwrap();
-        
+
         // Duplicate to another pool
         let checksum2 = checksum1.dup(&pool2).unwrap();
-        
+
         // They should match
         assert!(checksum1.matches(&checksum2));
         assert_eq!(checksum1.kind(), checksum2.kind());
@@ -316,15 +317,15 @@ mod tests {
     #[test]
     fn test_checksum_has_known_size() {
         let pool = apr::Pool::new();
-        
+
         let md5 = Checksum::empty(ChecksumKind::MD5, &pool).unwrap();
         assert!(md5.has_known_size(16));
         assert!(!md5.has_known_size(20));
-        
+
         let sha1 = Checksum::empty(ChecksumKind::SHA1, &pool).unwrap();
         assert!(sha1.has_known_size(20));
         assert!(!sha1.has_known_size(16));
-        
+
         let fnv = Checksum::empty(ChecksumKind::Fnv1a32, &pool).unwrap();
         assert!(fnv.has_known_size(4));
         assert!(!fnv.has_known_size(16));
@@ -458,6 +459,28 @@ impl From<Revision> for svn_opt_revision_t {
                 kind: subversion_sys::svn_opt_revision_kind_svn_opt_revision_head,
                 value: svn_opt_revision_value_t::default(),
             },
+        }
+    }
+}
+
+impl From<svn_opt_revision_t> for Revision {
+    fn from(revision: svn_opt_revision_t) -> Self {
+        match revision.kind {
+            subversion_sys::svn_opt_revision_kind_svn_opt_revision_unspecified => {
+                Revision::Unspecified
+            }
+            subversion_sys::svn_opt_revision_kind_svn_opt_revision_number => unsafe {
+                Revision::Number(Revnum(*revision.value.number.as_ref()))
+            },
+            subversion_sys::svn_opt_revision_kind_svn_opt_revision_date => unsafe {
+                Revision::Date(*revision.value.date.as_ref())
+            },
+            subversion_sys::svn_opt_revision_kind_svn_opt_revision_committed => Revision::Committed,
+            subversion_sys::svn_opt_revision_kind_svn_opt_revision_previous => Revision::Previous,
+            subversion_sys::svn_opt_revision_kind_svn_opt_revision_base => Revision::Base,
+            subversion_sys::svn_opt_revision_kind_svn_opt_revision_working => Revision::Working,
+            subversion_sys::svn_opt_revision_kind_svn_opt_revision_head => Revision::Head,
+            _ => Revision::Unspecified,
         }
     }
 }
@@ -1148,9 +1171,7 @@ impl<'pool> Checksum<'pool> {
 
     /// Compare two checksums for equality
     pub fn matches(&self, other: &Checksum) -> bool {
-        unsafe {
-            subversion_sys::svn_checksum_match(self.ptr, other.ptr) != 0
-        }
+        unsafe { subversion_sys::svn_checksum_match(self.ptr, other.ptr) != 0 }
     }
 
     /// Duplicate this checksum into a new pool
@@ -1171,7 +1192,7 @@ impl<'pool> Checksum<'pool> {
             let serialized = subversion_sys::svn_checksum_serialize(
                 self.ptr,
                 pool.as_mut_ptr(),
-                pool.as_mut_ptr()
+                pool.as_mut_ptr(),
             );
             if serialized.is_null() {
                 Err(Error::from_str("Failed to serialize checksum"))
@@ -1191,7 +1212,7 @@ impl<'pool> Checksum<'pool> {
                 &mut checksum,
                 data_cstr.as_ptr(),
                 pool.as_mut_ptr(),
-                pool.as_mut_ptr()
+                pool.as_mut_ptr(),
             );
             Error::from_raw(err)?;
             if checksum.is_null() {
@@ -1218,7 +1239,8 @@ impl<'pool> Checksum<'pool> {
     /// Convert checksum for display
     pub fn to_display(&self, pool: &apr::Pool) -> String {
         unsafe {
-            let display = subversion_sys::svn_checksum_to_cstring_display(self.ptr, pool.as_mut_ptr());
+            let display =
+                subversion_sys::svn_checksum_to_cstring_display(self.ptr, pool.as_mut_ptr());
             if display.is_null() {
                 String::new()
             } else {
