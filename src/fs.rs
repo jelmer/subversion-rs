@@ -228,19 +228,17 @@ impl Fs {
             return Ok(std::collections::HashMap::new());
         }
 
-        let revprops = apr::hash::Hash::<&[u8], subversion_sys::svn_string_t>::from_ptr(props);
+        let revprops = apr::hash::Hash::<&[u8], Option<&crate::SvnString>>::from_ptr(props);
 
         let revprops = revprops
             .iter(&pool)
-            .map(|(k, v)| {
-                (
-                    String::from_utf8_lossy(k).into_owned(),
-                    if v.data.is_null() || v.len == 0 {
-                        Vec::new()
-                    } else {
-                        unsafe { std::slice::from_raw_parts(v.data as *const u8, v.len).to_vec() }
-                    },
-                )
+            .filter_map(|(k, v_opt)| {
+                v_opt.map(|v| {
+                    (
+                        String::from_utf8_lossy(k).into_owned(),
+                        v.as_bytes().to_vec(),
+                    )
+                })
             })
             .collect();
 
@@ -469,15 +467,13 @@ impl Root {
 
             let mut result = std::collections::HashMap::new();
             if !props.is_null() {
-                let hash = apr::hash::Hash::<&[u8], subversion_sys::svn_string_t>::from_ptr(props);
-                for (k, v) in hash.iter(pool) {
-                    let key = String::from_utf8_lossy(k).into_owned();
-                    let value = if v.data.is_null() || v.len == 0 {
-                        Vec::new()
-                    } else {
-                        unsafe { std::slice::from_raw_parts(v.data as *const u8, v.len).to_vec() }
-                    };
-                    result.insert(key, value);
+                let hash = apr::hash::Hash::<&[u8], Option<&crate::SvnString>>::from_ptr(props);
+                for (k, v_opt) in hash.iter(pool) {
+                    if let Some(v) = v_opt {
+                        let key = String::from_utf8_lossy(k).into_owned();
+                        let value = v.as_bytes().to_vec();
+                        result.insert(key, value);
+                    }
                 }
             }
             Ok(result)
@@ -503,7 +499,7 @@ impl Root {
                     );
                 for (k, v) in hash.iter(pool) {
                     let path = String::from_utf8_lossy(k).into_owned();
-                    let change = FsPathChange::from_raw(*v);
+                    let change = FsPathChange::from_raw(v);
                     result.insert(path, change);
                 }
             }
@@ -550,7 +546,7 @@ impl Root {
                 );
                 for (k, v) in hash.iter(pool) {
                     let name = String::from_utf8_lossy(k).into_owned();
-                    let entry = FsDirEntry::from_raw(*v);
+                    let entry = FsDirEntry::from_raw(v);
                     result.insert(name, entry);
                 }
             }

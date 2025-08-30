@@ -820,20 +820,14 @@ impl Context {
         }
 
         let props_hash =
-            unsafe { apr::hash::Hash::<&str, *mut subversion_sys::svn_string_t>::from_ptr(props) };
+            unsafe { apr::hash::Hash::<&str, Option<&crate::SvnString>>::from_ptr(props) };
 
         let mut result = std::collections::HashMap::new();
-        for (key, svn_str) in props_hash.iter(&pool) {
-            let value = unsafe {
-                let svn_str = *svn_str;
-                if !svn_str.is_null() {
-                    std::slice::from_raw_parts((*svn_str).data as *const u8, (*svn_str).len)
-                        .to_vec()
-                } else {
-                    Vec::new()
-                }
-            };
-            result.insert(String::from_utf8_lossy(key).to_string(), value);
+        for (key, svn_str_opt) in props_hash.iter(&pool) {
+            if let Some(svn_str) = svn_str_opt {
+                let value = svn_str.as_bytes().to_vec();
+                result.insert(String::from_utf8_lossy(key).to_string(), value);
+            }
         }
 
         Ok(Some(result))

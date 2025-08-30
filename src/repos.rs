@@ -77,9 +77,13 @@ impl Repos {
 
         // Convert config HashMap to APR hash if provided
         let config_hash = if let Some(cfg) = config {
-            let mut hash = apr::hash::Hash::<&[u8], &[u8]>::new(&pool);
-            for (k, v) in cfg.iter() {
-                hash.insert(&k.as_bytes(), &v.as_bytes());
+            let byte_pairs: Vec<_> = cfg
+                .iter()
+                .map(|(k, v)| (k.as_bytes(), v.as_bytes()))
+                .collect();
+            let mut hash = apr::hash::Hash::<&[u8], *const u8>::new(&pool);
+            for (k, v) in byte_pairs.iter() {
+                hash.insert(k, v.as_ptr());
             }
             unsafe { hash.as_mut_ptr() }
         } else {
@@ -88,9 +92,13 @@ impl Repos {
 
         // Convert fs_config HashMap to APR hash if provided
         let fs_config_hash = if let Some(cfg) = fs_config {
-            let mut hash = apr::hash::Hash::<&[u8], &[u8]>::new(&pool);
-            for (k, v) in cfg.iter() {
-                hash.insert(&k.as_bytes(), &v.as_bytes());
+            let byte_pairs: Vec<_> = cfg
+                .iter()
+                .map(|(k, v)| (k.as_bytes(), v.as_bytes()))
+                .collect();
+            let mut hash = apr::hash::Hash::<&[u8], *const u8>::new(&pool);
+            for (k, v) in byte_pairs.iter() {
+                hash.insert(k, v.as_ptr());
             }
             unsafe { hash.as_mut_ptr() }
         } else {
