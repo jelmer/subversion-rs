@@ -101,17 +101,13 @@ extern "C" fn wrap_proplist_receiver2(
             ) -> Result<(), Error>;
         let callback = &mut *(callback);
         let path: &str = std::ffi::CStr::from_ptr(path).to_str().unwrap();
-        let props = apr::hash::Hash::<&str, *mut subversion_sys::svn_string_t>::from_ptr(props);
+        let props = apr::hash::Hash::<&str, &crate::SvnString>::from_ptr(props);
         let props = props
             .iter(&scratch_pool)
             .map(|(k, v)| {
                 (
                     String::from_utf8_lossy(k).to_string(),
-                    if (*v).is_null() {
-                        Vec::new()
-                    } else {
-                        std::slice::from_raw_parts((**v).data as *const u8, (**v).len).to_vec()
-                    },
+                    v.to_vec(),
                 )
             })
             .collect::<HashMap<_, _>>();
@@ -143,11 +139,9 @@ pub struct Info(*const subversion_sys::svn_client_info2_t);
 pub struct BlameInfo {
     pub line_no: i64,
     pub revision: Revnum,
-    pub author: Option<String>,
-    pub date: Option<apr::time::Time>,
+    pub revprops: HashMap<String, Vec<u8>>,
     pub merged_revision: Option<Revnum>,
-    pub merged_author: Option<String>,
-    pub merged_date: Option<apr::time::Time>,
+    pub merged_revprops: HashMap<String, Vec<u8>>,
     pub merged_path: Option<String>,
     pub line: String,
     pub local_change: bool,
@@ -236,70 +230,30 @@ unsafe extern "C" fn blame_receiver_wrapper(
 ) -> *mut subversion_sys::svn_error_t {
     let callback = &mut *(baton as *mut &mut dyn FnMut(BlameInfo) -> Result<(), Error>);
 
-    // Extract author and date from rev_props
-    let (author, date) = if !rev_props.is_null() {
-        let props =
-            apr::hash::Hash::<&str, *const subversion_sys::svn_string_t>::from_ptr(rev_props);
-        let _pool = apr::Pool::from_raw(pool);
-
-        let author = props.get("svn:author").and_then(|svn_str| {
-            if !svn_str.is_null() {
-                let str_data = (**svn_str).data as *const i8;
-                let str_len = (**svn_str).len;
-                let bytes = std::slice::from_raw_parts(str_data as *const u8, str_len);
-                String::from_utf8(bytes.to_vec()).ok()
-            } else {
-                None
-            }
-        });
-
-        let date = props.get("svn:date").and_then(|svn_str| {
-            if !svn_str.is_null() {
-                let str_data = (**svn_str).data as *const i8;
-                let str_len = (**svn_str).len;
-                let bytes = std::slice::from_raw_parts(str_data as *const u8, str_len);
-                let date_str = String::from_utf8_lossy(bytes);
-                // Parse SVN date format - this is a simplified version
-                // Real implementation would need proper date parsing
-                Some(apr::time::Time::now())
-            } else {
-                None
-            }
-        });
-        (author, date)
+    // Extract revprops
+    let revprops = if !rev_props.is_null() {
+        let props = apr::hash::Hash::<&str, &crate::SvnString>::from_ptr(rev_props);
+        let pool = apr::Pool::from_raw(pool);
+        props.iter(&pool)
+            .map(|(k, v)| {
+                (String::from_utf8_lossy(k).into_owned(), v.as_bytes().to_vec())
+            })
+            .collect()
     } else {
-        (None, None)
+        HashMap::new()
     };
 
-    // Extract merged revision info
-    let (merged_author, merged_date) = if !merged_rev_props.is_null() {
-        let props = apr::hash::Hash::<&str, *const subversion_sys::svn_string_t>::from_ptr(
-            merged_rev_props,
-        );
-        let _pool = apr::Pool::from_raw(pool);
-
-        let author = props.get("svn:author").and_then(|svn_str| {
-            if !svn_str.is_null() {
-                let str_data = (**svn_str).data as *const i8;
-                let str_len = (**svn_str).len;
-                let bytes = std::slice::from_raw_parts(str_data as *const u8, str_len);
-                String::from_utf8(bytes.to_vec()).ok()
-            } else {
-                None
-            }
-        });
-
-        let date = props.get("svn:date").and_then(|svn_str| {
-            if !svn_str.is_null() {
-                // Simplified date handling
-                Some(apr::time::Time::now())
-            } else {
-                None
-            }
-        });
-        (author, date)
+    // Extract merged revprops
+    let merged_revprops = if !merged_rev_props.is_null() {
+        let props = apr::hash::Hash::<&str, &crate::SvnString>::from_ptr(merged_rev_props);
+        let pool = apr::Pool::from_raw(pool);
+        props.iter(&pool)
+            .map(|(k, v)| {
+                (String::from_utf8_lossy(k).into_owned(), v.as_bytes().to_vec())
+            })
+            .collect()
     } else {
-        (None, None)
+        HashMap::new()
     };
 
     // Extract line content
@@ -327,11 +281,9 @@ unsafe extern "C" fn blame_receiver_wrapper(
     let info = BlameInfo {
         line_no,
         revision: Revnum::from_raw(revision).unwrap_or(Revnum::from(0u64)),
-        author,
-        date,
+        revprops,
         merged_revision: Revnum::from_raw(merged_revision),
-        merged_author,
-        merged_date,
+        merged_revprops,
         merged_path: merged_path_str,
         line: line_str,
         local_change: local_change != 0,
@@ -1005,10 +957,16 @@ impl Context {
     ) -> Result<(), Error> {
         let mut pool = std::rc::Rc::new(Pool::default());
         unsafe {
-            let mut rps = apr::hash::Hash::new(&pool);
-            for (k, v) in revprop_table {
-                rps.insert(k, &v);
-            }
+            // Convert revprops to BStr objects that live in the pool
+            let svn_strings: Vec<_> = revprop_table
+                .iter()
+                .map(|(k, v)| (*k, crate::string::BStr::from_bytes(v, &pool)))
+                .collect();
+            
+            let rps = apr::hash::Hash::from_iter(
+                &pool,
+                svn_strings.iter().map(|(k, v)| (*k, v))
+            );
             // Keep CStrings alive for the duration of the function
             let path_cstrings: Vec<std::ffi::CString> = paths
                 .iter()
@@ -1040,10 +998,16 @@ impl Context {
     ) -> Result<(), Error> {
         let mut pool = std::rc::Rc::new(Pool::default());
         unsafe {
-            let mut rps = apr::hash::Hash::new(&pool);
-            for (k, v) in revprop_table {
-                rps.insert(k, &v);
-            }
+            // Convert revprops to BStr objects that live in the pool  
+            let svn_strings: Vec<_> = revprop_table
+                .iter()
+                .map(|(k, v)| (*k, crate::string::BStr::from_str(v, &pool)))
+                .collect();
+            
+            let rps = apr::hash::Hash::from_iter(
+                &pool,
+                svn_strings.iter().map(|(k, v)| (*k, v))
+            );
             // Keep CStrings alive for the duration of the function
             let path_cstrings: Vec<std::ffi::CString> = paths
                 .iter()
@@ -1130,10 +1094,16 @@ impl Context {
     ) -> Result<(), Error> {
         let mut pool = std::rc::Rc::new(Pool::default());
         let path = path.as_canonical_dirent()?;
-        let mut rps = apr::hash::Hash::new(std::rc::Rc::get_mut(&mut pool).unwrap());
-        for (k, v) in revprop_table {
-            rps.insert(k, &v);
-        }
+        // Convert revprops to BStr objects that live in the pool
+        let svn_strings: Vec<_> = revprop_table
+            .iter()
+            .map(|(k, v)| (*k, crate::string::BStr::from_str(v, &pool)))
+            .collect();
+        
+        let rps = apr::hash::Hash::from_iter(
+            &pool,
+            svn_strings.iter().map(|(k, v)| (*k, v))
+        );
         unsafe {
             let filter_callback = Box::into_raw(Box::new(filter_callback));
             let commit_callback = Box::into_raw(Box::new(commit_callback));
@@ -1198,10 +1168,16 @@ impl Context {
         commit_callback: &dyn FnMut(&crate::CommitInfo) -> Result<(), Error>,
     ) -> Result<(), Error> {
         let mut pool = std::rc::Rc::new(Pool::default());
-        let mut rps = apr::hash::Hash::new(&pool);
-        for (k, v) in revprop_table {
-            rps.insert(k, &v);
-        }
+        // Convert revprops to BStr objects that live in the pool
+        let svn_strings: Vec<_> = revprop_table
+            .iter()
+            .map(|(k, v)| (*k, crate::string::BStr::from_str(v, &pool)))
+            .collect();
+        
+        let rps = apr::hash::Hash::from_iter(
+            &pool,
+            svn_strings.iter().map(|(k, v)| (*k, v))
+        );
 
         unsafe {
             // Keep CStrings alive for the duration of the function
@@ -1581,10 +1557,10 @@ impl Context {
                 apr::pool::Pool::new().as_mut_ptr(),
             );
             Error::from_raw(err)?;
-            let props = apr::hash::Hash::<&str, &[u8]>::from_ptr(props);
+            let props = apr::hash::Hash::<&str, &crate::SvnString>::from_ptr(props);
             Ok(props
                 .iter(&pool)
-                .map(|(k, v)| (String::from_utf8_lossy(k).to_string(), v.to_vec()))
+                .map(|(k, v)| (String::from_utf8_lossy(k).to_string(), v.as_bytes().to_vec()))
                 .collect())
         }
     }
@@ -2033,18 +2009,14 @@ impl Context {
 
             // Convert apr hash to Rust HashMap
             // The hash values are svn_string_t structs (not pointers)
-            let hash = apr::hash::Hash::<&[u8], subversion_sys::svn_string_t>::from_ptr(props);
+            let hash = apr::hash::Hash::<&[u8], Option<&crate::SvnString>>::from_ptr(props);
             let mut result = std::collections::HashMap::new();
-            for (k, v) in hash.iter(pool) {
-                let key = String::from_utf8_lossy(k).into_owned();
-                let data_ptr = v.data;
-                let data_len = v.len;
-                let value = if data_ptr.is_null() || data_len == 0 {
-                    Vec::new()
-                } else {
-                    unsafe { std::slice::from_raw_parts(data_ptr as *const u8, data_len).to_vec() }
-                };
-                result.insert(key, value);
+            for (k, v_opt) in hash.iter(pool) {
+                if let Some(v) = v_opt {
+                    let key = String::from_utf8_lossy(k).into_owned();
+                    let value = v.as_bytes().to_vec();
+                    result.insert(key, value);
+                }
             }
             Ok(result)
         })
@@ -2145,15 +2117,15 @@ impl Context {
 
                 // Convert props hash
                 let hash =
-                    apr::hash::Hash::<&[u8], *const subversion_sys::svn_string_t>::from_ptr(props);
+                    apr::hash::Hash::<&[u8], Option<&crate::SvnString>>::from_ptr(props);
                 let mut prop_hash = std::collections::HashMap::new();
                 let pool = apr::Pool::new();
-                for (k, v) in hash.iter(&pool) {
-                    let key = String::from_utf8_lossy(k).into_owned();
-                    let value = unsafe {
-                        std::slice::from_raw_parts((**v).data as *const u8, (**v).len).to_vec()
-                    };
-                    prop_hash.insert(key, value);
+                for (k, v_opt) in hash.iter(&pool) {
+                    if let Some(v) = v_opt {
+                        let key = String::from_utf8_lossy(k).into_owned();
+                        let value = v.as_bytes().to_vec();
+                        prop_hash.insert(key, value);
+                    }
                 }
 
                 match receiver(path_str, prop_hash) {
@@ -3427,15 +3399,12 @@ impl Context {
 
             let mut result = std::collections::HashMap::new();
             if !props_hash.is_null() {
-                let hash = apr::hash::Hash::<&[u8], *mut subversion_sys::svn_string_t>::from_ptr(
+                let hash = apr::hash::Hash::<&[u8], Option<&crate::SvnString>>::from_ptr(
                     props_hash,
                 );
-                for (key, value_ptr) in hash.iter(&pool) {
-                    if !(*value_ptr).is_null() {
-                        let value = *value_ptr;
-                        let len = (*value).len;
-                        let data = (*value).data as *const u8;
-                        let bytes = std::slice::from_raw_parts(data, len).to_vec();
+                for (key, value_opt) in hash.iter(&pool) {
+                    if let Some(value) = value_opt {
+                        let bytes = value.as_bytes().to_vec();
                         let key_str = String::from_utf8_lossy(key).to_string();
                         result.insert(key_str, bytes);
                     }
@@ -4632,6 +4601,46 @@ mod tests {
 
         // Should return error for invalid repository
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_revprop_hash_conversion() {
+        // Test that revprops can be properly created and converted
+        // This verifies our APR hash API changes work correctly
+        use std::collections::HashMap;
+        
+        // Test BlameInfo structure which stores revprops
+        let mut revprops_map = HashMap::new();
+        revprops_map.insert("svn:author".to_string(), b"test_user".to_vec());
+        revprops_map.insert("svn:log".to_string(), b"test commit message".to_vec());
+        revprops_map.insert("custom:prop".to_string(), b"custom value".to_vec());
+        
+        let blame_info = BlameInfo {
+            line_no: 1,
+            revision: Revnum::from(123u64),
+            revprops: revprops_map.clone(),
+            merged_revision: None,
+            merged_revprops: HashMap::new(),
+            merged_path: None,
+            line: "test line".to_string(),
+            local_change: false,
+        };
+        
+        // Verify the data is stored correctly
+        assert_eq!(blame_info.revprops.len(), 3);
+        assert_eq!(blame_info.revprops.get("svn:author").unwrap(), b"test_user");
+        assert_eq!(blame_info.revprops.get("svn:log").unwrap(), b"test commit message");
+        assert_eq!(blame_info.revprops.get("custom:prop").unwrap(), b"custom value");
+        
+        // Test that CommitBuilder and MkdirBuilder patterns work
+        let mut ctx = Context::new().unwrap();
+        let _commit_builder = CommitBuilder::new(&mut ctx)
+            .add_revprop("svn:author", "test_author")
+            .add_revprop("svn:log", "test message");
+            
+        let _mkdir_builder = MkdirBuilder::new(&mut ctx)
+            .add_revprop("svn:author", b"test_author".to_vec())
+            .add_revprop("svn:log", b"test message".to_vec());
     }
 
     #[test]

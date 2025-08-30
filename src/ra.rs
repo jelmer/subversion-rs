@@ -339,7 +339,7 @@ impl Session {
         let err = unsafe {
             subversion_sys::svn_ra_rev_proplist(self.ptr, rev.into(), &mut props, pool.as_mut_ptr())
         };
-        let hash = apr::hash::Hash::<&str, *const subversion_sys::svn_string_t>::from_ptr(props);
+        let hash = apr::hash::Hash::<&str, &crate::SvnString>::from_ptr(props);
         Error::from_raw(err)?;
         let pool = apr::pool::Pool::new();
         Ok(hash
@@ -347,9 +347,7 @@ impl Session {
             .map(|(k, v)| {
                 (
                     String::from_utf8_lossy(k).into_owned(),
-                    Vec::from(unsafe {
-                        std::slice::from_raw_parts((**v).data as *const u8, (**v).len)
-                    }),
+                    v.as_bytes().to_vec(),
                 )
             })
             .collect())
@@ -389,17 +387,32 @@ impl Session {
         let commit_callback = Box::into_raw(Box::new(commit_callback));
         let mut editor = std::ptr::null();
         let mut edit_baton = std::ptr::null_mut();
-        let mut hash_revprop_table =
-            apr::hash::Hash::<&str, *const subversion_sys::svn_string_t>::in_pool(&pool);
-        for (k, v) in revprop_table.iter() {
-            let v: crate::string::String = v.as_slice().into();
-            hash_revprop_table.insert(k, &v.as_ptr());
-        }
-        let mut hash_lock_tokens =
-            apr::hash::Hash::<&str, *const std::os::raw::c_char>::in_pool(&pool);
-        for (k, v) in lock_tokens.iter() {
-            hash_lock_tokens.insert(k, &(v.as_ptr() as *const _));
-        }
+        // Create svn_string_t values that will live as long as pool
+        let svn_strings: Vec<_> = revprop_table
+            .iter()
+            .map(|(k, v)| (k.as_str(), crate::string::BStr::from_bytes(v.as_slice(), &pool)))
+            .collect();
+        
+        let mut hash_revprop_table = apr::hash::Hash::from_iter(
+            &pool,
+            svn_strings.iter().map(|(k, v)| (*k, v))
+        );
+        
+        // Create C strings that will live as long as pool
+        let c_strings: Vec<_> = lock_tokens
+            .iter()
+            .map(|(k, v)| (k.as_str(), std::ffi::CString::new(v.as_str()).unwrap()))
+            .collect();
+            
+        let c_string_ptrs: Vec<_> = c_strings
+            .iter()
+            .map(|(k, v)| (*k, v.as_ptr()))
+            .collect();
+            
+        let mut hash_lock_tokens = apr::hash::Hash::from_iter(
+            &pool,
+            c_string_ptrs.iter().map(|(k, v)| (*k, v))
+        );
         let result_pool = Pool::new();
         let err = unsafe {
             subversion_sys::svn_ra_get_commit_editor3(
@@ -444,7 +457,7 @@ impl Session {
             )
         };
         crate::Error::from_raw(err)?;
-        let hash = apr::hash::Hash::<&str, *const subversion_sys::svn_string_t>::from_ptr(props);
+        let hash = apr::hash::Hash::<&str, &crate::SvnString>::from_ptr(props);
         let pool = apr::pool::Pool::new();
         Ok((
             Revnum::from_raw(fetched_rev).unwrap(),
@@ -452,9 +465,7 @@ impl Session {
                 .map(|(k, v)| {
                     (
                         String::from_utf8_lossy(k).into_owned(),
-                        Vec::from(unsafe {
-                            std::slice::from_raw_parts((**v).data as *const u8, (**v).len)
-                        }),
+                        v.as_bytes().to_vec(),
                     )
                 })
                 .collect(),
@@ -488,18 +499,16 @@ impl Session {
         let rc_pool = std::rc::Rc::new(pool);
         crate::Error::from_raw(err)?;
         let props_hash =
-            apr::hash::Hash::<&str, *const subversion_sys::svn_string_t>::from_ptr(props);
+            apr::hash::Hash::<&str, &crate::SvnString>::from_ptr(props);
         let dirents_hash =
-            apr::hash::Hash::<&str, *mut subversion_sys::svn_dirent_t>::from_ptr(dirents);
+            apr::hash::Hash::<&str, &subversion_sys::svn_dirent_t>::from_ptr(dirents);
         let iter_pool = apr::pool::Pool::new();
         let props = props_hash
             .iter(&iter_pool)
             .map(|(k, v)| {
                 (
                     String::from_utf8_lossy(k).into_owned(),
-                    Vec::from(unsafe {
-                        std::slice::from_raw_parts((**v).data as *const u8, (**v).len)
-                    }),
+                    v.as_bytes().to_vec(),
                 )
             })
             .collect();
@@ -508,7 +517,7 @@ impl Session {
             .map(|(k, v)| {
                 (
                     String::from_utf8_lossy(k).into_owned(),
-                    Dirent::from_raw(*v),
+                    Dirent::from_raw(v as *const _ as *mut _),
                 )
             })
             .collect();
@@ -590,7 +599,7 @@ impl Session {
             .iter(&iter_pool)
             .map(|(k, v)| {
                 (String::from_utf8_lossy(k).into_owned(), unsafe {
-                    crate::mergeinfo::Mergeinfo::from_ptr_and_pool(*v, apr::Pool::new())
+                    crate::mergeinfo::Mergeinfo::from_ptr_and_pool(v, apr::Pool::new())
                 })
             })
             .collect())
@@ -848,34 +857,45 @@ impl Session {
         strict_node_history: bool,
         include_merged_revisions: bool,
         revprops: &[&str],
-        log_receiver: &dyn FnMut(&crate::CommitInfo) -> Result<(), Error>,
+        log_receiver: &dyn FnMut(&crate::LogEntry) -> Result<(), Error>,
     ) -> Result<(), Error> {
         let pool = Pool::new();
+        
+        // Convert paths to proper C strings
+        let path_cstrings: Vec<std::ffi::CString> = paths.iter()
+            .map(|p| std::ffi::CString::new(*p).unwrap())
+            .collect();
         let mut paths_array = apr::tables::ArrayHeader::<*const std::os::raw::c_char>::new(&pool);
-        for path in paths {
-            paths_array.push(path.as_ptr() as _);
+        for cstr in &path_cstrings {
+            paths_array.push(cstr.as_ptr());
         }
-        let paths = paths_array;
-        let mut revprops_array =
-            apr::tables::ArrayHeader::<*const std::os::raw::c_char>::new(&pool);
-        for revprop in revprops {
-            revprops_array.push(revprop.as_ptr() as _);
+        
+        // Convert revprops to proper C strings  
+        let revprop_cstrings: Vec<std::ffi::CString> = revprops.iter()
+            .map(|p| std::ffi::CString::new(*p).unwrap())
+            .collect();
+        let mut revprops_array = apr::tables::ArrayHeader::<*const std::os::raw::c_char>::new(&pool);
+        for cstr in &revprop_cstrings {
+            revprops_array.push(cstr.as_ptr());
         }
-        let revprops = revprops_array;
-        let log_receiver = Box::new(log_receiver);
+        
+        // Create the callback wrapper that matches the expected signature
+        let mut callback_wrapper = log_receiver;
+        let baton = &mut callback_wrapper as *mut _ as *mut std::ffi::c_void;
+        
         let err = unsafe {
             subversion_sys::svn_ra_get_log2(
                 self.ptr,
-                paths.as_ptr(),
+                paths_array.as_ptr(),
                 start.into(),
                 end.into(),
                 limit as _,
                 discover_changed_paths.into(),
                 strict_node_history.into(),
                 include_merged_revisions.into(),
-                revprops.as_ptr(),
+                revprops_array.as_ptr(),
                 Some(crate::wrap_log_entry_receiver),
-                &log_receiver as *const _ as *mut _,
+                baton,
                 pool.as_mut_ptr(),
             )
         };
@@ -917,7 +937,7 @@ impl Session {
         for (k, v) in iter.iter(&pool) {
             let revnum = k.as_ptr() as *const Revnum;
             locations.insert(unsafe { *revnum }, unsafe {
-                std::ffi::CStr::from_ptr(*v).to_string_lossy().into_owned()
+                std::ffi::CStr::from_ptr(v).to_string_lossy().into_owned()
             });
         }
 
@@ -959,10 +979,11 @@ impl Session {
     ) -> Result<(), Error> {
         let pool = Pool::new();
         let scratch_pool = std::rc::Rc::new(Pool::new());
+        let revnum_values: Vec<_> = path_revs.values().map(|v| v.0).collect();
         let mut hash =
-            apr::hash::Hash::<&str, subversion_sys::svn_revnum_t>::in_pool(&scratch_pool);
-        for (k, v) in path_revs.iter() {
-            hash.insert(k, &v.0);
+            apr::hash::Hash::<&str, &subversion_sys::svn_revnum_t>::new(&scratch_pool);
+        for ((k, _), revnum_val) in path_revs.iter().zip(revnum_values.iter()) {
+            hash.insert(k, revnum_val);
         }
         let comment = std::ffi::CString::new(comment).unwrap();
         let err = unsafe {
@@ -988,9 +1009,13 @@ impl Session {
     ) -> Result<(), Error> {
         let pool = Pool::new();
         let scratch_pool = std::rc::Rc::new(Pool::new());
-        let mut hash = apr::hash::Hash::<&str, *const std::os::raw::c_char>::in_pool(&scratch_pool);
-        for (k, v) in path_tokens.iter() {
-            hash.insert(k, &(v.as_ptr() as *const _));
+        let mut hash = apr::hash::Hash::<&str, &*const std::os::raw::c_char>::new(&scratch_pool);
+        let path_token_ptrs: Vec<_> = path_tokens
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_ptr() as *const std::os::raw::c_char))
+            .collect();
+        for (k, v) in path_token_ptrs.iter() {
+            hash.insert(k, v);
         }
         let err = unsafe {
             subversion_sys::svn_ra_unlock(
@@ -1047,7 +1072,7 @@ impl Session {
                 (
                     String::from_utf8_lossy(k).into_owned(),
                     crate::Lock {
-                        ptr: *v,
+                        ptr: v,
                         _pool: std::marker::PhantomData,
                     },
                 )
@@ -1098,18 +1123,16 @@ impl Session {
                     .unwrap()
             };
             let revprops =
-                apr::hash::Hash::<&str, *const subversion_sys::svn_string_t>::from_ptr(rev_props);
+                apr::hash::Hash::<&str, Option<&crate::SvnString>>::from_ptr(rev_props);
 
             let pool = apr::pool::Pool::new();
             let revprops = revprops
                 .iter(&pool)
-                .map(|(k, v)| {
-                    (
+                .filter_map(|(k, v_opt)| {
+                    v_opt.map(|v| (
                         std::str::from_utf8(k).unwrap().to_string(),
-                        Vec::from(unsafe {
-                            std::slice::from_raw_parts((**v).data as *const u8, (**v).len)
-                        }),
-                    )
+                        v.as_bytes().to_vec(),
+                    ))
                 })
                 .collect();
 
@@ -1156,18 +1179,16 @@ impl Session {
             };
 
             let revprops =
-                apr::hash::Hash::<&str, *const subversion_sys::svn_string_t>::from_ptr(rev_props);
+                apr::hash::Hash::<&str, Option<&crate::SvnString>>::from_ptr(rev_props);
 
             let pool = apr::pool::Pool::new();
             let revprops = revprops
                 .iter(&pool)
-                .map(|(k, v)| {
-                    (
+                .filter_map(|(k, v_opt)| {
+                    v_opt.map(|v| (
                         std::str::from_utf8(k).unwrap().to_string(),
-                        Vec::from(unsafe {
-                            std::slice::from_raw_parts((**v).data as *const u8, (**v).len)
-                        }),
-                    )
+                        v.as_bytes().to_vec(),
+                    ))
                 })
                 .collect();
 
@@ -1271,18 +1292,16 @@ impl Session {
             let rev_props_hash = if rev_props.is_null() {
                 HashMap::new()
             } else {
-                let hash = apr::hash::Hash::<&str, *const subversion_sys::svn_string_t>::from_ptr(
+                let hash = apr::hash::Hash::<&str, Option<&crate::SvnString>>::from_ptr(
                     rev_props,
                 );
                 let iter_pool = apr::pool::Pool::new();
                 hash.iter(&iter_pool)
-                    .map(|(k, v)| {
-                        (
+                    .filter_map(|(k, v_opt)| {
+                        v_opt.map(|v| (
                             String::from_utf8_lossy(k).into_owned(),
-                            Vec::from(unsafe {
-                                std::slice::from_raw_parts((**v).data as *const u8, (**v).len)
-                            }),
-                        )
+                            v.as_bytes().to_vec(),
+                        ))
                     })
                     .collect()
             };
@@ -1398,11 +1417,15 @@ impl Session {
         };
 
         let mut result = Vec::new();
-        for item in array {
+        for (i, item) in array.iter().enumerate() {
+            // Debug: Check if the item has valid pointers
+            if item.path_or_url.is_null() {
+                eprintln!("Warning: item {} has null path_or_url", i);
+                continue;
+            }
             let path_or_url = unsafe {
                 std::ffi::CStr::from_ptr(item.path_or_url)
-                    .to_str()
-                    .unwrap()
+                    .to_string_lossy()
                     .to_string()
             };
 
@@ -1410,18 +1433,15 @@ impl Session {
             let props = if item.prop_hash.is_null() {
                 HashMap::new()
             } else {
-                let hash = apr::hash::Hash::<&str, *const subversion_sys::svn_string_t>::from_ptr(
-                    item.prop_hash,
-                );
+                // Use the new APR hash API with Option<SvnString> to handle NULL values gracefully
+                let hash = apr::hash::Hash::<&str, Option<&crate::SvnString>>::from_ptr(item.prop_hash);
                 let iter_pool = apr::pool::Pool::new();
                 hash.iter(&iter_pool)
-                    .map(|(k, v)| {
-                        (
+                    .filter_map(|(k, svn_str_opt)| {
+                        svn_str_opt.map(|svn_str| (
                             String::from_utf8_lossy(k).into_owned(),
-                            Vec::from(unsafe {
-                                std::slice::from_raw_parts((**v).data as *const u8, (**v).len)
-                            }),
-                        )
+                            svn_str.as_bytes().to_vec(),
+                        ))
                     })
                     .collect()
             };
@@ -1648,6 +1668,44 @@ mod tests {
         assert!(callbacks.is_ok());
         let callbacks = callbacks.unwrap();
         assert!(!callbacks.ptr.is_null());
+    }
+
+    #[test]
+    fn test_repo_creation_only() {
+        let (_temp_dir, url, _repo) = create_test_repo();
+        println!("Created repo at: {}", url);
+        // Just test that we can create a repository without opening a session
+    }
+
+    #[test]
+    fn test_session_opening_only() {
+        let (_temp_dir, url, _repo) = create_test_repo();
+        // Try to open a session - this is where the segfault might occur
+        let result = Session::open(&url, None, None, None);
+        println!("Session open result: {:?}", result.is_ok());
+    }
+
+    #[test]
+    fn test_simple_get_log() {
+        let (_temp_dir, repo, mut session) = create_test_repo_with_session();
+        
+        // Try a very simple get_log call without any complex setup
+        let mut call_count = 0;
+        let result = session.get_log(
+            &[""], // Root path
+            crate::Revnum::from(0u32),
+            crate::Revnum::from(0u32), 
+            0, // No limit
+            false, // discover_changed_paths
+            false, // strict_node_history
+            false, // include_merged_revisions
+            &[],   // No revprops
+            &|_log_entry| {
+                call_count += 1;
+                Ok(())
+            },
+        );
+        println!("get_log result: {:?}, calls: {}", result.is_ok(), call_count);
     }
 
     #[test]
@@ -1911,7 +1969,7 @@ mod tests {
         }
 
         // Test get_log with various options
-        let mut log_entries: Vec<(crate::Revnum, String)> = Vec::new();
+        let mut log_entries: Vec<(crate::Revnum, String, String)> = Vec::new();
 
         session
             .get_log(
@@ -1923,8 +1981,12 @@ mod tests {
                 false, // strict_node_history
                 false, // include_merged_revisions
                 &["svn:log", "svn:author", "svn:date"],
-                &|commit_info| {
-                    log_entries.push((commit_info.revision(), commit_info.author().to_string()));
+                &|log_entry| {
+                    if let Some(revision) = log_entry.revision() {
+                        let author = log_entry.author().unwrap_or("").to_string();
+                        let message = log_entry.message().unwrap_or("").to_string();
+                        log_entries.push((revision, author, message));
+                    }
                     Ok(())
                 },
             )
@@ -1933,9 +1995,10 @@ mod tests {
         // Verify we got all commits
         assert_eq!(log_entries.len(), 3);
 
-        // Check that authors are correct
-        for (_i, (rev, author)) in log_entries.iter().enumerate() {
+        // Check that authors and messages are correct
+        for (i, (rev, author, message)) in log_entries.iter().enumerate() {
             assert_eq!(author, "test-user");
+            assert_eq!(message, &format!("Commit {}", i + 1));
             assert!(rev.as_u64() >= 1);
         }
     }
