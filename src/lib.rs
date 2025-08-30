@@ -26,6 +26,7 @@ pub mod error;
 pub mod fs;
 pub mod hash;
 pub mod io;
+pub mod iter;
 #[cfg(feature = "client")]
 pub mod merge;
 pub mod mergeinfo;
