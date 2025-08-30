@@ -82,6 +82,9 @@ impl<'pool> From<&str> for BStr<'pool> {
 // For backwards compatibility, keep the old String name as an alias
 pub type String<'pool> = BStr<'pool>;
 
+// BStr can be used directly as values in the new APR hash API
+// The Hash<K, V> type uses lifetimes to ensure values outlive the hash
+
 #[cfg(test)]
 mod tests {
     use super::*;
