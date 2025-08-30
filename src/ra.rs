@@ -20,6 +20,46 @@ impl Dirent {
             _phantom: PhantomData,
         }
     }
+
+    /// Get the node kind (file, directory, etc.)
+    pub fn kind(&self) -> crate::NodeKind {
+        unsafe { (*self.ptr).kind.into() }
+    }
+
+    /// Get the size of the file (SVN_INVALID_FILESIZE for directories)
+    pub fn size(&self) -> i64 {
+        unsafe { (*self.ptr).size }
+    }
+
+    /// Check if the node has properties
+    pub fn has_props(&self) -> bool {
+        unsafe { (*self.ptr).has_props != 0 }
+    }
+
+    /// Get the revision in which this node was created/last changed
+    pub fn created_rev(&self) -> Option<crate::Revnum> {
+        unsafe {
+            let rev = (*self.ptr).created_rev;
+            crate::Revnum::from_raw(rev)
+        }
+    }
+
+    /// Get the time of created_rev (modification time)
+    pub fn time(&self) -> apr::time::Time {
+        unsafe { apr::time::Time::from((*self.ptr).time) }
+    }
+
+    /// Get the author of created_rev
+    pub fn last_author(&self) -> Option<&str> {
+        unsafe {
+            let author_ptr = (*self.ptr).last_author;
+            if author_ptr.is_null() {
+                None
+            } else {
+                Some(std::ffi::CStr::from_ptr(author_ptr).to_str().unwrap())
+            }
+        }
+    }
 }
 
 unsafe impl Send for Dirent {}
