@@ -197,6 +197,15 @@ impl Stream {
         }
     }
 
+    /// Create a Stream from a raw pointer and pool
+    pub fn from_ptr(ptr: *mut subversion_sys::svn_stream_t, pool: apr::Pool) -> Self {
+        Self {
+            ptr,
+            pool,
+            _phantom: PhantomData,
+        }
+    }
+
     /// Create a stream from a callback-based implementation
     pub fn create<T: 'static>(baton: T) -> Self {
         let pool = apr::Pool::new();
