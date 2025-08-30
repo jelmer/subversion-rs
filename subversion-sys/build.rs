@@ -14,6 +14,7 @@ fn create_svn_bindings(
         .header(svn_path.join("svn_dirent_uri.h").to_str().unwrap())
         .header(svn_path.join("svn_version.h").to_str().unwrap())
         .header(svn_path.join("svn_error.h").to_str().unwrap())
+        .header(svn_path.join("svn_error_codes.h").to_str().unwrap())
         .header(svn_path.join("svn_opt.h").to_str().unwrap())
         .header(svn_path.join("svn_repos.h").to_str().unwrap())
         .header(svn_path.join("svn_time.h").to_str().unwrap())

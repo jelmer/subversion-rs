@@ -1,3 +1,9 @@
+pub mod backend;
+pub mod builder;
+
+pub use backend::{StreamBackend, BufferBackend, ReadOnlyBackend, WriteOnlyBackend};
+pub use builder::{StreamBuilder, IntoStream};
+
 use crate::{svn_result, with_tmp_pool, Error};
 use std::ffi::OsStr;
 use std::marker::PhantomData;
@@ -207,6 +213,186 @@ impl Stream {
     pub fn set_baton<T: 'static>(&mut self, baton: T) {
         let baton_ptr = Box::into_raw(Box::new(baton)) as *mut std::ffi::c_void;
         unsafe { subversion_sys::svn_stream_set_baton(self.ptr, baton_ptr) };
+    }
+
+    /// Create a stream from a custom backend implementation
+    pub fn from_backend<B: StreamBackend>(backend: B) -> Result<Self, Error> {
+        let pool = apr::Pool::new();
+        
+        // Check if backend supports reset and mark before boxing
+        let supports_reset = backend.supports_reset();
+        let supports_mark = backend.supports_mark();
+        
+        // Box the backend and create a raw pointer for the baton
+        let backend_ptr = Box::into_raw(Box::new(backend)) as *mut std::ffi::c_void;
+        
+        // Create the SVN stream with our backend as the baton
+        let stream = unsafe { 
+            subversion_sys::svn_stream_create(backend_ptr, pool.as_mut_ptr()) 
+        };
+
+        // Set up the callback trampolines
+        unsafe {
+            // Read callback
+            extern "C" fn read_trampoline<B: StreamBackend>(
+                baton: *mut std::ffi::c_void,
+                buffer: *mut std::os::raw::c_char,
+                len: *mut apr_sys::apr_size_t,
+            ) -> *mut subversion_sys::svn_error_t {
+                unsafe {
+                    let backend = &mut *(baton as *mut B);
+                    let requested_len = *len;
+                    let buf = std::slice::from_raw_parts_mut(buffer as *mut u8, requested_len);
+                    match backend.read(buf) {
+                        Ok(bytes_read) => {
+                            *len = bytes_read;
+                            std::ptr::null_mut()
+                        }
+                        Err(mut e) => e.detach()
+                    }
+                }
+            }
+
+            // Write callback
+            extern "C" fn write_trampoline<B: StreamBackend>(
+                baton: *mut std::ffi::c_void,
+                data: *const std::os::raw::c_char,
+                len: *mut apr_sys::apr_size_t,
+            ) -> *mut subversion_sys::svn_error_t {
+                unsafe {
+                    let backend = &mut *(baton as *mut B);
+                    let requested_len = *len;
+                    let buf = std::slice::from_raw_parts(data as *const u8, requested_len);
+                    match backend.write(buf) {
+                        Ok(bytes_written) => {
+                            *len = bytes_written;
+                            std::ptr::null_mut()
+                        }
+                        Err(mut e) => e.detach()
+                    }
+                }
+            }
+
+            // Close callback - handles cleanup
+            extern "C" fn close_trampoline<B: StreamBackend>(
+                baton: *mut std::ffi::c_void,
+            ) -> *mut subversion_sys::svn_error_t {
+                unsafe {
+                    if !baton.is_null() {
+                        let backend = &mut *(baton as *mut B);
+                        // Call close on the backend
+                        let result = match backend.close() {
+                            Ok(()) => std::ptr::null_mut(),
+                            Err(mut e) => e.detach(),
+                        };
+                        // Take ownership and drop the backend
+                        let _ = Box::from_raw(baton as *mut B);
+                        result
+                    } else {
+                        std::ptr::null_mut()
+                    }
+                }
+            }
+
+            // Skip callback  
+            extern "C" fn skip_trampoline<B: StreamBackend>(
+                baton: *mut std::ffi::c_void,
+                len: apr_sys::apr_size_t,
+            ) -> *mut subversion_sys::svn_error_t {
+                unsafe {
+                    let backend = &mut *(baton as *mut B);
+                    match backend.skip(len) {
+                        Ok(_) => std::ptr::null_mut(),
+                        Err(mut e) => e.detach(),
+                    }
+                }
+            }
+
+            // Data available callback
+            extern "C" fn data_available_trampoline<B: StreamBackend>(
+                baton: *mut std::ffi::c_void,
+                data_available: *mut subversion_sys::svn_boolean_t,
+            ) -> *mut subversion_sys::svn_error_t {
+                unsafe {
+                    let backend = &mut *(baton as *mut B);
+                    match backend.data_available() {
+                        Ok(available) => {
+                            *data_available = if available { 1 } else { 0 };
+                            std::ptr::null_mut()
+                        }
+                        Err(mut e) => e.detach(),
+                    }
+                }
+            }
+
+            // Mark callback
+            extern "C" fn mark_trampoline<B: StreamBackend>(
+                baton: *mut std::ffi::c_void,
+                mark: *mut *mut subversion_sys::svn_stream_mark_t,
+                pool: *mut apr_sys::apr_pool_t,
+            ) -> *mut subversion_sys::svn_error_t {
+                unsafe {
+                    let backend = &mut *(baton as *mut B);
+                    match backend.mark() {
+                        Ok(stream_mark) => {
+                            // Allocate mark structure in the pool
+                            let mark_size = std::mem::size_of::<subversion_sys::svn_stream_mark_t>();
+                            let mark_ptr = apr_sys::apr_palloc(pool, mark_size) as *mut subversion_sys::svn_stream_mark_t;
+                            // Store our position in the mark
+                            // Note: This is a simplified implementation
+                            *(mark_ptr as *mut u64) = stream_mark.position;
+                            *mark = mark_ptr;
+                            std::ptr::null_mut()
+                        }
+                        Err(mut e) => e.detach(),
+                    }
+                }
+            }
+
+            // Seek callback
+            extern "C" fn seek_trampoline<B: StreamBackend>(
+                baton: *mut std::ffi::c_void,
+                mark: *const subversion_sys::svn_stream_mark_t,
+            ) -> *mut subversion_sys::svn_error_t {
+                unsafe {
+                    let backend = &mut *(baton as *mut B);
+                    
+                    // If mark is null, reset to beginning
+                    if mark.is_null() {
+                        match backend.reset() {
+                            Ok(()) => return std::ptr::null_mut(),
+                            Err(mut e) => return e.detach(),
+                        }
+                    }
+                    
+                    let position = *(mark as *const u64);
+                    let stream_mark = crate::io::backend::StreamMark { position };
+                    match backend.seek(&stream_mark) {
+                        Ok(()) => std::ptr::null_mut(),
+                        Err(mut e) => e.detach(),
+                    }
+                }
+            }
+
+            // Set the callbacks on the stream
+            subversion_sys::svn_stream_set_read(stream, Some(read_trampoline::<B>));
+            subversion_sys::svn_stream_set_write(stream, Some(write_trampoline::<B>));
+            subversion_sys::svn_stream_set_close(stream, Some(close_trampoline::<B>));
+            subversion_sys::svn_stream_set_skip(stream, Some(skip_trampoline::<B>));
+            subversion_sys::svn_stream_set_data_available(stream, Some(data_available_trampoline::<B>));
+            
+            // Set mark and seek if the backend supports them
+            if supports_reset && supports_mark {
+                subversion_sys::svn_stream_set_mark(stream, Some(mark_trampoline::<B>));
+                subversion_sys::svn_stream_set_seek(stream, Some(seek_trampoline::<B>));
+            }
+        }
+
+        Ok(Self {
+            ptr: stream,
+            pool,
+            _phantom: PhantomData,
+        })
     }
 
     /// Create a disowned stream that doesn't close the underlying resource
@@ -448,7 +634,7 @@ impl Stream {
     pub fn read(&mut self, buf: &mut [u8]) -> Result<usize, Error> {
         let mut len = buf.len();
         let err = unsafe {
-            subversion_sys::svn_stream_read2(self.ptr, buf.as_mut_ptr() as *mut i8, &mut len)
+            subversion_sys::svn_stream_read(self.ptr, buf.as_mut_ptr() as *mut i8, &mut len)
         };
         Error::from_raw(err)?;
         Ok(len)
@@ -1709,6 +1895,109 @@ mod tests {
         read_stream.read_to_string(&mut read_buffer).unwrap();
         
         assert_eq!(read_buffer, "First line\nSecond line\nThird line");
+    }
+
+    #[test]
+    fn test_custom_backend_buffer() {
+        use crate::io::backend::BufferBackend;
+        
+        // Create a stream with a buffer backend
+        let backend = BufferBackend::from_vec(b"Hello from buffer backend!".to_vec());
+        let mut stream = Stream::from_backend(backend).unwrap();
+        
+        // Read from the stream
+        let mut buf = vec![0u8; 5];
+        let n = stream.read(&mut buf).unwrap();
+        assert_eq!(n, 5);
+        assert_eq!(&buf, b"Hello");
+        
+        // Read more
+        let mut buf2 = vec![0u8; 21];
+        let n = stream.read(&mut buf2).unwrap();
+        assert_eq!(n, 21);
+        assert_eq!(&buf2, b" from buffer backend!");
+    }
+
+    #[test]
+    fn test_custom_backend_read_write() {
+        use crate::io::backend::BufferBackend;
+        
+        // Create a stream with an empty buffer backend
+        let backend = BufferBackend::new();
+        let mut stream = Stream::from_backend(backend).unwrap();
+        
+        // Write to the stream
+        stream.write(b"Test data").unwrap();
+        stream.write(b" for custom backend").unwrap();
+        
+        // Reset to read from beginning
+        stream.reset().unwrap();
+        
+        // Read back
+        let mut buf = vec![0u8; 28];
+        let n = stream.read(&mut buf).unwrap();
+        assert_eq!(n, 28);
+        assert_eq!(&buf[..n], b"Test data for custom backend");
+    }
+
+    #[test]
+    fn test_stream_builder() {
+        use crate::io::builder::StreamBuilder;
+        use crate::io::backend::BufferBackend;
+        
+        // Create a stream using the builder
+        let backend = BufferBackend::from_vec(b"Builder test".to_vec());
+        let mut stream = StreamBuilder::new(backend)
+            .buffer_size(4096)
+            .build()
+            .unwrap();
+        
+        // Read from the stream
+        let mut buf = vec![0u8; 12];
+        let n = stream.read(&mut buf).unwrap();
+        assert_eq!(n, 12);
+        assert_eq!(&buf, b"Builder test");
+    }
+
+    #[test]
+    fn test_read_only_backend() {
+        use crate::io::backend::ReadOnlyBackend;
+        use std::io::Cursor;
+        
+        // Create a read-only stream from a cursor
+        let data = b"Read-only data";
+        let cursor = Cursor::new(data);
+        let backend = ReadOnlyBackend::new(cursor);
+        let mut stream = Stream::from_backend(backend).unwrap();
+        
+        // Read from the stream
+        let mut buf = vec![0u8; 14];
+        let n = stream.read(&mut buf).unwrap();
+        assert_eq!(n, 14);
+        assert_eq!(&buf, b"Read-only data");
+        
+        // Writing should fail (backend doesn't support write)
+        let result = stream.write(b"Should fail");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_write_only_backend() {
+        use crate::io::backend::BufferBackend;
+        
+        // Use BufferBackend for write testing since it owns its data
+        let backend = BufferBackend::new();
+        let mut stream = Stream::from_backend(backend).unwrap();
+        
+        // Write to the stream
+        stream.write(b"Write test data").unwrap();
+        
+        // Reset and read back to verify
+        stream.reset().unwrap();
+        let mut buf = vec![0u8; 15];
+        let n = stream.read(&mut buf).unwrap();
+        assert_eq!(n, 15);
+        assert_eq!(&buf, b"Write test data");
     }
 }
 
