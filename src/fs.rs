@@ -469,8 +469,7 @@ impl Root {
 
             let mut result = std::collections::HashMap::new();
             if !props.is_null() {
-                let hash =
-                    apr::hash::Hash::<&[u8], subversion_sys::svn_string_t>::from_ptr(props);
+                let hash = apr::hash::Hash::<&[u8], subversion_sys::svn_string_t>::from_ptr(props);
                 for (k, v) in hash.iter(pool) {
                     let key = String::from_utf8_lossy(k).into_owned();
                     let value = if v.data.is_null() || v.len == 0 {
@@ -546,10 +545,9 @@ impl Root {
 
             let mut result = std::collections::HashMap::new();
             if !entries.is_null() {
-                let hash =
-                    apr::hash::Hash::<&[u8], *mut subversion_sys::svn_fs_dirent_t>::from_ptr(
-                        entries,
-                    );
+                let hash = apr::hash::Hash::<&[u8], *mut subversion_sys::svn_fs_dirent_t>::from_ptr(
+                    entries,
+                );
                 for (k, v) in hash.iter(pool) {
                     let name = String::from_utf8_lossy(k).into_owned();
                     let entry = FsDirEntry::from_raw(*v);
@@ -667,11 +665,8 @@ impl TxnRoot {
         let path_cstr = std::ffi::CString::new(path)?;
         let pool = apr::Pool::new();
         unsafe {
-            let err = subversion_sys::svn_fs_make_dir(
-                self.ptr,
-                path_cstr.as_ptr(),
-                pool.as_mut_ptr(),
-            );
+            let err =
+                subversion_sys::svn_fs_make_dir(self.ptr, path_cstr.as_ptr(), pool.as_mut_ptr());
             Error::from_raw(err)?;
             Ok(())
         }
@@ -682,11 +677,8 @@ impl TxnRoot {
         let path_cstr = std::ffi::CString::new(path)?;
         let pool = apr::Pool::new();
         unsafe {
-            let err = subversion_sys::svn_fs_make_file(
-                self.ptr,
-                path_cstr.as_ptr(),
-                pool.as_mut_ptr(),
-            );
+            let err =
+                subversion_sys::svn_fs_make_file(self.ptr, path_cstr.as_ptr(), pool.as_mut_ptr());
             Error::from_raw(err)?;
             Ok(())
         }
@@ -697,11 +689,8 @@ impl TxnRoot {
         let path_cstr = std::ffi::CString::new(path)?;
         let pool = apr::Pool::new();
         unsafe {
-            let err = subversion_sys::svn_fs_delete(
-                self.ptr,
-                path_cstr.as_ptr(),
-                pool.as_mut_ptr(),
-            );
+            let err =
+                subversion_sys::svn_fs_delete(self.ptr, path_cstr.as_ptr(), pool.as_mut_ptr());
             Error::from_raw(err)?;
             Ok(())
         }
@@ -1009,51 +998,60 @@ mod tests {
         let fs_path = dir.path().join("test-fs");
 
         let fs = Fs::create(&fs_path).unwrap();
-        
+
         // Begin a transaction
         let mut txn = fs.begin_txn(crate::Revnum::from(0u32)).unwrap();
-        
+
         // Check basic transaction properties
         let name = txn.name().unwrap();
         assert!(!name.is_empty(), "Transaction should have a name");
-        
+
         let base_rev = txn.base_revision().unwrap();
-        assert_eq!(base_rev, crate::Revnum::from(0u32), "Base revision should be 0");
-        
+        assert_eq!(
+            base_rev,
+            crate::Revnum::from(0u32),
+            "Base revision should be 0"
+        );
+
         // Set a transaction property
         txn.change_prop("svn:log", "Test commit message").unwrap();
         txn.change_prop("svn:author", "test-user").unwrap();
-        
+
         // Get transaction root and make some changes
         let mut root = txn.root().unwrap();
-        
+
         // Create a directory
         root.make_dir("trunk").unwrap();
-        
+
         // Verify the directory exists
         let kind = root.check_path("trunk").unwrap();
         assert_eq!(kind, crate::NodeKind::Dir);
-        
+
         // Create a file
         root.make_file("trunk/test.txt").unwrap();
-        
+
         // Verify the file exists
         let kind = root.check_path("trunk/test.txt").unwrap();
         assert_eq!(kind, crate::NodeKind::File);
-        
+
         // Add content to the file
         let mut stream = root.apply_text("trunk/test.txt").unwrap();
         use std::io::Write;
         stream.write_all(b"Hello, World!\n").unwrap();
         drop(stream);
-        
+
         // Set a property on the file
-        root.change_node_prop("trunk/test.txt", "custom:prop", b"value").unwrap();
-        
+        root.change_node_prop("trunk/test.txt", "custom:prop", b"value")
+            .unwrap();
+
         // Commit the transaction
         let new_rev = txn.commit().unwrap();
-        assert_eq!(new_rev, crate::Revnum::from(1u32), "First commit should be revision 1");
-        
+        assert_eq!(
+            new_rev,
+            crate::Revnum::from(1u32),
+            "First commit should be revision 1"
+        );
+
         // Verify the youngest revision is updated
         let youngest = fs.youngest_revision().unwrap();
         assert_eq!(youngest, crate::Revnum::from(1u32));
@@ -1065,21 +1063,25 @@ mod tests {
         let fs_path = dir.path().join("test-fs");
 
         let fs = Fs::create(&fs_path).unwrap();
-        
+
         // Begin a transaction
         let mut txn = fs.begin_txn(crate::Revnum(0)).unwrap();
         let mut root = txn.root().unwrap();
-        
+
         // Make some changes
         root.make_dir("test-dir").unwrap();
         root.make_file("test-file.txt").unwrap();
-        
+
         // Abort the transaction
         txn.abort().unwrap();
-        
+
         // Verify no changes were committed
         let youngest = fs.youngest_revision().unwrap();
-        assert_eq!(youngest, crate::Revnum(0), "No changes should be committed after abort");
+        assert_eq!(
+            youngest,
+            crate::Revnum(0),
+            "No changes should be committed after abort"
+        );
     }
 
     #[test]
@@ -1088,40 +1090,40 @@ mod tests {
         let fs_path = dir.path().join("test-fs");
 
         let fs = Fs::create(&fs_path).unwrap();
-        
+
         // First, create some content to copy
         let mut txn1 = fs.begin_txn(crate::Revnum(0)).unwrap();
         txn1.change_prop("svn:log", "Initial commit").unwrap();
         let mut root1 = txn1.root().unwrap();
-        
+
         root1.make_dir("original").unwrap();
         root1.make_file("original/file.txt").unwrap();
-        
+
         let mut stream = root1.apply_text("original/file.txt").unwrap();
         use std::io::Write;
         stream.write_all(b"Original content\n").unwrap();
         drop(stream);
-        
+
         let rev1 = txn1.commit().unwrap();
-        
+
         // Now copy the content in a new transaction
         let mut txn2 = fs.begin_txn(rev1).unwrap();
         txn2.change_prop("svn:log", "Copy operation").unwrap();
         let mut root2 = txn2.root().unwrap();
-        
+
         // Get the root from revision 1 for copying
         let rev1_root = fs.revision_root(rev1).unwrap();
-        
+
         // Copy the directory
         root2.copy(&rev1_root, "original", "copy").unwrap();
-        
+
         // Verify the copy exists
         let kind = root2.check_path("copy").unwrap();
         assert_eq!(kind, crate::NodeKind::Dir);
-        
+
         let kind = root2.check_path("copy/file.txt").unwrap();
         assert_eq!(kind, crate::NodeKind::File);
-        
+
         let _rev2 = txn2.commit().unwrap();
     }
 
@@ -1131,34 +1133,34 @@ mod tests {
         let fs_path = dir.path().join("test-fs");
 
         let fs = Fs::create(&fs_path).unwrap();
-        
+
         // Create content first
         let mut txn1 = fs.begin_txn(crate::Revnum(0)).unwrap();
         txn1.change_prop("svn:log", "Create files").unwrap();
         let mut root1 = txn1.root().unwrap();
-        
+
         root1.make_dir("dir1").unwrap();
         root1.make_file("dir1/file1.txt").unwrap();
         root1.make_file("file2.txt").unwrap();
-        
+
         let rev1 = txn1.commit().unwrap();
-        
+
         // Now delete some content
         let mut txn2 = fs.begin_txn(rev1).unwrap();
         txn2.change_prop("svn:log", "Delete files").unwrap();
         let mut root2 = txn2.root().unwrap();
-        
+
         // Delete a file
         root2.delete("file2.txt").unwrap();
-        
+
         // Verify it's gone
         let kind = root2.check_path("file2.txt").unwrap();
         assert_eq!(kind, crate::NodeKind::None);
-        
+
         // But the other file still exists
         let kind = root2.check_path("dir1/file1.txt").unwrap();
         assert_eq!(kind, crate::NodeKind::File);
-        
+
         let _rev2 = txn2.commit().unwrap();
     }
 
@@ -1168,26 +1170,32 @@ mod tests {
         let fs_path = dir.path().join("test-fs");
 
         let fs = Fs::create(&fs_path).unwrap();
-        
+
         let mut txn = fs.begin_txn(crate::Revnum(0)).unwrap();
         let mut root = txn.root().unwrap();
-        
+
         // Create a file and set properties
         root.make_file("test.txt").unwrap();
-        
+
         // Set various properties
-        root.change_node_prop("test.txt", "svn:mime-type", b"text/plain").unwrap();
-        root.change_node_prop("test.txt", "custom:author", b"test-user").unwrap();
-        root.change_node_prop("test.txt", "custom:description", b"A test file").unwrap();
-        
+        root.change_node_prop("test.txt", "svn:mime-type", b"text/plain")
+            .unwrap();
+        root.change_node_prop("test.txt", "custom:author", b"test-user")
+            .unwrap();
+        root.change_node_prop("test.txt", "custom:description", b"A test file")
+            .unwrap();
+
         // Set an empty property (delete)
-        root.change_node_prop("test.txt", "custom:empty", b"").unwrap();
-        
+        root.change_node_prop("test.txt", "custom:empty", b"")
+            .unwrap();
+
         // Set transaction properties
-        txn.change_prop("svn:log", "Test commit with properties").unwrap();
+        txn.change_prop("svn:log", "Test commit with properties")
+            .unwrap();
         txn.change_prop("svn:author", "property-tester").unwrap();
-        txn.change_prop("svn:date", "2023-01-01T12:00:00.000000Z").unwrap();
-        
+        txn.change_prop("svn:date", "2023-01-01T12:00:00.000000Z")
+            .unwrap();
+
         let _rev = txn.commit().unwrap();
     }
 
@@ -1197,19 +1205,19 @@ mod tests {
         let fs_path = dir.path().join("test-fs");
 
         let fs = Fs::create(&fs_path).unwrap();
-        
+
         // Begin a transaction
         let txn = fs.begin_txn(crate::Revnum(0)).unwrap();
         let txn_name = txn.name().unwrap();
-        
+
         // Don't commit it, just get the name
         drop(txn);
-        
+
         // Try to open the transaction by name
         // Note: This might fail if the transaction was cleaned up
         // This test mainly verifies the API works
         let _result = fs.open_txn(&txn_name);
-        // We don't assert success because transaction cleanup behavior 
+        // We don't assert success because transaction cleanup behavior
         // depends on SVN implementation details
     }
 }

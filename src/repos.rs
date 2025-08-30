@@ -299,8 +299,8 @@ impl Repos {
             subversion_sys::svn_repos_load_fs6(
                 self.ptr,
                 dumpstream.as_mut_ptr(),
-                start_rev.map(|r| r.0).unwrap_or(-1),  // SVN_INVALID_REVNUM
-                end_rev.map(|r| r.0).unwrap_or(-1),    // SVN_INVALID_REVNUM
+                start_rev.map(|r| r.0).unwrap_or(-1), // SVN_INVALID_REVNUM
+                end_rev.map(|r| r.0).unwrap_or(-1),   // SVN_INVALID_REVNUM
                 uuid_action.into(),
                 parent_dir_cstr,
                 use_pre_commit_hook.into(),

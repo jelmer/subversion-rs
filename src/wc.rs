@@ -865,18 +865,17 @@ impl Context {
             status: *const subversion_sys::svn_wc_status3_t,
             _pool: *mut apr_sys::apr_pool_t,
         ) -> *mut subversion_sys::svn_error_t {
-            let callback = unsafe {
-                &mut *(baton as *mut Box<dyn FnMut(&str, &Status) -> Result<(), Error>>)
-            };
-            
+            let callback =
+                unsafe { &mut *(baton as *mut Box<dyn FnMut(&str, &Status) -> Result<(), Error>>) };
+
             let path = unsafe {
                 std::ffi::CStr::from_ptr(local_abspath)
                     .to_string_lossy()
                     .into_owned()
             };
-            
+
             let status = Status { ptr: status };
-            
+
             match callback(&path, &status) {
                 Ok(()) => std::ptr::null_mut(),
                 Err(e) => unsafe { e.into_raw() },
@@ -898,14 +897,14 @@ impl Context {
                 std::ptr::null_mut(), // ignore_patterns
                 Some(status_callback),
                 baton,
-                None, // cancel_func
+                None,                 // cancel_func
                 std::ptr::null_mut(), // cancel_baton
                 pool.as_mut_ptr(),
             );
-            
+
             // Clean up the callback
             let _ = Box::from_raw(baton as *mut Box<dyn FnMut(&str, &Status) -> Result<(), Error>>);
-            
+
             Error::from_raw(err)
         }
     }
@@ -929,8 +928,8 @@ impl Context {
                 path_cstr.as_ptr(),
                 recurse as i32,
                 std::ptr::null_mut(), // wcprop_changes (deprecated)
-                false as i32, // remove_lock
-                false as i32, // remove_changelist  
+                false as i32,         // remove_lock
+                false as i32,         // remove_changelist
                 std::ptr::null_mut(), // sha1_checksum
                 pool.as_mut_ptr(),
             );
@@ -949,13 +948,9 @@ impl Context {
         rev_author: Option<&str>,
     ) -> Result<(), Error> {
         let pool = apr::Pool::new();
-        
-        let rev_date_cstr = rev_date
-            .map(|s| std::ffi::CString::new(s))
-            .transpose()?;
-        let rev_author_cstr = rev_author
-            .map(|s| std::ffi::CString::new(s))
-            .transpose()?;
+
+        let rev_date_cstr = rev_date.map(|s| std::ffi::CString::new(s)).transpose()?;
+        let rev_author_cstr = rev_author.map(|s| std::ffi::CString::new(s)).transpose()?;
 
         unsafe {
             let err = subversion_sys::svn_wc_process_committed_queue2(
@@ -968,7 +963,7 @@ impl Context {
                 rev_author_cstr
                     .as_ref()
                     .map_or(std::ptr::null(), |s| s.as_ptr()),
-                None, // cancel_func
+                None,                 // cancel_func
                 std::ptr::null_mut(), // cancel_baton
                 pool.as_mut_ptr(),
             );
@@ -979,11 +974,7 @@ impl Context {
     /// Add a lock to the working copy
     ///
     /// Adds lock information for the given path.
-    pub fn add_lock(
-        &mut self,
-        local_abspath: &std::path::Path,
-        lock: &Lock,
-    ) -> Result<(), Error> {
+    pub fn add_lock(&mut self, local_abspath: &std::path::Path, lock: &Lock) -> Result<(), Error> {
         let pool = apr::Pool::new();
         let path_cstr = std::ffi::CString::new(local_abspath.to_str().unwrap())?;
 
@@ -1001,10 +992,7 @@ impl Context {
     /// Remove a lock from the working copy
     ///
     /// Removes lock information for the given path.
-    pub fn remove_lock(
-        &mut self,
-        local_abspath: &std::path::Path,
-    ) -> Result<(), Error> {
+    pub fn remove_lock(&mut self, local_abspath: &std::path::Path) -> Result<(), Error> {
         let pool = apr::Pool::new();
         let path_cstr = std::ffi::CString::new(local_abspath.to_str().unwrap())?;
 
@@ -1029,9 +1017,7 @@ impl CommittedQueue {
     /// Create a new committed queue
     pub fn new() -> Self {
         let pool = apr::Pool::new();
-        let ptr = unsafe {
-            subversion_sys::svn_wc_committed_queue_create(pool.as_mut_ptr())
-        };
+        let ptr = unsafe { subversion_sys::svn_wc_committed_queue_create(pool.as_mut_ptr()) };
         Self { ptr, pool }
     }
 

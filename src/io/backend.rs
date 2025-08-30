@@ -39,7 +39,7 @@ pub trait StreamBackend: Send + 'static {
         // Default implementation using read
         let mut buf = vec![0u8; count.min(8192)];
         let mut total_skipped = 0;
-        
+
         while total_skipped < count {
             let to_skip = (count - total_skipped).min(buf.len());
             let n = self.read(&mut buf[..to_skip])?;
@@ -48,7 +48,7 @@ pub trait StreamBackend: Send + 'static {
             }
             total_skipped += n;
         }
-        
+
         Ok(total_skipped)
     }
 
@@ -140,12 +140,12 @@ impl StreamBackend for BufferBackend {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, Error> {
         let available = self.write_pos.saturating_sub(self.read_pos);
         let to_read = buf.len().min(available);
-        
+
         if to_read > 0 {
             buf[..to_read].copy_from_slice(&self.buffer[self.read_pos..self.read_pos + to_read]);
             self.read_pos += to_read;
         }
-        
+
         Ok(to_read)
     }
 
@@ -154,10 +154,10 @@ impl StreamBackend for BufferBackend {
         if self.write_pos + buf.len() > self.buffer.len() {
             self.buffer.resize(self.write_pos + buf.len(), 0);
         }
-        
+
         self.buffer[self.write_pos..self.write_pos + buf.len()].copy_from_slice(buf);
         self.write_pos += buf.len();
-        
+
         Ok(buf.len())
     }
 

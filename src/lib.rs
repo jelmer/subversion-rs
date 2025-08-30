@@ -684,7 +684,7 @@ impl<'pool> LogEntry<'pool> {
         self.get_revprop("svn:log")
     }
 
-    /// Get the author 
+    /// Get the author
     pub fn author(&self) -> Option<&str> {
         self.get_revprop("svn:author")
     }
@@ -708,7 +708,7 @@ impl<'pool> LogEntry<'pool> {
                 prop_key.as_ptr() as *const std::ffi::c_void,
                 apr_sys::APR_HASH_KEY_STRING as apr_sys::apr_ssize_t,
             );
-            
+
             if value_ptr.is_null() {
                 return None;
             }
@@ -718,10 +718,8 @@ impl<'pool> LogEntry<'pool> {
                 return None;
             }
 
-            let data_slice = std::slice::from_raw_parts(
-                (*svn_string).data as *const u8,
-                (*svn_string).len,
-            );
+            let data_slice =
+                std::slice::from_raw_parts((*svn_string).data as *const u8, (*svn_string).len);
             std::str::from_utf8(data_slice).ok()
         }
     }

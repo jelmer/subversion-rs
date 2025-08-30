@@ -44,17 +44,17 @@ impl<B: StreamBackend> StreamBuilder<B> {
     /// Build the stream with the configured options
     pub fn build(self) -> Result<Stream, Error> {
         let stream = Stream::from_backend(self.backend)?;
-        
+
         // Apply configurations
         if self.buffer_size.is_some() {
             // In a real implementation, we might wrap the stream in a buffering layer
             // For now, SVN handles its own buffering
         }
-        
+
         // Note: disown functionality would need to be implemented at the backend level
         // The SVN disown creates a new stream that doesn't close the underlying resource
         // For custom backends, this behavior should be controlled by the backend itself
-        
+
         Ok(stream)
     }
 }
@@ -76,14 +76,10 @@ where
 
 /// Helper to create a buffered stream
 pub fn buffered_stream<B: StreamBackend>(backend: B, buffer_size: usize) -> Result<Stream, Error> {
-    StreamBuilder::new(backend)
-        .buffer_size(buffer_size)
-        .build()
+    StreamBuilder::new(backend).buffer_size(buffer_size).build()
 }
 
 /// Helper to create a lazy stream that opens on first use
 pub fn lazy_stream<B: StreamBackend>(backend: B) -> Result<Stream, Error> {
-    StreamBuilder::new(backend)
-        .lazy_open()
-        .build()
+    StreamBuilder::new(backend).lazy_open().build()
 }
