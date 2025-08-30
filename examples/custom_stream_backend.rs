@@ -53,10 +53,11 @@ impl<T: Read + Write + Send + 'static> StreamBackend for LoggingBackend<T> {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== Custom Stream Backend Examples ===\n");
 
-    // Example 1: BufferBackend (built-in)
-    println!("1. Using BufferBackend:");
+    // Example 1: BufferBackend (built-in) using IntoStream trait
+    println!("1. Using BufferBackend with IntoStream:");
+    use subversion::io::IntoStream;
     let backend = BufferBackend::from_vec(b"Hello, Subversion!".to_vec());
-    let mut stream = Stream::from_backend(backend)?;
+    let mut stream = backend.into_stream()?;
     
     let mut buf = vec![0u8; 18];
     let n = stream.read(&mut buf)?;
@@ -75,7 +76,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Example 3: BufferBackend with write and reset
     println!("\n3. Using BufferBackend with write:");
     let backend = BufferBackend::new();
+    // Both approaches are equivalent:
+    // 1. Direct method call:
     let mut stream = Stream::from_backend(backend)?;
+    // 2. Using IntoStream trait (would be: backend.into_stream()?)
     
     // Write data - using std::io::Write trait
     use std::io::Write;
