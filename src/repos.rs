@@ -79,7 +79,7 @@ impl Repos {
         let config_hash = if let Some(cfg) = config {
             let mut hash = apr::hash::Hash::<&[u8], &[u8]>::new(&pool);
             for (k, v) in cfg.iter() {
-                hash.set(&k.as_bytes(), &v.as_bytes());
+                hash.insert(&k.as_bytes(), &v.as_bytes());
             }
             unsafe { hash.as_mut_ptr() }
         } else {
@@ -90,7 +90,7 @@ impl Repos {
         let fs_config_hash = if let Some(cfg) = fs_config {
             let mut hash = apr::hash::Hash::<&[u8], &[u8]>::new(&pool);
             for (k, v) in cfg.iter() {
-                hash.set(&k.as_bytes(), &v.as_bytes());
+                hash.insert(&k.as_bytes(), &v.as_bytes());
             }
             unsafe { hash.as_mut_ptr() }
         } else {
@@ -146,7 +146,7 @@ impl Repos {
             )
         };
         Error::from_raw(ret)?;
-        let mut capabilities_hash = apr::hash::Hash::<&str, &str>::from_ptr(capabilities);
+        let capabilities_hash = apr::hash::Hash::<&str, &str>::from_ptr(capabilities);
         Ok(capabilities_hash
             .keys(&pool)
             .map(|k| String::from_utf8_lossy(k).to_string())

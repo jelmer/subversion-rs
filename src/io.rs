@@ -1507,7 +1507,7 @@ mod tests {
 
     #[test]
     fn test_stringbuf_operations() {
-        let mut stringbuf = StringBuf::from_str("Initial content");
+        let stringbuf = StringBuf::from_str("Initial content");
         assert_eq!(stringbuf.len(), 15);
         assert!(!stringbuf.is_empty());
         assert_eq!(stringbuf.to_string(), "Initial content");
@@ -1649,6 +1649,66 @@ mod tests {
         stream.flush().unwrap();
 
         assert!(stringbuf.to_string().contains("Hello world"));
+    }
+
+    #[test]
+    fn test_stream_std_io_write() {
+        use std::io::Write;
+        
+        let mut stringbuf = StringBuf::new();
+        let mut stream = Stream::from_stringbuf(&mut stringbuf);
+        
+        // Test std::io::Write trait - explicitly use the trait method
+        let data = b"Hello, World!";
+        let bytes_written = Write::write(&mut stream, data).unwrap();
+        assert_eq!(bytes_written, data.len());
+        
+        // Verify the data was written
+        let result = stringbuf.to_string();
+        assert_eq!(result, "Hello, World!");
+    }
+
+    #[test]
+    fn test_stream_std_io_read() {
+        use std::io::Read;
+        
+        // Create a stream from some data
+        let data = b"Test data for reading";
+        let mut stream = Stream::from(data.as_slice());
+        
+        // Test std::io::Read trait - explicitly use the trait method
+        let mut buffer = vec![0u8; 9];
+        let bytes_read = Read::read(&mut stream, &mut buffer).unwrap();
+        assert_eq!(bytes_read, 9);
+        assert_eq!(&buffer, b"Test data");
+        
+        // Read more
+        let mut buffer2 = vec![0u8; 12];
+        let bytes_read = Read::read(&mut stream, &mut buffer2).unwrap();
+        assert_eq!(bytes_read, 12);
+        assert_eq!(&buffer2, b" for reading");
+    }
+
+    #[test]
+    fn test_stream_read_write_roundtrip() {
+        use std::io::{Read, Write};
+        
+        // Write data to a stream
+        let mut stringbuf = StringBuf::new();
+        let mut write_stream = Stream::from_stringbuf(&mut stringbuf);
+        
+        write_stream.write_all(b"First line\n").unwrap();
+        write_stream.write_all(b"Second line\n").unwrap();
+        write_stream.write_all(b"Third line").unwrap();
+        
+        // Create a new stream from the written data to read it back
+        let written_data = stringbuf.to_string();
+        let mut read_stream = Stream::from(written_data.as_str());
+        
+        let mut read_buffer = String::new();
+        read_stream.read_to_string(&mut read_buffer).unwrap();
+        
+        assert_eq!(read_buffer, "First line\nSecond line\nThird line");
     }
 }
 

@@ -101,7 +101,7 @@ extern "C" fn wrap_proplist_receiver2(
             ) -> Result<(), Error>;
         let callback = &mut *(callback);
         let path: &str = std::ffi::CStr::from_ptr(path).to_str().unwrap();
-        let mut props = apr::hash::Hash::<&str, *mut subversion_sys::svn_string_t>::from_ptr(props);
+        let props = apr::hash::Hash::<&str, *mut subversion_sys::svn_string_t>::from_ptr(props);
         let props = props
             .iter(&scratch_pool)
             .map(|(k, v)| {
@@ -110,9 +110,7 @@ extern "C" fn wrap_proplist_receiver2(
                     if (*v).is_null() {
                         Vec::new()
                     } else {
-                        unsafe {
-                            std::slice::from_raw_parts((**v).data as *const u8, (**v).len).to_vec()
-                        }
+                        std::slice::from_raw_parts((**v).data as *const u8, (**v).len).to_vec()
                     },
                 )
             })
@@ -242,7 +240,7 @@ unsafe extern "C" fn blame_receiver_wrapper(
     let (author, date) = if !rev_props.is_null() {
         let props =
             apr::hash::Hash::<&str, *const subversion_sys::svn_string_t>::from_ptr(rev_props);
-        let pool = apr::Pool::from_raw(pool);
+        let _pool = apr::Pool::from_raw(pool);
 
         let author = props.get("svn:author").and_then(|svn_str| {
             if !svn_str.is_null() {
@@ -278,7 +276,7 @@ unsafe extern "C" fn blame_receiver_wrapper(
         let props = apr::hash::Hash::<&str, *const subversion_sys::svn_string_t>::from_ptr(
             merged_rev_props,
         );
-        let pool = apr::Pool::from_raw(pool);
+        let _pool = apr::Pool::from_raw(pool);
 
         let author = props.get("svn:author").and_then(|svn_str| {
             if !svn_str.is_null() {
@@ -873,7 +871,7 @@ impl Context {
     ) -> Result<Revnum, Error> {
         let peg_revision = options.peg_revision.into();
         let revision = options.revision.into();
-        let mut pool = Pool::default();
+        let pool = Pool::default();
 
         // Canonicalize inputs
         let url = url.as_canonical_uri()?;
@@ -947,7 +945,7 @@ impl Context {
         url: impl AsCanonicalUri,
         options: &SwitchOptions,
     ) -> Result<Revnum, Error> {
-        let mut pool = Pool::default();
+        let pool = Pool::default();
         let mut result_rev = 0;
 
         // Canonicalize inputs
@@ -979,7 +977,7 @@ impl Context {
     }
 
     pub fn add(&mut self, path: impl AsCanonicalDirent, options: &AddOptions) -> Result<(), Error> {
-        let mut pool = Pool::default();
+        let pool = Pool::default();
         let path = path.as_canonical_dirent()?;
         with_tmp_pool(|tmp_pool| unsafe {
             let path_cstr = std::ffi::CString::new(path.as_str())?;
@@ -1009,7 +1007,7 @@ impl Context {
         unsafe {
             let mut rps = apr::hash::Hash::new(&pool);
             for (k, v) in revprop_table {
-                rps.set(k, &v);
+                rps.insert(k, &v);
             }
             // Keep CStrings alive for the duration of the function
             let path_cstrings: Vec<std::ffi::CString> = paths
@@ -1044,7 +1042,7 @@ impl Context {
         unsafe {
             let mut rps = apr::hash::Hash::new(&pool);
             for (k, v) in revprop_table {
-                rps.set(k, &v);
+                rps.insert(k, &v);
             }
             // Keep CStrings alive for the duration of the function
             let path_cstrings: Vec<std::ffi::CString> = paths
@@ -1134,7 +1132,7 @@ impl Context {
         let path = path.as_canonical_dirent()?;
         let mut rps = apr::hash::Hash::new(std::rc::Rc::get_mut(&mut pool).unwrap());
         for (k, v) in revprop_table {
-            rps.set(k, &v);
+            rps.insert(k, &v);
         }
         unsafe {
             let filter_callback = Box::into_raw(Box::new(filter_callback));
@@ -1166,7 +1164,7 @@ impl Context {
         to_path: impl AsCanonicalDirent,
         options: &ExportOptions,
     ) -> Result<Revnum, Error> {
-        let mut pool = std::rc::Rc::new(Pool::default());
+        let pool = std::rc::Rc::new(Pool::default());
         let native_eol: Option<&str> = options.native_eol.into();
         let native_eol = native_eol.map(|s| std::ffi::CString::new(s).unwrap());
         let mut revnum = 0;
@@ -1202,7 +1200,7 @@ impl Context {
         let mut pool = std::rc::Rc::new(Pool::default());
         let mut rps = apr::hash::Hash::new(&pool);
         for (k, v) in revprop_table {
-            rps.set(k, &v);
+            rps.insert(k, &v);
         }
 
         unsafe {
@@ -1543,7 +1541,7 @@ impl Context {
         local_abspath: impl AsCanonicalDirent,
     ) -> Result<Conflict, Error> {
         let pool = apr::Pool::new();
-        let mut scratch_pool = apr::Pool::new();
+        let scratch_pool = apr::Pool::new();
         let local_abspath = local_abspath.as_canonical_dirent()?;
         let mut conflict: *mut subversion_sys::svn_client_conflict_t = std::ptr::null_mut();
         with_tmp_pool(|tmp_pool| unsafe {
@@ -1583,7 +1581,7 @@ impl Context {
                 apr::pool::Pool::new().as_mut_ptr(),
             );
             Error::from_raw(err)?;
-            let mut props = apr::hash::Hash::<&str, &[u8]>::from_ptr(props);
+            let props = apr::hash::Hash::<&str, &[u8]>::from_ptr(props);
             Ok(props
                 .iter(&pool)
                 .map(|(k, v)| (String::from_utf8_lossy(k).to_string(), v.to_vec()))
@@ -1641,7 +1639,7 @@ impl Context {
         &mut self,
         path: impl AsCanonicalDirent,
     ) -> Result<std::path::PathBuf, Error> {
-        let mut pool = std::rc::Rc::new(Pool::default());
+        let pool = std::rc::Rc::new(Pool::default());
         let path = path.as_canonical_dirent()?;
         let mut wc_root: *const i8 = std::ptr::null();
         with_tmp_pool(|tmp_pool| unsafe {
@@ -1663,7 +1661,7 @@ impl Context {
         local_abspath: impl AsCanonicalDirent,
         committed: bool,
     ) -> Result<(Revnum, Revnum), Error> {
-        let mut scratch_pool = apr::pool::Pool::new();
+        let scratch_pool = apr::pool::Pool::new();
         let local_abspath = local_abspath.as_canonical_dirent()?;
         let mut min_revision: subversion_sys::svn_revnum_t = 0;
         let mut max_revision: subversion_sys::svn_revnum_t = 0;
@@ -1686,7 +1684,7 @@ impl Context {
     }
 
     pub fn url_from_path(&mut self, path: impl AsCanonicalUri) -> Result<String, Error> {
-        let mut pool = Pool::default();
+        let pool = Pool::default();
 
         // Canonicalize input
         let path = path.as_canonical_uri()?;
@@ -2035,7 +2033,7 @@ impl Context {
 
             // Convert apr hash to Rust HashMap
             // The hash values are svn_string_t structs (not pointers)
-            let mut hash = apr::hash::Hash::<&[u8], subversion_sys::svn_string_t>::from_ptr(props);
+            let hash = apr::hash::Hash::<&[u8], subversion_sys::svn_string_t>::from_ptr(props);
             let mut result = std::collections::HashMap::new();
             for (k, v) in hash.iter(pool) {
                 let key = String::from_utf8_lossy(k).into_owned();
@@ -2146,7 +2144,7 @@ impl Context {
                 let path_str = unsafe { std::ffi::CStr::from_ptr(path).to_str().unwrap() };
 
                 // Convert props hash
-                let mut hash =
+                let hash =
                     apr::hash::Hash::<&[u8], *const subversion_sys::svn_string_t>::from_ptr(props);
                 let mut prop_hash = std::collections::HashMap::new();
                 let pool = apr::Pool::new();
@@ -4321,8 +4319,8 @@ mod tests {
         let wc_path = td.path().join("wc");
 
         // Create a test repository and get its UUID
-        let mut repos = crate::repos::Repos::create(&repo_path).unwrap();
-        let mut fs = repos.fs().unwrap();
+        let repos = crate::repos::Repos::create(&repo_path).unwrap();
+        let fs = repos.fs().unwrap();
         let uuid = fs.get_uuid().unwrap();
         drop(fs);
         drop(repos);

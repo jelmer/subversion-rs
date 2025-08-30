@@ -37,12 +37,9 @@ pub fn read(
     terminator: Option<&str>,
 ) -> Result<HashMap<String, String>, Error> {
     let pool = apr::Pool::new();
-    let mut raw_hash: *mut apr_sys::apr_hash_t = std::ptr::null_mut();
 
     // Create empty APR hash
-    unsafe {
-        raw_hash = apr_sys::apr_hash_make(pool.as_mut_ptr());
-    }
+    let raw_hash = unsafe { apr_sys::apr_hash_make(pool.as_mut_ptr()) };
 
     let terminator_cstr = terminator
         .map(|s| std::ffi::CString::new(s))
@@ -174,12 +171,9 @@ pub fn read_incremental(
     terminator: Option<&str>,
 ) -> Result<HashMap<String, String>, Error> {
     let pool = apr::Pool::new();
-    let mut raw_hash: *mut apr_sys::apr_hash_t = std::ptr::null_mut();
 
     // Create empty APR hash
-    unsafe {
-        raw_hash = apr_sys::apr_hash_make(pool.as_mut_ptr());
-    }
+    let raw_hash = unsafe { apr_sys::apr_hash_make(pool.as_mut_ptr()) };
 
     let terminator_cstr = terminator
         .map(|s| std::ffi::CString::new(s))
@@ -335,7 +329,7 @@ pub fn write_incremental(
 pub fn diff<F>(
     hash_a: &HashMap<String, String>,
     hash_b: &HashMap<String, String>,
-    mut diff_func: F,
+    diff_func: F,
 ) -> Result<(), Error>
 where
     F: FnMut(&str, DiffKeyStatus) -> Result<(), Error>,
@@ -418,7 +412,7 @@ where
         }
     }
 
-    let mut boxed_callback: Box<Box<dyn FnMut(&str, DiffKeyStatus) -> Result<(), Error>>> =
+    let boxed_callback: Box<Box<dyn FnMut(&str, DiffKeyStatus) -> Result<(), Error>>> =
         Box::new(Box::new(diff_func));
     let baton = Box::into_raw(boxed_callback) as *mut std::ffi::c_void;
 

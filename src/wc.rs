@@ -31,7 +31,7 @@ pub const SCHEDULE_REPLACE: u32 = subversion_sys::svn_wc_schedule_t_svn_wc_sched
 /// Working copy status types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
-pub enum Status {
+pub enum StatusKind {
     /// Not under version control
     None = subversion_sys::svn_wc_status_kind_svn_wc_status_none,
     /// Item is not versioned
@@ -62,24 +62,86 @@ pub enum Status {
     Incomplete = subversion_sys::svn_wc_status_kind_svn_wc_status_incomplete,
 }
 
-impl From<subversion_sys::svn_wc_status_kind> for Status {
+impl From<subversion_sys::svn_wc_status_kind> for StatusKind {
     fn from(status: subversion_sys::svn_wc_status_kind) -> Self {
         match status {
-            subversion_sys::svn_wc_status_kind_svn_wc_status_none => Status::None,
-            subversion_sys::svn_wc_status_kind_svn_wc_status_unversioned => Status::Unversioned,
-            subversion_sys::svn_wc_status_kind_svn_wc_status_normal => Status::Normal,
-            subversion_sys::svn_wc_status_kind_svn_wc_status_added => Status::Added,
-            subversion_sys::svn_wc_status_kind_svn_wc_status_missing => Status::Missing,
-            subversion_sys::svn_wc_status_kind_svn_wc_status_deleted => Status::Deleted,
-            subversion_sys::svn_wc_status_kind_svn_wc_status_replaced => Status::Replaced,
-            subversion_sys::svn_wc_status_kind_svn_wc_status_modified => Status::Modified,
-            subversion_sys::svn_wc_status_kind_svn_wc_status_merged => Status::Merged,
-            subversion_sys::svn_wc_status_kind_svn_wc_status_conflicted => Status::Conflicted,
-            subversion_sys::svn_wc_status_kind_svn_wc_status_ignored => Status::Ignored,
-            subversion_sys::svn_wc_status_kind_svn_wc_status_obstructed => Status::Obstructed,
-            subversion_sys::svn_wc_status_kind_svn_wc_status_external => Status::External,
-            subversion_sys::svn_wc_status_kind_svn_wc_status_incomplete => Status::Incomplete,
-            _ => Status::None,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_none => StatusKind::None,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_unversioned => StatusKind::Unversioned,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_normal => StatusKind::Normal,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_added => StatusKind::Added,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_missing => StatusKind::Missing,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_deleted => StatusKind::Deleted,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_replaced => StatusKind::Replaced,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_modified => StatusKind::Modified,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_merged => StatusKind::Merged,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_conflicted => StatusKind::Conflicted,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_ignored => StatusKind::Ignored,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_obstructed => StatusKind::Obstructed,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_external => StatusKind::External,
+            subversion_sys::svn_wc_status_kind_svn_wc_status_incomplete => StatusKind::Incomplete,
+            _ => StatusKind::None,
+        }
+    }
+}
+
+/// Working copy status information
+pub struct Status {
+    ptr: *const subversion_sys::svn_wc_status3_t,
+}
+
+impl Status {
+    /// Get the node status
+    pub fn node_status(&self) -> StatusKind {
+        unsafe { (*self.ptr).node_status.into() }
+    }
+
+    /// Get the text status
+    pub fn text_status(&self) -> StatusKind {
+        unsafe { (*self.ptr).text_status.into() }
+    }
+
+    /// Get the property status
+    pub fn prop_status(&self) -> StatusKind {
+        unsafe { (*self.ptr).prop_status.into() }
+    }
+
+    /// Check if the item is copied
+    pub fn copied(&self) -> bool {
+        unsafe { (*self.ptr).copied != 0 }
+    }
+
+    /// Check if the item is switched
+    pub fn switched(&self) -> bool {
+        unsafe { (*self.ptr).switched != 0 }
+    }
+
+    /// Check if the item is locked
+    pub fn locked(&self) -> bool {
+        unsafe { (*self.ptr).locked != 0 }
+    }
+
+    /// Get the revision
+    pub fn revision(&self) -> crate::Revnum {
+        unsafe { crate::Revnum((*self.ptr).revision) }
+    }
+
+    /// Get the changed revision
+    pub fn changed_rev(&self) -> crate::Revnum {
+        unsafe { crate::Revnum((*self.ptr).changed_rev) }
+    }
+
+    /// Get the repository relative path
+    pub fn repos_relpath(&self) -> Option<String> {
+        unsafe {
+            if (*self.ptr).repos_relpath.is_null() {
+                None
+            } else {
+                Some(
+                    std::ffi::CStr::from_ptr((*self.ptr).repos_relpath)
+                        .to_string_lossy()
+                        .into_owned(),
+                )
+            }
         }
     }
 }
@@ -776,6 +838,222 @@ impl Context {
 
         Ok(Some(result))
     }
+
+    /// Walk the status of a working copy tree
+    ///
+    /// Walks the WC status for `local_abspath` and all its children, invoking
+    /// the callback for each node.
+    pub fn walk_status<F>(
+        &mut self,
+        local_abspath: &std::path::Path,
+        depth: crate::Depth,
+        get_all: bool,
+        no_ignore: bool,
+        ignore_text_mods: bool,
+        status_func: F,
+    ) -> Result<(), Error>
+    where
+        F: FnMut(&str, &Status) -> Result<(), Error>,
+    {
+        let pool = apr::Pool::new();
+        let path_cstr = std::ffi::CString::new(local_abspath.to_str().unwrap())?;
+
+        // Wrap the closure in a way that can be passed to C
+        extern "C" fn status_callback(
+            baton: *mut std::ffi::c_void,
+            local_abspath: *const std::os::raw::c_char,
+            status: *const subversion_sys::svn_wc_status3_t,
+            _pool: *mut apr_sys::apr_pool_t,
+        ) -> *mut subversion_sys::svn_error_t {
+            let callback = unsafe {
+                &mut *(baton as *mut Box<dyn FnMut(&str, &Status) -> Result<(), Error>>)
+            };
+            
+            let path = unsafe {
+                std::ffi::CStr::from_ptr(local_abspath)
+                    .to_string_lossy()
+                    .into_owned()
+            };
+            
+            let status = Status { ptr: status };
+            
+            match callback(&path, &status) {
+                Ok(()) => std::ptr::null_mut(),
+                Err(e) => unsafe { e.into_raw() },
+            }
+        }
+
+        let mut boxed_callback: Box<Box<dyn FnMut(&str, &Status) -> Result<(), Error>>> =
+            Box::new(Box::new(status_func));
+        let baton = Box::into_raw(boxed_callback) as *mut std::ffi::c_void;
+
+        unsafe {
+            let err = subversion_sys::svn_wc_walk_status(
+                self.ptr,
+                path_cstr.as_ptr(),
+                depth.into(),
+                get_all as i32,
+                no_ignore as i32,
+                ignore_text_mods as i32,
+                std::ptr::null_mut(), // ignore_patterns
+                Some(status_callback),
+                baton,
+                None, // cancel_func
+                std::ptr::null_mut(), // cancel_baton
+                pool.as_mut_ptr(),
+            );
+            
+            // Clean up the callback
+            let _ = Box::from_raw(baton as *mut Box<dyn FnMut(&str, &Status) -> Result<(), Error>>);
+            
+            Error::from_raw(err)
+        }
+    }
+
+    /// Queue committed items for post-commit processing
+    ///
+    /// Queues items that have been committed for later processing by `process_committed_queue`.
+    pub fn queue_committed(
+        &mut self,
+        local_abspath: &std::path::Path,
+        recurse: bool,
+        committed_queue: &mut CommittedQueue,
+    ) -> Result<(), Error> {
+        let pool = apr::Pool::new();
+        let path_cstr = std::ffi::CString::new(local_abspath.to_str().unwrap())?;
+
+        unsafe {
+            let err = subversion_sys::svn_wc_queue_committed3(
+                committed_queue.as_mut_ptr(),
+                self.ptr,
+                path_cstr.as_ptr(),
+                recurse as i32,
+                std::ptr::null_mut(), // wcprop_changes (deprecated)
+                false as i32, // remove_lock
+                false as i32, // remove_changelist  
+                std::ptr::null_mut(), // sha1_checksum
+                pool.as_mut_ptr(),
+            );
+            Error::from_raw(err)
+        }
+    }
+
+    /// Process the committed queue
+    ///
+    /// Processes all items in the committed queue after a successful commit.
+    pub fn process_committed_queue(
+        &mut self,
+        committed_queue: &mut CommittedQueue,
+        new_revnum: crate::Revnum,
+        rev_date: Option<&str>,
+        rev_author: Option<&str>,
+    ) -> Result<(), Error> {
+        let pool = apr::Pool::new();
+        
+        let rev_date_cstr = rev_date
+            .map(|s| std::ffi::CString::new(s))
+            .transpose()?;
+        let rev_author_cstr = rev_author
+            .map(|s| std::ffi::CString::new(s))
+            .transpose()?;
+
+        unsafe {
+            let err = subversion_sys::svn_wc_process_committed_queue2(
+                committed_queue.as_mut_ptr(),
+                self.ptr,
+                new_revnum.0,
+                rev_date_cstr
+                    .as_ref()
+                    .map_or(std::ptr::null(), |s| s.as_ptr()),
+                rev_author_cstr
+                    .as_ref()
+                    .map_or(std::ptr::null(), |s| s.as_ptr()),
+                None, // cancel_func
+                std::ptr::null_mut(), // cancel_baton
+                pool.as_mut_ptr(),
+            );
+            Error::from_raw(err)
+        }
+    }
+
+    /// Add a lock to the working copy
+    ///
+    /// Adds lock information for the given path.
+    pub fn add_lock(
+        &mut self,
+        local_abspath: &std::path::Path,
+        lock: &Lock,
+    ) -> Result<(), Error> {
+        let pool = apr::Pool::new();
+        let path_cstr = std::ffi::CString::new(local_abspath.to_str().unwrap())?;
+
+        unsafe {
+            let err = subversion_sys::svn_wc_add_lock2(
+                self.ptr,
+                path_cstr.as_ptr(),
+                lock.as_ptr(),
+                pool.as_mut_ptr(),
+            );
+            Error::from_raw(err)
+        }
+    }
+
+    /// Remove a lock from the working copy
+    ///
+    /// Removes lock information for the given path.
+    pub fn remove_lock(
+        &mut self,
+        local_abspath: &std::path::Path,
+    ) -> Result<(), Error> {
+        let pool = apr::Pool::new();
+        let path_cstr = std::ffi::CString::new(local_abspath.to_str().unwrap())?;
+
+        unsafe {
+            let err = subversion_sys::svn_wc_remove_lock2(
+                self.ptr,
+                path_cstr.as_ptr(),
+                pool.as_mut_ptr(),
+            );
+            Error::from_raw(err)
+        }
+    }
+}
+
+/// Represents a queue of committed items
+pub struct CommittedQueue {
+    ptr: *mut subversion_sys::svn_wc_committed_queue_t,
+    pool: apr::Pool,
+}
+
+impl CommittedQueue {
+    /// Create a new committed queue
+    pub fn new() -> Self {
+        let pool = apr::Pool::new();
+        let ptr = unsafe {
+            subversion_sys::svn_wc_committed_queue_create(pool.as_mut_ptr())
+        };
+        Self { ptr, pool }
+    }
+
+    fn as_mut_ptr(&mut self) -> *mut subversion_sys::svn_wc_committed_queue_t {
+        self.ptr
+    }
+}
+
+/// Represents a lock in the working copy
+pub struct Lock {
+    ptr: *const subversion_sys::svn_lock_t,
+}
+
+impl Lock {
+    /// Create from a raw pointer
+    pub fn from_ptr(ptr: *const subversion_sys::svn_lock_t) -> Self {
+        Self { ptr }
+    }
+
+    fn as_ptr(&self) -> *const subversion_sys::svn_lock_t {
+        self.ptr
+    }
 }
 
 /// Clean up a working copy
@@ -979,23 +1257,23 @@ mod tests {
 
     #[test]
     fn test_status_enum() {
-        // Test Status enum conversions
+        // Test StatusKind enum conversions
         assert_eq!(
-            Status::Normal as u32,
+            StatusKind::Normal as u32,
             subversion_sys::svn_wc_status_kind_svn_wc_status_normal
         );
         assert_eq!(
-            Status::Added as u32,
+            StatusKind::Added as u32,
             subversion_sys::svn_wc_status_kind_svn_wc_status_added
         );
         assert_eq!(
-            Status::Deleted as u32,
+            StatusKind::Deleted as u32,
             subversion_sys::svn_wc_status_kind_svn_wc_status_deleted
         );
 
         // Test From conversion
-        let status = Status::from(subversion_sys::svn_wc_status_kind_svn_wc_status_modified);
-        assert_eq!(status, Status::Modified);
+        let status = StatusKind::from(subversion_sys::svn_wc_status_kind_svn_wc_status_modified);
+        assert_eq!(status, StatusKind::Modified);
     }
 
     #[test]
