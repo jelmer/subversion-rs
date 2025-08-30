@@ -68,10 +68,14 @@ impl Error {
         }
     }
 
-    pub fn message(&self) -> &str {
+    pub fn message(&self) -> Option<&str> {
         unsafe {
             let message = (*self.0).message;
-            std::ffi::CStr::from_ptr(message).to_str().unwrap()
+            if message.is_null() {
+                None
+            } else {
+                Some(std::ffi::CStr::from_ptr(message).to_str().unwrap())
+            }
         }
     }
 
@@ -178,7 +182,7 @@ impl std::fmt::Debug for Error {
             "{}:{}: {}",
             self.file().unwrap_or("<unspecified>"),
             self.line(),
-            self.message()
+            self.message().unwrap_or("<no message>")
         )?;
         let mut n = self.child();
         while let Some(err) = n {
@@ -187,7 +191,7 @@ impl std::fmt::Debug for Error {
                 "{}:{}: {}",
                 err.file().unwrap_or("<unspecified>"),
                 err.line(),
-                err.message()
+                err.message().unwrap_or("<no message>")
             )?;
             n = err.child();
         }
@@ -213,7 +217,7 @@ impl From<Error> for std::io::Error {
     fn from(err: Error) -> Self {
         let errno = err.apr_err().raw_os_error();
         errno.map_or(
-            std::io::Error::other(err.message()),
+            std::io::Error::other(err.message().unwrap_or("Unknown error")),
             std::io::Error::from_raw_os_error,
         )
     }
@@ -250,7 +254,7 @@ mod tests {
     #[test]
     fn test_single_error_message() {
         let err = Error::from_str("Single error");
-        assert_eq!(err.message(), "Single error");
+        assert_eq!(err.message(), Some("Single error"));
 
         let full_msg = err.full_message();
         assert!(full_msg.contains("Single error"));
