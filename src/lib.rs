@@ -670,6 +670,64 @@ impl<'pool> LogEntry<'pool> {
     pub fn as_ptr(&self) -> *const subversion_sys::svn_log_entry_t {
         self.ptr
     }
+
+    /// Get the revision number
+    pub fn revision(&self) -> Option<Revnum> {
+        unsafe {
+            let rev = (*self.ptr).revision;
+            Revnum::from_raw(rev)
+        }
+    }
+
+    /// Get the log message
+    pub fn message(&self) -> Option<&str> {
+        self.get_revprop("svn:log")
+    }
+
+    /// Get the author
+    pub fn author(&self) -> Option<&str> {
+        self.get_revprop("svn:author")
+    }
+
+    /// Get the date as a string
+    pub fn date(&self) -> Option<&str> {
+        self.get_revprop("svn:date")
+    }
+
+    /// Get a revision property by name
+    fn get_revprop(&self, prop_name: &str) -> Option<&str> {
+        unsafe {
+            let revprops = (*self.ptr).revprops;
+            if revprops.is_null() {
+                return None;
+            }
+
+            let prop_key = std::ffi::CString::new(prop_name).ok()?;
+            let value_ptr = apr_sys::apr_hash_get(
+                revprops,
+                prop_key.as_ptr() as *const std::ffi::c_void,
+                apr_sys::APR_HASH_KEY_STRING as apr_sys::apr_ssize_t,
+            );
+
+            if value_ptr.is_null() {
+                return None;
+            }
+
+            let svn_string = value_ptr as *const subversion_sys::svn_string_t;
+            if svn_string.is_null() || (*svn_string).data.is_null() {
+                return None;
+            }
+
+            let data_slice =
+                std::slice::from_raw_parts((*svn_string).data as *const u8, (*svn_string).len);
+            std::str::from_utf8(data_slice).ok()
+        }
+    }
+
+    /// Check if this log entry has children
+    pub fn has_children(&self) -> bool {
+        unsafe { (*self.ptr).has_children != 0 }
+    }
 }
 
 pub type FileSize = subversion_sys::svn_filesize_t;

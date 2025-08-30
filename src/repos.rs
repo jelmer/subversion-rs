@@ -270,8 +270,8 @@ impl Repos {
     pub fn load_fs(
         &self,
         dumpstream: &mut crate::io::Stream,
-        start_rev: Revnum,
-        end_rev: Revnum,
+        start_rev: Option<Revnum>,
+        end_rev: Option<Revnum>,
         uuid_action: LoadUUID,
         parent_dir: &std::path::Path,
         use_pre_commit_hook: bool,
@@ -299,8 +299,8 @@ impl Repos {
             subversion_sys::svn_repos_load_fs6(
                 self.ptr,
                 dumpstream.as_mut_ptr(),
-                start_rev.0,
-                end_rev.0,
+                start_rev.map(|r| r.0).unwrap_or(-1), // SVN_INVALID_REVNUM
+                end_rev.map(|r| r.0).unwrap_or(-1),   // SVN_INVALID_REVNUM
                 uuid_action.into(),
                 parent_dir_cstr,
                 use_pre_commit_hook.into(),
@@ -644,11 +644,11 @@ mod tests {
         let dump_data = b"SVN-fs-dump-format-version: 3\nUUID: test-uuid-1234\n\nRevision-number: 0\nProp-content-length: 56\nContent-length: 56\n\nK 8\nsvn:date\nV 27\n2023-01-01T12:00:00.000000Z\nPROPS-END\n\n";
         let mut stream = crate::io::Stream::from(dump_data.as_slice());
 
-        // This should trigger the segfault - use both invalid revnums
+        // Use None for both start_rev and end_rev to load all revisions
         let result = repo.load_fs(
             &mut stream,
-            Revnum(-1),
-            Revnum(-1),
+            None,
+            None,
             LoadUUID::Default,
             std::path::Path::new(""),
             false,
