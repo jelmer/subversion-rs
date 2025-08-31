@@ -36,6 +36,7 @@ pub mod props;
 pub mod ra;
 pub mod repos;
 pub mod string;
+pub mod subst;
 pub mod time;
 pub mod uri;
 pub mod version;
@@ -1405,26 +1406,24 @@ impl std::fmt::Debug for SvnString {
 impl SvnString {
     /// Get the data as bytes
     pub fn as_bytes(&self) -> &[u8] {
-        unsafe {
-            std::slice::from_raw_parts(self.0.data as *const u8, self.0.len)
-        }
+        unsafe { std::slice::from_raw_parts(self.0.data as *const u8, self.0.len) }
     }
-    
+
     /// Get the data as a string
     pub fn to_str(&self) -> Result<&str, std::str::Utf8Error> {
         std::str::from_utf8(self.as_bytes())
     }
-    
+
     /// Get the data as a string (lossy conversion)
     pub fn to_str_lossy(&self) -> std::borrow::Cow<str> {
         String::from_utf8_lossy(self.as_bytes())
     }
-    
+
     /// Convert to Vec<u8>
     pub fn to_vec(&self) -> Vec<u8> {
         self.as_bytes().to_vec()
     }
-    
+
     /// Get the raw pointer to the svn_string_t
     pub fn as_ptr(&self) -> *const subversion_sys::svn_string_t {
         &self.0 as *const _
