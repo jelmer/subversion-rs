@@ -104,12 +104,7 @@ extern "C" fn wrap_proplist_receiver2(
         let props = apr::hash::Hash::<&str, &crate::SvnString>::from_ptr(props);
         let props = props
             .iter(&scratch_pool)
-            .map(|(k, v)| {
-                (
-                    String::from_utf8_lossy(k).to_string(),
-                    v.to_vec(),
-                )
-            })
+            .map(|(k, v)| (String::from_utf8_lossy(k).to_string(), v.to_vec()))
             .collect::<HashMap<_, _>>();
         let inherited_props = if inherited_props.is_null() {
             None
@@ -234,9 +229,13 @@ unsafe extern "C" fn blame_receiver_wrapper(
     let revprops = if !rev_props.is_null() {
         let props = apr::hash::Hash::<&str, &crate::SvnString>::from_ptr(rev_props);
         let pool = apr::Pool::from_raw(pool);
-        props.iter(&pool)
+        props
+            .iter(&pool)
             .map(|(k, v)| {
-                (String::from_utf8_lossy(k).into_owned(), v.as_bytes().to_vec())
+                (
+                    String::from_utf8_lossy(k).into_owned(),
+                    v.as_bytes().to_vec(),
+                )
             })
             .collect()
     } else {
@@ -247,9 +246,13 @@ unsafe extern "C" fn blame_receiver_wrapper(
     let merged_revprops = if !merged_rev_props.is_null() {
         let props = apr::hash::Hash::<&str, &crate::SvnString>::from_ptr(merged_rev_props);
         let pool = apr::Pool::from_raw(pool);
-        props.iter(&pool)
+        props
+            .iter(&pool)
             .map(|(k, v)| {
-                (String::from_utf8_lossy(k).into_owned(), v.as_bytes().to_vec())
+                (
+                    String::from_utf8_lossy(k).into_owned(),
+                    v.as_bytes().to_vec(),
+                )
             })
             .collect()
     } else {
@@ -487,19 +490,10 @@ impl AddOptions {
 }
 
 /// Options for delete
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct DeleteOptions {
     pub force: bool,
     pub keep_local: bool,
-}
-
-impl Default for DeleteOptions {
-    fn default() -> Self {
-        Self {
-            force: false,
-            keep_local: false,
-        }
-    }
 }
 
 impl DeleteOptions {
@@ -962,11 +956,8 @@ impl Context {
                 .iter()
                 .map(|(k, v)| (*k, crate::string::BStr::from_bytes(v, &pool)))
                 .collect();
-            
-            let rps = apr::hash::Hash::from_iter(
-                &pool,
-                svn_strings.iter().map(|(k, v)| (*k, v))
-            );
+
+            let rps = apr::hash::Hash::from_iter(&pool, svn_strings.iter().map(|(k, v)| (*k, v)));
             // Keep CStrings alive for the duration of the function
             let path_cstrings: Vec<std::ffi::CString> = paths
                 .iter()
@@ -998,16 +989,13 @@ impl Context {
     ) -> Result<(), Error> {
         let mut pool = std::rc::Rc::new(Pool::default());
         unsafe {
-            // Convert revprops to BStr objects that live in the pool  
+            // Convert revprops to BStr objects that live in the pool
             let svn_strings: Vec<_> = revprop_table
                 .iter()
                 .map(|(k, v)| (*k, crate::string::BStr::from_str(v, &pool)))
                 .collect();
-            
-            let rps = apr::hash::Hash::from_iter(
-                &pool,
-                svn_strings.iter().map(|(k, v)| (*k, v))
-            );
+
+            let rps = apr::hash::Hash::from_iter(&pool, svn_strings.iter().map(|(k, v)| (*k, v)));
             // Keep CStrings alive for the duration of the function
             let path_cstrings: Vec<std::ffi::CString> = paths
                 .iter()
@@ -1099,11 +1087,8 @@ impl Context {
             .iter()
             .map(|(k, v)| (*k, crate::string::BStr::from_str(v, &pool)))
             .collect();
-        
-        let rps = apr::hash::Hash::from_iter(
-            &pool,
-            svn_strings.iter().map(|(k, v)| (*k, v))
-        );
+
+        let rps = apr::hash::Hash::from_iter(&pool, svn_strings.iter().map(|(k, v)| (*k, v)));
         unsafe {
             let filter_callback = Box::into_raw(Box::new(filter_callback));
             let commit_callback = Box::into_raw(Box::new(commit_callback));
@@ -1173,11 +1158,8 @@ impl Context {
             .iter()
             .map(|(k, v)| (*k, crate::string::BStr::from_str(v, &pool)))
             .collect();
-        
-        let rps = apr::hash::Hash::from_iter(
-            &pool,
-            svn_strings.iter().map(|(k, v)| (*k, v))
-        );
+
+        let rps = apr::hash::Hash::from_iter(&pool, svn_strings.iter().map(|(k, v)| (*k, v)));
 
         unsafe {
             // Keep CStrings alive for the duration of the function
@@ -1560,7 +1542,12 @@ impl Context {
             let props = apr::hash::Hash::<&str, &crate::SvnString>::from_ptr(props);
             Ok(props
                 .iter(&pool)
-                .map(|(k, v)| (String::from_utf8_lossy(k).to_string(), v.as_bytes().to_vec()))
+                .map(|(k, v)| {
+                    (
+                        String::from_utf8_lossy(k).to_string(),
+                        v.as_bytes().to_vec(),
+                    )
+                })
                 .collect())
         }
     }
@@ -2116,8 +2103,7 @@ impl Context {
                 let path_str = unsafe { std::ffi::CStr::from_ptr(path).to_str().unwrap() };
 
                 // Convert props hash
-                let hash =
-                    apr::hash::Hash::<&[u8], Option<&crate::SvnString>>::from_ptr(props);
+                let hash = apr::hash::Hash::<&[u8], Option<&crate::SvnString>>::from_ptr(props);
                 let mut prop_hash = std::collections::HashMap::new();
                 let pool = apr::Pool::new();
                 for (k, v_opt) in hash.iter(&pool) {
@@ -3399,9 +3385,8 @@ impl Context {
 
             let mut result = std::collections::HashMap::new();
             if !props_hash.is_null() {
-                let hash = apr::hash::Hash::<&[u8], Option<&crate::SvnString>>::from_ptr(
-                    props_hash,
-                );
+                let hash =
+                    apr::hash::Hash::<&[u8], Option<&crate::SvnString>>::from_ptr(props_hash);
                 for (key, value_opt) in hash.iter(&pool) {
                     if let Some(value) = value_opt {
                         let bytes = value.as_bytes().to_vec();
@@ -3753,7 +3738,7 @@ mod tests {
         let revnum = ctx
             .checkout(
                 url,
-                &td.path().join("wc"),
+                td.path().join("wc"),
                 &CheckoutOptions {
                     peg_revision: Revision::Head,
                     revision: Revision::Head,
@@ -4007,7 +3992,7 @@ mod tests {
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         ctx.checkout(
-            crate::uri::Uri::new(&url.to_string()).unwrap(),
+            crate::uri::Uri::new(url.as_ref()).unwrap(),
             &wc_path,
             &CheckoutOptions {
                 peg_revision: Revision::Head,
@@ -4026,9 +4011,9 @@ mod tests {
         // Test diff between repository revisions using direct function
         let diff_result = ctx.diff(
             &[], // diff_options
-            &url.to_string(),
+            url.as_ref(),
             &Revision::Head,
-            &url.to_string(),
+            url.as_ref(),
             &Revision::Head,
             None, // relative_to_dir
             Depth::Infinity,
@@ -4066,7 +4051,7 @@ mod tests {
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         ctx.checkout(
-            crate::uri::Uri::new(&url.to_string()).unwrap(),
+            crate::uri::Uri::new(url.as_ref()).unwrap(),
             &wc_path,
             &CheckoutOptions {
                 peg_revision: Revision::Head,
@@ -4608,13 +4593,13 @@ mod tests {
         // Test that revprops can be properly created and converted
         // This verifies our APR hash API changes work correctly
         use std::collections::HashMap;
-        
+
         // Test BlameInfo structure which stores revprops
         let mut revprops_map = HashMap::new();
         revprops_map.insert("svn:author".to_string(), b"test_user".to_vec());
         revprops_map.insert("svn:log".to_string(), b"test commit message".to_vec());
         revprops_map.insert("custom:prop".to_string(), b"custom value".to_vec());
-        
+
         let blame_info = BlameInfo {
             line_no: 1,
             revision: Revnum::from(123u64),
@@ -4625,19 +4610,25 @@ mod tests {
             line: "test line".to_string(),
             local_change: false,
         };
-        
+
         // Verify the data is stored correctly
         assert_eq!(blame_info.revprops.len(), 3);
         assert_eq!(blame_info.revprops.get("svn:author").unwrap(), b"test_user");
-        assert_eq!(blame_info.revprops.get("svn:log").unwrap(), b"test commit message");
-        assert_eq!(blame_info.revprops.get("custom:prop").unwrap(), b"custom value");
-        
+        assert_eq!(
+            blame_info.revprops.get("svn:log").unwrap(),
+            b"test commit message"
+        );
+        assert_eq!(
+            blame_info.revprops.get("custom:prop").unwrap(),
+            b"custom value"
+        );
+
         // Test that CommitBuilder and MkdirBuilder patterns work
         let mut ctx = Context::new().unwrap();
         let _commit_builder = CommitBuilder::new(&mut ctx)
             .add_revprop("svn:author", "test_author")
             .add_revprop("svn:log", "test message");
-            
+
         let _mkdir_builder = MkdirBuilder::new(&mut ctx)
             .add_revprop("svn:author", b"test_author".to_vec())
             .add_revprop("svn:log", b"test message".to_vec());

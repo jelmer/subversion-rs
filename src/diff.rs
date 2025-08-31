@@ -290,12 +290,8 @@ pub fn file_output_unified(
     let modified_path_cstr = std::ffi::CString::new(modified_path.to_string_lossy().as_ref())?;
     let header_encoding_cstr = std::ffi::CString::new(header_encoding)?;
 
-    let original_header_cstr = original_header
-        .map(|h| std::ffi::CString::new(h))
-        .transpose()?;
-    let modified_header_cstr = modified_header
-        .map(|h| std::ffi::CString::new(h))
-        .transpose()?;
+    let original_header_cstr = original_header.map(std::ffi::CString::new).transpose()?;
+    let modified_header_cstr = modified_header.map(std::ffi::CString::new).transpose()?;
 
     with_tmp_pool(|scratch_pool| {
         let err = unsafe {

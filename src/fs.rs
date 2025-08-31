@@ -233,10 +233,12 @@ impl Fs {
         let revprops = revprops
             .iter(&pool)
             .filter_map(|(k, v_opt)| {
-                v_opt.map(|v| (
-                    String::from_utf8_lossy(k).into_owned(),
-                    v.as_bytes().to_vec(),
-                ))
+                v_opt.map(|v| {
+                    (
+                        String::from_utf8_lossy(k).into_owned(),
+                        v.as_bytes().to_vec(),
+                    )
+                })
             })
             .collect();
 
