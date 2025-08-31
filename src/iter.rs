@@ -58,7 +58,9 @@ where
             }
         }
 
-        let baton = &mut callback_wrapper as *mut _ as *mut std::ffi::c_void;
+        let callback_trait: &mut dyn FnMut(&[u8], *mut std::ffi::c_void) -> IterResult<()> =
+            &mut callback_wrapper;
+        let baton = &callback_trait as *const _ as *mut std::ffi::c_void;
 
         unsafe {
             let err = subversion_sys::svn_iter_apr_hash(
@@ -68,7 +70,15 @@ where
                 baton,
                 pool.as_mut_ptr(),
             );
-            Error::from_raw(err)?;
+            // Check if it's the special ITER_BREAK error - if so, don't wrap it
+            if !err.is_null()
+                && (*err).apr_err == subversion_sys::svn_errno_t_SVN_ERR_ITER_BREAK as i32
+            {
+                // Iteration was interrupted by break - this is normal, not an error
+                // The error is a static singleton that must not be cleared
+            } else {
+                Error::from_raw(err)?;
+            }
         }
 
         Ok(completed != 0)
@@ -109,7 +119,9 @@ where
             }
         }
 
-        let baton = &mut callback_wrapper as *mut _ as *mut std::ffi::c_void;
+        let callback_trait: &mut dyn FnMut(*mut std::ffi::c_void) -> IterResult<()> =
+            &mut callback_wrapper;
+        let baton = &callback_trait as *const _ as *mut std::ffi::c_void;
 
         unsafe {
             let err = subversion_sys::svn_iter_apr_array(
@@ -119,7 +131,15 @@ where
                 baton,
                 pool.as_mut_ptr(),
             );
-            Error::from_raw(err)?;
+            // Check if it's the special ITER_BREAK error - if so, don't wrap it
+            if !err.is_null()
+                && (*err).apr_err == subversion_sys::svn_errno_t_SVN_ERR_ITER_BREAK as i32
+            {
+                // Iteration was interrupted by break - this is normal, not an error
+                // The error is a static singleton that must not be cleared
+            } else {
+                Error::from_raw(err)?;
+            }
         }
 
         Ok(completed != 0)

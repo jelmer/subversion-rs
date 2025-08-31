@@ -36,8 +36,10 @@ pub mod props;
 pub mod ra;
 pub mod repos;
 pub mod string;
+pub mod subst;
 pub mod time;
 pub mod uri;
+pub mod utf;
 pub mod version;
 #[cfg(feature = "wc")]
 pub mod wc;
