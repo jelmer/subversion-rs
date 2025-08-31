@@ -108,17 +108,6 @@ impl From<Revnum> for u64 {
     }
 }
 
-impl apr::hash::IntoHashKey for &Revnum {
-    fn into_hash_key(&self) -> &[u8] {
-        unsafe {
-            std::slice::from_raw_parts(
-                &self.0 as *const _ as *const u8,
-                std::mem::size_of::<subversion_sys::svn_revnum_t>(),
-            )
-        }
-    }
-}
-
 impl Revnum {
     pub fn from_raw(raw: subversion_sys::svn_revnum_t) -> Option<Self> {
         if raw < 0 {
@@ -1128,6 +1117,76 @@ extern "C" fn wrap_cancel_func(
     }
 }
 
+/// Conflict resolution choice for text and property conflicts
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextConflictChoice {
+    /// Postpone resolution for later
+    Postpone,
+    /// Use base version (original)
+    Base,
+    /// Use their version (incoming changes)
+    TheirsFull,
+    /// Use my version (local changes)
+    MineFull,
+    /// Use their version for conflicts only
+    TheirsConflict,
+    /// Use my version for conflicts only
+    MineConflict,
+    /// Use a merged version
+    Merged,
+    /// Undefined/unspecified
+    Unspecified,
+}
+
+impl From<TextConflictChoice> for subversion_sys::svn_client_conflict_option_id_t {
+    fn from(choice: TextConflictChoice) -> Self {
+        match choice {
+            TextConflictChoice::Unspecified => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_undefined,
+            TextConflictChoice::Postpone => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_postpone,
+            TextConflictChoice::Base => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_base_text,
+            TextConflictChoice::TheirsFull => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_text,
+            TextConflictChoice::MineFull => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_working_text,
+            TextConflictChoice::TheirsConflict => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_text_where_conflicted,
+            TextConflictChoice::MineConflict => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_working_text_where_conflicted,
+            TextConflictChoice::Merged => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_merged_text,
+        }
+    }
+}
+
+/// Conflict resolution choice for tree conflicts  
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TreeConflictChoice {
+    /// Postpone resolution for later
+    Postpone,
+    /// Accept current working copy state
+    AcceptCurrentState,
+    /// Accept incoming deletion
+    AcceptIncomingDelete,
+    /// Ignore incoming deletion (keep local)
+    IgnoreIncomingDelete,
+    /// Update moved destination
+    UpdateMoveDestination,
+    /// Accept incoming addition
+    AcceptIncomingAdd,
+    /// Ignore incoming addition
+    IgnoreIncomingAdd,
+}
+
+impl From<TreeConflictChoice> for subversion_sys::svn_client_conflict_option_id_t {
+    fn from(choice: TreeConflictChoice) -> Self {
+        match choice {
+            TreeConflictChoice::Postpone => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_postpone,
+            TreeConflictChoice::AcceptCurrentState => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_accept_current_wc_state,
+            TreeConflictChoice::AcceptIncomingDelete => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_delete_accept,
+            TreeConflictChoice::IgnoreIncomingDelete => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_delete_ignore,
+            TreeConflictChoice::UpdateMoveDestination => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_update_move_destination,
+            TreeConflictChoice::AcceptIncomingAdd => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_add_ignore,
+            TreeConflictChoice::IgnoreIncomingAdd => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_delete_ignore,
+        }
+    }
+}
+
+/// Legacy conflict choice enum for backward compatibility with WC functions
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConflictChoice {
     Postpone,
@@ -1391,46 +1450,24 @@ pub fn checksum<'pool>(
     }
 }
 
-/// Zero-cost wrapper for SVN string that can be used with APR hash tables
-#[repr(transparent)]
-pub struct SvnString(subversion_sys::svn_string_t);
+/// Helper functions for working with svn_string_t directly
+mod svn_string_helpers {
+    use subversion_sys::svn_string_t;
 
-impl std::fmt::Debug for SvnString {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SvnString")
-            .field("data", &self.to_str_lossy())
-            .field("len", &self.0.len)
-            .finish()
+    /// Get the data from an svn_string_t as bytes
+    pub fn as_bytes(s: &svn_string_t) -> &[u8] {
+        if s.data.is_null() || s.len == 0 {
+            &[]
+        } else {
+            unsafe { std::slice::from_raw_parts(s.data as *const u8, s.len) }
+        }
+    }
+
+    /// Get the data from an svn_string_t as a Vec<u8>
+    pub fn to_vec(s: &svn_string_t) -> Vec<u8> {
+        as_bytes(s).to_vec()
     }
 }
 
-impl SvnString {
-    /// Get the data as bytes
-    pub fn as_bytes(&self) -> &[u8] {
-        unsafe { std::slice::from_raw_parts(self.0.data as *const u8, self.0.len) }
-    }
-
-    /// Get the data as a string
-    pub fn to_str(&self) -> Result<&str, std::str::Utf8Error> {
-        std::str::from_utf8(self.as_bytes())
-    }
-
-    /// Get the data as a string (lossy conversion)
-    pub fn to_str_lossy(&self) -> std::borrow::Cow<str> {
-        String::from_utf8_lossy(self.as_bytes())
-    }
-
-    /// Convert to Vec<u8>
-    pub fn to_vec(&self) -> Vec<u8> {
-        self.as_bytes().to_vec()
-    }
-
-    /// Get the raw pointer to the svn_string_t
-    pub fn as_ptr(&self) -> *const subversion_sys::svn_string_t {
-        &self.0 as *const _
-    }
-}
-
-// SvnString can be used directly with the new simplified APR hash API
-// The Hash<K, V> type uses lifetimes to ensure values outlive the hash
-// The APR crate provides blanket implementations of FromNullablePtr for &T and Option<&T>
+// Re-export the helper functions
+pub use svn_string_helpers::*;

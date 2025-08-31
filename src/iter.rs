@@ -159,10 +159,7 @@ pub trait HashIterExt {
         F: FnMut(&[u8], *mut std::ffi::c_void) -> IterResult<()>;
 }
 
-impl<K, V> HashIterExt for apr::hash::Hash<'_, K, V>
-where
-    K: apr::hash::IntoHashKey,
-{
+impl HashIterExt for apr::hash::Hash<'_> {
     fn iter_entries<F>(&self, callback: F) -> Result<bool, Error>
     where
         F: FnMut(&[u8], *mut std::ffi::c_void) -> IterResult<()>,
@@ -179,12 +176,12 @@ pub trait ArrayIterExt {
         F: FnMut(*mut std::ffi::c_void) -> IterResult<()>;
 }
 
-impl<T> ArrayIterExt for apr::tables::ArrayHeader<'_, T> {
+impl<T: Copy> ArrayIterExt for apr::tables::TypedArray<'_, T> {
     fn iter_items<F>(&self, callback: F) -> Result<bool, Error>
     where
         F: FnMut(*mut std::ffi::c_void) -> IterResult<()>,
     {
-        iter_array(self.as_ptr(), callback)
+        iter_array(unsafe { self.as_ptr() }, callback)
     }
 }
 
@@ -198,11 +195,15 @@ mod tests {
         let pool = apr::Pool::new();
 
         // Create a simple hash with integer values (which work with IntoStoredPointer)
-        let mut hash = apr::hash::Hash::<&str, &i32>::new(&pool);
+        let mut hash = apr::hash::Hash::new(&pool);
         let val1 = 42i32;
         let val2 = 84i32;
-        hash.insert("key1", &val1);
-        hash.insert("key2", &val2);
+        unsafe {
+            hash.insert(b"key1", &val1 as *const _ as *mut std::ffi::c_void);
+        }
+        unsafe {
+            hash.insert(b"key2", &val2 as *const _ as *mut std::ffi::c_void);
+        }
 
         let mut collected = HashMap::new();
         let completed = iter_hash(unsafe { hash.as_ptr() as *mut _ }, |key, value| {
@@ -224,11 +225,15 @@ mod tests {
         let pool = apr::Pool::new();
 
         // Create a simple hash with integer values
-        let mut hash = apr::hash::Hash::<&str, &i32>::new(&pool);
+        let mut hash = apr::hash::Hash::new(&pool);
         let val1 = 42i32;
         let val2 = 84i32;
-        hash.insert("key1", &val1);
-        hash.insert("key2", &val2);
+        unsafe {
+            hash.insert(b"key1", &val1 as *const _ as *mut std::ffi::c_void);
+        }
+        unsafe {
+            hash.insert(b"key2", &val2 as *const _ as *mut std::ffi::c_void);
+        }
 
         let mut count = 0;
         let completed = iter_hash(unsafe { hash.as_ptr() as *mut _ }, |_key, _value| {
@@ -250,7 +255,7 @@ mod tests {
         let pool = apr::Pool::new();
 
         // Create an array with some test data
-        let mut array = apr::tables::ArrayHeader::<i32>::new(&pool);
+        let mut array = apr::tables::TypedArray::<i32>::new(&pool, 10);
         array.push(10);
         array.push(20);
         array.push(30);
@@ -273,7 +278,7 @@ mod tests {
         let pool = apr::Pool::new();
 
         // Create an array with some test data
-        let mut array = apr::tables::ArrayHeader::<i32>::new(&pool);
+        let mut array = apr::tables::TypedArray::<i32>::new(&pool, 10);
         array.push(10);
         array.push(20);
         array.push(30);

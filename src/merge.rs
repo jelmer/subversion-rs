@@ -68,7 +68,10 @@ where
         let merge_options = if options.diff_options.is_empty() {
             ptr::null()
         } else {
-            let mut arr = apr::tables::ArrayHeader::<*const std::ffi::c_char>::new(pool);
+            let mut arr = apr::tables::TypedArray::<*const std::ffi::c_char>::new(
+                pool,
+                options.diff_options.len() as i32,
+            );
             for opt in &options.diff_options {
                 arr.push(apr::strings::pstrdup_raw(opt, pool)? as *const _);
             }
@@ -133,27 +136,30 @@ where
         let peg_revision: subversion_sys::svn_opt_revision_t = source_peg_revision.into().into();
 
         // Convert revision ranges to APR array if provided
-        let ranges_array = if let Some(ranges) = ranges_to_merge {
-            let mut arr =
-                apr::tables::ArrayHeader::<*mut subversion_sys::svn_opt_revision_range_t>::new(
-                    pool,
-                );
-            for range in ranges {
-                let range_ptr: *mut subversion_sys::svn_opt_revision_range_t = pool.calloc();
-                (*range_ptr).start = range.start.into();
-                (*range_ptr).end = range.end.into();
-                arr.push(range_ptr);
-            }
-            arr.as_ptr()
-        } else {
-            ptr::null()
-        };
+        let ranges_array =
+            if let Some(ranges) = ranges_to_merge {
+                let mut arr = apr::tables::TypedArray::<
+                    *mut subversion_sys::svn_opt_revision_range_t,
+                >::new(pool, ranges.len() as i32);
+                for range in ranges {
+                    let range_ptr: *mut subversion_sys::svn_opt_revision_range_t = pool.calloc();
+                    (*range_ptr).start = range.start.into();
+                    (*range_ptr).end = range.end.into();
+                    arr.push(range_ptr);
+                }
+                arr.as_ptr()
+            } else {
+                ptr::null()
+            };
 
         // Convert diff options to APR array
         let merge_options = if options.diff_options.is_empty() {
             ptr::null()
         } else {
-            let mut arr = apr::tables::ArrayHeader::<*const std::ffi::c_char>::new(pool);
+            let mut arr = apr::tables::TypedArray::<*const std::ffi::c_char>::new(
+                pool,
+                options.diff_options.len() as i32,
+            );
             for opt in &options.diff_options {
                 arr.push(apr::strings::pstrdup_raw(opt, pool)? as *const _);
             }
@@ -233,10 +239,11 @@ where
                 let source_str = source_cstr.to_str()?.to_string();
 
                 // Convert svn_rangelist_t (apr_array_header_t of svn_merge_range_t*)
-                let rangelist_array =
-                    apr::tables::ArrayHeader::<*mut subversion_sys::svn_merge_range_t>::from_ptr(
+                let rangelist_array = unsafe {
+                    apr::tables::TypedArray::<*mut subversion_sys::svn_merge_range_t>::from_ptr(
                         val_ptr as *mut apr_sys::apr_array_header_t,
-                    );
+                    )
+                };
 
                 let mut ranges = Vec::new();
                 for range_ptr in rangelist_array.iter() {
