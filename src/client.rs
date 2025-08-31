@@ -3709,6 +3709,119 @@ impl Conflict {
             .unwrap()
             .to_owned())
     }
+    
+    /// Resolve a text conflict
+    pub fn text_resolve(
+        &mut self,
+        choice: crate::TextConflictChoice,
+        ctx: &mut Context,
+    ) -> Result<(), Error> {
+        unsafe {
+            let err = subversion_sys::svn_client_conflict_text_resolve_by_id(
+                self.ptr,
+                choice.into(),
+                ctx.as_mut_ptr(),
+                apr::pool::Pool::new().as_mut_ptr(),
+            );
+            svn_result(err)
+        }
+    }
+    
+    /// Resolve a property conflict
+    pub fn prop_resolve(
+        &mut self,
+        propname: &str,
+        choice: crate::TextConflictChoice,
+        ctx: &mut Context,
+    ) -> Result<(), Error> {
+        let propname_c = std::ffi::CString::new(propname)?;
+        unsafe {
+            let err = subversion_sys::svn_client_conflict_prop_resolve_by_id(
+                self.ptr,
+                propname_c.as_ptr(),
+                choice.into(),
+                ctx.as_mut_ptr(),
+                apr::pool::Pool::new().as_mut_ptr(),
+            );
+            svn_result(err)
+        }
+    }
+    
+    /// Resolve a tree conflict
+    pub fn tree_resolve(
+        &mut self,
+        choice: crate::TreeConflictChoice,
+        ctx: &mut Context,
+    ) -> Result<(), Error> {
+        unsafe {
+            let err = subversion_sys::svn_client_conflict_tree_resolve_by_id(
+                self.ptr,
+                choice.into(),
+                ctx.as_mut_ptr(),
+                apr::pool::Pool::new().as_mut_ptr(),
+            );
+            svn_result(err)
+        }
+    }
+    
+    /// Get whether the conflict has text, property, or tree conflicts
+    pub fn get_conflicted(&self) -> Result<(bool, Vec<String>, bool), Error> {
+        let pool = apr::pool::Pool::new();
+        let mut text_conflicted: subversion_sys::svn_boolean_t = 0;
+        let mut props_conflicted: *mut apr_sys::apr_array_header_t = std::ptr::null_mut();
+        let mut tree_conflicted: subversion_sys::svn_boolean_t = 0;
+        
+        unsafe {
+            let err = subversion_sys::svn_client_conflict_get_conflicted(
+                &mut text_conflicted,
+                &mut props_conflicted,
+                &mut tree_conflicted,
+                self.ptr,
+                pool.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            );
+            svn_result(err)?;
+            
+            let has_text_conflict = text_conflicted != 0;
+            let has_tree_conflict = tree_conflicted != 0;
+            
+            let mut prop_conflicts = Vec::new();
+            if !props_conflicted.is_null() {
+                // Property conflicts array contains property names
+                let array = apr::tables::ArrayHeader::<&std::ffi::CStr>::from_ptr(props_conflicted);
+                for cstr in array.into_iter() {
+                    let propname = cstr.to_string_lossy().into_owned();
+                    prop_conflicts.push(propname);
+                }
+            }
+            
+            Ok((has_text_conflict, prop_conflicts, has_tree_conflict))
+        }
+    }
+    
+    /// Get the operation that caused the conflict
+    pub fn get_operation(&self) -> Result<crate::conflict::ConflictAction, Error> {
+        unsafe {
+            let operation = subversion_sys::svn_client_conflict_get_operation(self.ptr);
+            Ok(operation.into())
+        }
+    }
+    
+    /// Get whether the conflict involves a binary file
+    pub fn text_get_mime_type(&self) -> Result<Option<String>, Error> {
+        unsafe {
+            let mime_type = subversion_sys::svn_client_conflict_text_get_mime_type(self.ptr);
+            if mime_type.is_null() {
+                Ok(None)
+            } else {
+                Ok(Some(
+                    std::ffi::CStr::from_ptr(mime_type)
+                        .to_string_lossy()
+                        .into_owned(),
+                ))
+            }
+        }
+    }
 }
 
 #[cfg(test)]

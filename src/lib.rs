@@ -1128,6 +1128,76 @@ extern "C" fn wrap_cancel_func(
     }
 }
 
+/// Conflict resolution choice for text and property conflicts
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextConflictChoice {
+    /// Postpone resolution for later
+    Postpone,
+    /// Use base version (original)
+    Base,
+    /// Use their version (incoming changes)
+    TheirsFull,
+    /// Use my version (local changes)
+    MineFull,
+    /// Use their version for conflicts only
+    TheirsConflict,
+    /// Use my version for conflicts only
+    MineConflict,
+    /// Use a merged version
+    Merged,
+    /// Undefined/unspecified
+    Unspecified,
+}
+
+impl From<TextConflictChoice> for subversion_sys::svn_client_conflict_option_id_t {
+    fn from(choice: TextConflictChoice) -> Self {
+        match choice {
+            TextConflictChoice::Unspecified => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_undefined,
+            TextConflictChoice::Postpone => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_postpone,
+            TextConflictChoice::Base => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_base_text,
+            TextConflictChoice::TheirsFull => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_text,
+            TextConflictChoice::MineFull => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_working_text,
+            TextConflictChoice::TheirsConflict => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_text_where_conflicted,
+            TextConflictChoice::MineConflict => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_working_text_where_conflicted,
+            TextConflictChoice::Merged => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_merged_text,
+        }
+    }
+}
+
+/// Conflict resolution choice for tree conflicts  
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TreeConflictChoice {
+    /// Postpone resolution for later
+    Postpone,
+    /// Accept current working copy state
+    AcceptCurrentState,
+    /// Accept incoming deletion
+    AcceptIncomingDelete,
+    /// Ignore incoming deletion (keep local)
+    IgnoreIncomingDelete,
+    /// Update moved destination
+    UpdateMoveDestination,
+    /// Accept incoming addition
+    AcceptIncomingAdd,
+    /// Ignore incoming addition
+    IgnoreIncomingAdd,
+}
+
+impl From<TreeConflictChoice> for subversion_sys::svn_client_conflict_option_id_t {
+    fn from(choice: TreeConflictChoice) -> Self {
+        match choice {
+            TreeConflictChoice::Postpone => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_postpone,
+            TreeConflictChoice::AcceptCurrentState => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_accept_current_wc_state,
+            TreeConflictChoice::AcceptIncomingDelete => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_delete_accept,
+            TreeConflictChoice::IgnoreIncomingDelete => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_delete_ignore,
+            TreeConflictChoice::UpdateMoveDestination => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_update_move_destination,
+            TreeConflictChoice::AcceptIncomingAdd => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_add_ignore,
+            TreeConflictChoice::IgnoreIncomingAdd => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_delete_ignore,
+        }
+    }
+}
+
+/// Legacy conflict choice enum for backward compatibility with WC functions
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConflictChoice {
     Postpone,

@@ -227,7 +227,7 @@ pub enum ConflictChoice {
 }
 
 impl ConflictChoice {
-    fn to_raw(&self) -> subversion_sys::svn_wc_conflict_choice_t {
+    pub fn to_raw(&self) -> subversion_sys::svn_wc_conflict_choice_t {
         match self {
             ConflictChoice::Undefined => -1, // svn_wc_conflict_choose_undefined
             ConflictChoice::Postpone => 0,   // svn_wc_conflict_choose_postpone
@@ -237,6 +237,32 @@ impl ConflictChoice {
             ConflictChoice::TheirsConflict => 4, // svn_wc_conflict_choose_theirs_conflict
             ConflictChoice::MineConflict => 5, // svn_wc_conflict_choose_mine_conflict
             ConflictChoice::Merged => 6,     // svn_wc_conflict_choose_merged
+        }
+    }
+    
+    /// Convert to client conflict option ID for text conflicts
+    pub fn to_text_option_id(&self) -> subversion_sys::svn_client_conflict_option_id_t {
+        match self {
+            ConflictChoice::Undefined => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_undefined,
+            ConflictChoice::Postpone => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_postpone,
+            ConflictChoice::Base => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_base_text,
+            ConflictChoice::TheirsFull => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_text,
+            ConflictChoice::MineFull => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_working_text,
+            ConflictChoice::TheirsConflict => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_text_where_conflicted,
+            ConflictChoice::MineConflict => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_working_text_where_conflicted,
+            ConflictChoice::Merged => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_merged_text,
+        }
+    }
+    
+    /// Convert to client conflict option ID for tree conflicts
+    pub fn to_tree_option_id(&self) -> subversion_sys::svn_client_conflict_option_id_t {
+        match self {
+            ConflictChoice::Postpone => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_postpone,
+            ConflictChoice::Base => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_accept_current_wc_state,
+            ConflictChoice::TheirsFull => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_delete_accept,
+            ConflictChoice::MineFull => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_delete_ignore,
+            // For unsupported tree conflict choices, default to postpone
+            _ => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_postpone,
         }
     }
 }
