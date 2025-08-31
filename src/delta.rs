@@ -548,9 +548,8 @@ extern "C" fn wrap_editor_delete_entry(
     _pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     let path = unsafe { std::ffi::CStr::from_ptr(path) };
-    // The parent_baton is a Box<Box<dyn DirectoryEditor>> that was Box::into_raw'd
-    let parent_box = unsafe { &mut *(parent_baton as *mut Box<dyn DirectoryEditor>) };
-    let parent = parent_box.as_mut();
+    // The parent_baton is a Box<dyn DirectoryEditor> that was Box::into_raw'd
+    let parent = unsafe { &mut **(parent_baton as *mut Box<dyn DirectoryEditor>) };
     match parent.delete_entry(path.to_str().unwrap(), Revnum::from_raw(revision)) {
         Ok(()) => std::ptr::null_mut(),
         Err(err) => unsafe { err.into_raw() },
@@ -571,9 +570,8 @@ extern "C" fn wrap_editor_add_directory(
     } else {
         Some(unsafe { std::ffi::CStr::from_ptr(copyfrom_path) })
     };
-    // The parent_baton is a Box<Box<dyn DirectoryEditor>> that was Box::into_raw'd
-    let parent_box = unsafe { &mut *(parent_baton as *mut Box<dyn DirectoryEditor>) };
-    let parent = parent_box.as_mut();
+    // The parent_baton is a Box<dyn DirectoryEditor> that was Box::into_raw'd
+    let parent = unsafe { &mut **(parent_baton as *mut Box<dyn DirectoryEditor>) };
     let copyfrom = if let (Some(copyfrom_path), Some(copyfrom_revision)) =
         (copyfrom_path, Revnum::from_raw(copyfrom_revision))
     {
@@ -584,7 +582,7 @@ extern "C" fn wrap_editor_add_directory(
     match parent.add_directory(path.to_str().unwrap(), copyfrom) {
         Ok(child) => {
             unsafe {
-                *child_baton = Box::into_raw(Box::new(child)) as *mut std::ffi::c_void
+                *child_baton = Box::into_raw(child) as *mut std::ffi::c_void
             };
             std::ptr::null_mut()
         }
@@ -600,13 +598,12 @@ extern "C" fn wrap_editor_open_directory(
     child_baton: *mut *mut std::ffi::c_void,
 ) -> *mut subversion_sys::svn_error_t {
     let path = unsafe { std::ffi::CStr::from_ptr(path) };
-    // The parent_baton is a Box<Box<dyn DirectoryEditor>> that was Box::into_raw'd
-    let parent_box = unsafe { &mut *(parent_baton as *mut Box<dyn DirectoryEditor>) };
-    let parent = parent_box.as_mut();
+    // The parent_baton is a Box<dyn DirectoryEditor> that was Box::into_raw'd
+    let parent = unsafe { &mut **(parent_baton as *mut Box<dyn DirectoryEditor>) };
     match parent.open_directory(path.to_str().unwrap(), Revnum::from_raw(base_revision)) {
         Ok(child) => {
             unsafe {
-                *child_baton = Box::into_raw(Box::new(child)) as *mut std::ffi::c_void
+                *child_baton = Box::into_raw(child) as *mut std::ffi::c_void
             };
             std::ptr::null_mut()
         }
@@ -622,7 +619,7 @@ extern "C" fn wrap_editor_change_dir_prop(
 ) -> *mut subversion_sys::svn_error_t {
     let name = unsafe { std::ffi::CStr::from_ptr(name) };
     let value = unsafe { std::slice::from_raw_parts((*value).data as *const u8, (*value).len) };
-    let editor = unsafe { &mut *(baton as *mut Box<dyn DirectoryEditor>) };
+    let editor = unsafe { &mut **(baton as *mut Box<dyn DirectoryEditor>) };
     match editor.change_prop(name.to_str().unwrap(), value) {
         Ok(()) => std::ptr::null_mut(),
         Err(err) => unsafe { err.into_raw() },
@@ -649,9 +646,8 @@ extern "C" fn wrap_editor_absent_directory(
     _pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     let path = unsafe { std::ffi::CStr::from_ptr(path) };
-    // The parent_baton is a Box<Box<dyn DirectoryEditor>> that was Box::into_raw'd
-    let parent_box = unsafe { &mut *(parent_baton as *mut Box<dyn DirectoryEditor>) };
-    let parent = parent_box.as_mut();
+    // The parent_baton is a Box<dyn DirectoryEditor> that was Box::into_raw'd
+    let parent = unsafe { &mut **(parent_baton as *mut Box<dyn DirectoryEditor>) };
     match parent.absent_directory(path.to_str().unwrap()) {
         Ok(()) => std::ptr::null_mut(),
         Err(err) => unsafe { err.into_raw() },
@@ -672,9 +668,8 @@ extern "C" fn wrap_editor_add_file(
     } else {
         Some(unsafe { std::ffi::CStr::from_ptr(copyfrom_path) })
     };
-    // The parent_baton is a Box<Box<dyn DirectoryEditor>> that was Box::into_raw'd
-    let parent_box = unsafe { &mut *(parent_baton as *mut Box<dyn DirectoryEditor>) };
-    let parent = parent_box.as_mut();
+    // The parent_baton is a Box<dyn DirectoryEditor> that was Box::into_raw'd
+    let parent = unsafe { &mut **(parent_baton as *mut Box<dyn DirectoryEditor>) };
     let copyfrom = if let (Some(copyfrom_path), Some(copyfrom_revision)) =
         (copyfrom_path, Revnum::from_raw(copyfrom_revision))
     {
@@ -684,7 +679,7 @@ extern "C" fn wrap_editor_add_file(
     };
     match parent.add_file(path.to_str().unwrap(), copyfrom) {
         Ok(file) => {
-            unsafe { *file_baton = Box::into_raw(Box::new(file)) as *mut std::ffi::c_void };
+            unsafe { *file_baton = Box::into_raw(file) as *mut std::ffi::c_void };
             std::ptr::null_mut()
         }
         Err(err) => unsafe { err.into_raw() },
@@ -699,12 +694,11 @@ extern "C" fn wrap_editor_open_file(
     file_baton: *mut *mut std::ffi::c_void,
 ) -> *mut subversion_sys::svn_error_t {
     let path = unsafe { std::ffi::CStr::from_ptr(path) };
-    // The parent_baton is a Box<Box<dyn DirectoryEditor>> that was Box::into_raw'd
-    let parent_box = unsafe { &mut *(parent_baton as *mut Box<dyn DirectoryEditor>) };
-    let parent = parent_box.as_mut();
+    // The parent_baton is a Box<dyn DirectoryEditor> that was Box::into_raw'd
+    let parent = unsafe { &mut **(parent_baton as *mut Box<dyn DirectoryEditor>) };
     match parent.open_file(path.to_str().unwrap(), Revnum::from_raw(base_revision)) {
         Ok(file) => {
-            unsafe { *file_baton = Box::into_raw(Box::new(file)) as *mut std::ffi::c_void };
+            unsafe { *file_baton = Box::into_raw(file) as *mut std::ffi::c_void };
             std::ptr::null_mut()
         }
         Err(err) => unsafe { err.into_raw() },
@@ -723,9 +717,8 @@ extern "C" fn wrap_editor_apply_textdelta(
     } else {
         Some(unsafe { std::ffi::CStr::from_ptr(base_checksum) })
     };
-    // The file_baton is a Box<Box<dyn FileEditor>> that was Box::into_raw'd
-    let file_box = unsafe { &mut *(file_baton as *mut Box<dyn FileEditor>) };
-    let file = file_box.as_mut();
+    // The file_baton is a Box<dyn FileEditor> that was Box::into_raw'd
+    let file = unsafe { &mut **(file_baton as *mut Box<dyn FileEditor>) };
     match file.apply_textdelta(base_checksum.map(|c| c.to_str().unwrap())) {
         Ok(_apply) => {
             // TODO: Set up text delta handler and handler baton properly
@@ -744,9 +737,8 @@ extern "C" fn wrap_editor_change_file_prop(
 ) -> *mut subversion_sys::svn_error_t {
     let name = unsafe { std::ffi::CStr::from_ptr(name) };
     let value = unsafe { std::slice::from_raw_parts((*value).data as *const u8, (*value).len) };
-    // The baton is a Box<Box<dyn FileEditor>> that was Box::into_raw'd
-    let editor_box = unsafe { &mut *(baton as *mut Box<dyn FileEditor>) };
-    let editor = editor_box.as_mut();
+    // The baton is a Box<dyn FileEditor> that was Box::into_raw'd
+    let editor = unsafe { &mut **(baton as *mut Box<dyn FileEditor>) };
     match editor.change_prop(name.to_str().unwrap(), value) {
         Ok(()) => std::ptr::null_mut(),
         Err(err) => unsafe { err.into_raw() },
@@ -783,9 +775,8 @@ extern "C" fn wrap_editor_absent_file(
     } else {
         Some(unsafe { std::ffi::CStr::from_ptr(text_checksum) })
     };
-    // The file_baton is a Box<Box<dyn FileEditor>> that was Box::into_raw'd
-    let file_box = unsafe { &mut *(file_baton as *mut Box<dyn FileEditor>) };
-    let file = file_box.as_mut();
+    // The file_baton is a Box<dyn FileEditor> that was Box::into_raw'd
+    let file = unsafe { &mut **(file_baton as *mut Box<dyn FileEditor>) };
     match file.close(text_checksum.map(|c| c.to_str().unwrap())) {
         Ok(()) => std::ptr::null_mut(),
         Err(err) => unsafe { err.into_raw() },
