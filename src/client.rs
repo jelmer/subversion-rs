@@ -101,15 +101,16 @@ extern "C" fn wrap_proplist_receiver2(
             ) -> Result<(), Error>;
         let callback = &mut *(callback);
         let path: &str = std::ffi::CStr::from_ptr(path).to_str().unwrap();
-        let props = apr::hash::Hash::<&str, &crate::SvnString>::from_ptr(props);
+        let props =
+            unsafe { apr::hash::TypedHash::<subversion_sys::svn_string_t>::from_ptr(props) };
         let props = props
-            .iter(&scratch_pool)
-            .map(|(k, v)| (String::from_utf8_lossy(k).to_string(), v.to_vec()))
+            .iter()
+            .map(|(k, v)| (String::from_utf8_lossy(k).to_string(), crate::to_vec(v)))
             .collect::<HashMap<_, _>>();
         let inherited_props = if inherited_props.is_null() {
             None
         } else {
-            let inherited_props = apr::tables::ArrayHeader::<
+            let inherited_props = apr::tables::TypedArray::<
                 *mut subversion_sys::svn_prop_inherited_item_t,
             >::from_ptr(inherited_props);
             Some(
@@ -227,16 +228,12 @@ unsafe extern "C" fn blame_receiver_wrapper(
 
     // Extract revprops
     let revprops = if !rev_props.is_null() {
-        let props = apr::hash::Hash::<&str, &crate::SvnString>::from_ptr(rev_props);
+        let props =
+            unsafe { apr::hash::TypedHash::<subversion_sys::svn_string_t>::from_ptr(rev_props) };
         let pool = apr::Pool::from_raw(pool);
         props
-            .iter(&pool)
-            .map(|(k, v)| {
-                (
-                    String::from_utf8_lossy(k).into_owned(),
-                    v.as_bytes().to_vec(),
-                )
-            })
+            .iter()
+            .map(|(k, v)| (String::from_utf8_lossy(k).into_owned(), crate::to_vec(v)))
             .collect()
     } else {
         HashMap::new()
@@ -244,16 +241,13 @@ unsafe extern "C" fn blame_receiver_wrapper(
 
     // Extract merged revprops
     let merged_revprops = if !merged_rev_props.is_null() {
-        let props = apr::hash::Hash::<&str, &crate::SvnString>::from_ptr(merged_rev_props);
+        let props = unsafe {
+            apr::hash::TypedHash::<subversion_sys::svn_string_t>::from_ptr(merged_rev_props)
+        };
         let pool = apr::Pool::from_raw(pool);
         props
-            .iter(&pool)
-            .map(|(k, v)| {
-                (
-                    String::from_utf8_lossy(k).into_owned(),
-                    v.as_bytes().to_vec(),
-                )
-            })
+            .iter()
+            .map(|(k, v)| (String::from_utf8_lossy(k).into_owned(), crate::to_vec(v)))
             .collect()
     } else {
         HashMap::new()
@@ -860,7 +854,7 @@ impl Context {
                 .iter()
                 .map(|p| std::ffi::CString::new(*p).unwrap())
                 .collect();
-            let mut ps = apr::tables::ArrayHeader::new_with_capacity(&pool, paths.len());
+            let mut ps = apr::tables::TypedArray::new(&pool, paths.len() as i32);
             for path in &path_cstrings {
                 ps.push(path.as_ptr() as *mut std::ffi::c_void);
             }
@@ -878,8 +872,8 @@ impl Context {
                 self.ptr,
                 std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
             );
-            let result_revs: apr::tables::ArrayHeader<Revnum> =
-                apr::tables::ArrayHeader::<Revnum>::from_ptr(result_revs);
+            let result_revs: apr::tables::TypedArray<Revnum> =
+                apr::tables::TypedArray::<Revnum>::from_ptr(result_revs);
             Error::from_raw(err)?;
             Ok(result_revs.iter().collect())
         }
@@ -957,13 +951,18 @@ impl Context {
                 .map(|(k, v)| (*k, crate::string::BStr::from_bytes(v, &pool)))
                 .collect();
 
-            let rps = apr::hash::Hash::from_iter(&pool, svn_strings.iter().map(|(k, v)| (*k, v)));
+            let rps = apr::hash::Hash::from_iter(
+                &pool,
+                svn_strings
+                    .iter()
+                    .map(|(k, v)| (k.as_bytes(), v.as_ptr() as *mut std::ffi::c_void)),
+            );
             // Keep CStrings alive for the duration of the function
             let path_cstrings: Vec<std::ffi::CString> = paths
                 .iter()
                 .map(|p| std::ffi::CString::new(*p).unwrap())
                 .collect();
-            let mut ps = apr::tables::ArrayHeader::new_with_capacity(&pool, paths.len());
+            let mut ps = apr::tables::TypedArray::new(&pool, paths.len() as i32);
             for path in &path_cstrings {
                 ps.push(path.as_ptr() as *mut std::ffi::c_void);
             }
@@ -995,13 +994,18 @@ impl Context {
                 .map(|(k, v)| (*k, crate::string::BStr::from_str(v, &pool)))
                 .collect();
 
-            let rps = apr::hash::Hash::from_iter(&pool, svn_strings.iter().map(|(k, v)| (*k, v)));
+            let rps = apr::hash::Hash::from_iter(
+                &pool,
+                svn_strings
+                    .iter()
+                    .map(|(k, v)| (k.as_bytes(), v.as_ptr() as *mut std::ffi::c_void)),
+            );
             // Keep CStrings alive for the duration of the function
             let path_cstrings: Vec<std::ffi::CString> = paths
                 .iter()
                 .map(|p| std::ffi::CString::new(*p).unwrap())
                 .collect();
-            let mut ps = apr::tables::ArrayHeader::new_with_capacity(&pool, paths.len());
+            let mut ps = apr::tables::TypedArray::new(&pool, paths.len() as i32);
             for path in &path_cstrings {
                 ps.push(path.as_ptr() as *mut std::ffi::c_void);
             }
@@ -1040,7 +1044,7 @@ impl Context {
                 .collect::<Vec<_>>()
         });
         let changelists = changelists.as_ref().map(|cl| {
-            let mut array = apr::tables::ArrayHeader::<*const i8>::new(&pool);
+            let mut array = apr::tables::TypedArray::<*const i8>::new(&pool, 10);
             for item in cl.iter() {
                 array.push(item.as_ptr() as *const i8);
             }
@@ -1088,7 +1092,12 @@ impl Context {
             .map(|(k, v)| (*k, crate::string::BStr::from_str(v, &pool)))
             .collect();
 
-        let rps = apr::hash::Hash::from_iter(&pool, svn_strings.iter().map(|(k, v)| (*k, v)));
+        let rps = apr::hash::Hash::from_iter(
+            &pool,
+            svn_strings
+                .iter()
+                .map(|(k, v)| (k.as_bytes(), v.as_ptr() as *mut std::ffi::c_void)),
+        );
         unsafe {
             let filter_callback = Box::into_raw(Box::new(filter_callback));
             let commit_callback = Box::into_raw(Box::new(commit_callback));
@@ -1159,7 +1168,12 @@ impl Context {
             .map(|(k, v)| (*k, crate::string::BStr::from_str(v, &pool)))
             .collect();
 
-        let rps = apr::hash::Hash::from_iter(&pool, svn_strings.iter().map(|(k, v)| (*k, v)));
+        let rps = apr::hash::Hash::from_iter(
+            &pool,
+            svn_strings
+                .iter()
+                .map(|(k, v)| (k.as_bytes(), v.as_ptr() as *mut std::ffi::c_void)),
+        );
 
         unsafe {
             // Keep CStrings alive for the duration of the function
@@ -1167,7 +1181,7 @@ impl Context {
                 .iter()
                 .map(|t| std::ffi::CString::new(*t).unwrap())
                 .collect();
-            let mut ps = apr::tables::ArrayHeader::new_with_capacity(&pool, targets.len());
+            let mut ps = apr::tables::TypedArray::new(&pool, targets.len() as i32);
             for target in &target_cstrings {
                 ps.push(target.as_ptr() as *mut std::ffi::c_void);
             }
@@ -1181,8 +1195,7 @@ impl Context {
                 } else {
                     Vec::new()
                 };
-            let mut cl =
-                apr::tables::ArrayHeader::new_with_capacity(&pool, changelist_cstrings.len());
+            let mut cl = apr::tables::TypedArray::new(&pool, changelist_cstrings.len() as i32);
             for changelist in &changelist_cstrings {
                 cl.push(changelist.as_ptr() as *mut std::ffi::c_void);
             }
@@ -1223,7 +1236,7 @@ impl Context {
             } else {
                 Vec::new()
             };
-        let mut cl = apr::tables::ArrayHeader::new_with_capacity(&pool, changelist_cstrings.len());
+        let mut cl = apr::tables::TypedArray::new(&pool, changelist_cstrings.len() as i32);
         for changelist in &changelist_cstrings {
             cl.push(changelist.as_ptr() as *mut std::ffi::c_void);
         }
@@ -1279,15 +1292,15 @@ impl Context {
                 .iter()
                 .map(|t| std::ffi::CString::new(*t).unwrap())
                 .collect();
-            let mut ps = apr::tables::ArrayHeader::new_with_capacity(pool_mut, targets.len());
+            let mut ps = apr::tables::TypedArray::new(pool_mut, targets.len() as i32);
             for target in &target_cstrings {
                 ps.push(target.as_ptr() as *mut std::ffi::c_void);
             }
 
             let mut rrs =
-                apr::tables::ArrayHeader::<*mut subversion_sys::svn_opt_revision_range_t>::new_with_capacity(
+                apr::tables::TypedArray::<*mut subversion_sys::svn_opt_revision_range_t>::new(
                     pool_mut,
-                    revision_ranges.len(),
+                    revision_ranges.len() as i32,
                 );
             for revision_range in revision_ranges {
                 rrs.push(revision_range.to_c(pool_mut));
@@ -1298,7 +1311,7 @@ impl Context {
                 .iter()
                 .map(|r| std::ffi::CString::new(*r).unwrap())
                 .collect();
-            let mut rps = apr::tables::ArrayHeader::new_with_capacity(pool_mut, revprops.len());
+            let mut rps = apr::tables::TypedArray::new(pool_mut, revprops.len() as i32);
             for revprop in &revprop_cstrings {
                 rps.push(revprop.as_ptr() as *mut std::ffi::c_void);
             }
@@ -1436,7 +1449,7 @@ impl Context {
                 &mut targets,
                 os.as_mut_ptr(),
                 {
-                    let mut array = apr::tables::ArrayHeader::<*const i8>::new(&pool);
+                    let mut array = apr::tables::TypedArray::<*const i8>::new(&pool, 10);
                     for s in known_targets {
                         array.push(s.as_ptr());
                     }
@@ -1448,7 +1461,7 @@ impl Context {
             )
         };
         Error::from_raw(err)?;
-        let targets = apr::tables::ArrayHeader::<*const i8>::from_ptr(targets);
+        let targets = unsafe { apr::tables::TypedArray::<*const i8>::from_ptr(targets) };
         Ok(targets
             .iter()
             .map(|s| unsafe { std::ffi::CStr::from_ptr(*s as *const i8) })
@@ -1539,15 +1552,11 @@ impl Context {
                 apr::pool::Pool::new().as_mut_ptr(),
             );
             Error::from_raw(err)?;
-            let props = apr::hash::Hash::<&str, &crate::SvnString>::from_ptr(props);
+            let props =
+                unsafe { apr::hash::TypedHash::<subversion_sys::svn_string_t>::from_ptr(props) };
             Ok(props
-                .iter(&pool)
-                .map(|(k, v)| {
-                    (
-                        String::from_utf8_lossy(k).to_string(),
-                        v.as_bytes().to_vec(),
-                    )
-                })
+                .iter()
+                .map(|(k, v)| (String::from_utf8_lossy(k).to_string(), crate::to_vec(v)))
                 .collect())
         }
     }
@@ -1558,7 +1567,7 @@ impl Context {
             .iter()
             .map(|s| std::ffi::CString::new(*s).unwrap())
             .collect::<Vec<_>>();
-        let mut targets_array = apr::tables::ArrayHeader::<*const i8>::new(&pool);
+        let mut targets_array = apr::tables::TypedArray::<*const i8>::new(&pool, 10);
         for target in targets.iter() {
             targets_array.push(target.as_ptr());
         }
@@ -1582,7 +1591,7 @@ impl Context {
             .iter()
             .map(|s| std::ffi::CString::new(*s).unwrap())
             .collect::<Vec<_>>();
-        let mut targets_array = apr::tables::ArrayHeader::<*const i8>::new(&pool);
+        let mut targets_array = apr::tables::TypedArray::<*const i8>::new(&pool, 10);
         for target in targets.iter() {
             targets_array.push(target.as_ptr());
         }
@@ -1741,7 +1750,7 @@ impl Context {
                 .collect::<Vec<_>>()
         });
         let changelists = changelists.as_ref().map(|cl| {
-            let mut array = apr::tables::ArrayHeader::<*const i8>::new(&pool);
+            let mut array = apr::tables::TypedArray::<*const i8>::new(&pool, 10);
             for item in cl.iter() {
                 array.push(item.as_ptr());
             }
@@ -1758,7 +1767,7 @@ impl Context {
                 fetch_excluded as i32,
                 fetch_actual_only as i32,
                 include_externals as i32,
-                changelists.map_or(std::ptr::null(), |cl| cl.as_ptr()),
+                changelists.map_or(std::ptr::null(), |cl| unsafe { cl.as_ptr() }),
                 Some(wrap_info_receiver2),
                 receiver,
                 self.as_mut_ptr(),
@@ -1796,7 +1805,7 @@ impl Context {
                 .collect();
 
             // Create APR array of diff options for parsing
-            let mut diff_opts_array = apr::tables::ArrayHeader::<*const i8>::new(&pool);
+            let mut diff_opts_array = apr::tables::TypedArray::<*const i8>::new(&pool, 10);
             for opt in diff_options_cstrings.iter() {
                 diff_opts_array.push(opt.as_ptr());
             }
@@ -1880,9 +1889,9 @@ impl Context {
                 })
                 .collect::<Vec<_>>();
 
-            let mut sources_apr_array = apr::tables::ArrayHeader::<
+            let mut sources_apr_array = apr::tables::TypedArray::<
                 *const subversion_sys::svn_client_copy_source_t,
-            >::new(pool);
+            >::new(pool, sources_array.len() as i32);
             for src in sources_array.iter() {
                 sources_apr_array.push(*src as *const _);
             }
@@ -1917,7 +1926,7 @@ impl Context {
                 .iter()
                 .map(|p| std::ffi::CString::new(*p).unwrap())
                 .collect();
-            let mut paths_array = apr::tables::ArrayHeader::<*const i8>::new(pool);
+            let mut paths_array = apr::tables::TypedArray::<*const i8>::new(pool, 0);
             for path in paths_c.iter() {
                 paths_array.push(path.as_ptr());
             }
@@ -1953,7 +1962,7 @@ impl Context {
             let target_c = std::ffi::CString::new(target).unwrap();
 
             let changelists = changelists.map(|cl| {
-                let mut array = apr::tables::ArrayHeader::<*const i8>::new(pool);
+                let mut array = apr::tables::TypedArray::<*const i8>::new(pool, 0);
                 for item in cl.iter() {
                     let item_c = std::ffi::CString::new(*item).unwrap();
                     array.push(item_c.as_ptr());
@@ -1978,7 +1987,7 @@ impl Context {
                         std::ptr::null_mut()
                     },
                     depth.into(),
-                    changelists.map_or(std::ptr::null(), |cl| cl.as_ptr()),
+                    changelists.map_or(std::ptr::null(), |cl| unsafe { cl.as_ptr() }),
                     self.as_mut_ptr(),
                     pool.as_mut_ptr(),
                     pool.as_mut_ptr(),
@@ -1996,14 +2005,13 @@ impl Context {
 
             // Convert apr hash to Rust HashMap
             // The hash values are svn_string_t structs (not pointers)
-            let hash = apr::hash::Hash::<&[u8], Option<&crate::SvnString>>::from_ptr(props);
+            let hash =
+                unsafe { apr::hash::TypedHash::<subversion_sys::svn_string_t>::from_ptr(props) };
             let mut result = std::collections::HashMap::new();
-            for (k, v_opt) in hash.iter(pool) {
-                if let Some(v) = v_opt {
-                    let key = String::from_utf8_lossy(k).into_owned();
-                    let value = v.as_bytes().to_vec();
-                    result.insert(key, value);
-                }
+            for (k, v) in hash.iter() {
+                let key = String::from_utf8_lossy(k).into_owned();
+                let value = crate::svn_string_helpers::to_vec(&v);
+                result.insert(key, value);
             }
             Ok(result)
         })
@@ -2025,7 +2033,7 @@ impl Context {
             let target_c = std::ffi::CString::new(target).unwrap();
 
             // propset_local expects an array of targets
-            let mut targets_array = apr::tables::ArrayHeader::<*const i8>::new(pool);
+            let mut targets_array = apr::tables::TypedArray::<*const i8>::new(pool, 0);
             targets_array.push(target_c.as_ptr());
 
             let propval_svn = propval.map(|val| subversion_sys::svn_string_t {
@@ -2034,7 +2042,7 @@ impl Context {
             });
 
             let changelists = changelists.map(|cl| {
-                let mut array = apr::tables::ArrayHeader::<*const i8>::new(pool);
+                let mut array = apr::tables::TypedArray::<*const i8>::new(pool, 0);
                 for item in cl.iter() {
                     let item_c = std::ffi::CString::new(*item).unwrap();
                     array.push(item_c.as_ptr());
@@ -2051,7 +2059,7 @@ impl Context {
                     targets_array.as_ptr(),
                     depth.into(),
                     skip_checks as i32,
-                    changelists.map_or(std::ptr::null(), |cl| cl.as_ptr()),
+                    changelists.map_or(std::ptr::null(), |cl| unsafe { cl.as_ptr() }),
                     self.as_mut_ptr(),
                     pool.as_mut_ptr(),
                 )
@@ -2078,7 +2086,7 @@ impl Context {
             let target_c = std::ffi::CString::new(target).unwrap();
 
             let changelists = changelists.map(|cl| {
-                let mut array = apr::tables::ArrayHeader::<*const i8>::new(pool);
+                let mut array = apr::tables::TypedArray::<*const i8>::new(pool, 0);
                 for item in cl.iter() {
                     let item_c = std::ffi::CString::new(*item).unwrap();
                     array.push(item_c.as_ptr());
@@ -2103,15 +2111,15 @@ impl Context {
                 let path_str = unsafe { std::ffi::CStr::from_ptr(path).to_str().unwrap() };
 
                 // Convert props hash
-                let hash = apr::hash::Hash::<&[u8], Option<&crate::SvnString>>::from_ptr(props);
+                let hash = unsafe {
+                    apr::hash::TypedHash::<subversion_sys::svn_string_t>::from_ptr(props)
+                };
                 let mut prop_hash = std::collections::HashMap::new();
                 let pool = apr::Pool::new();
-                for (k, v_opt) in hash.iter(&pool) {
-                    if let Some(v) = v_opt {
-                        let key = String::from_utf8_lossy(k).into_owned();
-                        let value = v.as_bytes().to_vec();
-                        prop_hash.insert(key, value);
-                    }
+                for (k, v) in hash.iter() {
+                    let key = String::from_utf8_lossy(k).into_owned();
+                    let value = crate::svn_string_helpers::to_vec(&v);
+                    prop_hash.insert(key, value);
                 }
 
                 match receiver(path_str, prop_hash) {
@@ -2128,7 +2136,7 @@ impl Context {
                     &(*peg_revision).into(),
                     &(*revision).into(),
                     depth.into(),
-                    changelists.map_or(std::ptr::null(), |cl| cl.as_ptr()),
+                    changelists.map_or(std::ptr::null(), |cl| unsafe { cl.as_ptr() }),
                     get_target_inherited_props as i32,
                     Some(proplist_receiver),
                     receiver_ptr,
@@ -2172,7 +2180,7 @@ impl Context {
                 .iter()
                 .map(|o| std::ffi::CString::new(*o).unwrap())
                 .collect();
-            let mut diff_options_array = apr::tables::ArrayHeader::<*const i8>::new(pool);
+            let mut diff_options_array = apr::tables::TypedArray::<*const i8>::new(pool, 0);
             for opt in diff_options_c.iter() {
                 diff_options_array.push(opt.as_ptr());
             }
@@ -2180,7 +2188,7 @@ impl Context {
             let relative_to_dir_c = relative_to_dir.map(|d| std::ffi::CString::new(d).unwrap());
 
             let changelists = changelists.map(|cl| {
-                let mut array = apr::tables::ArrayHeader::<*const i8>::new(pool);
+                let mut array = apr::tables::TypedArray::<*const i8>::new(pool, 0);
                 for item in cl.iter() {
                     let item_c = std::ffi::CString::new(*item).unwrap();
                     array.push(item_c.as_ptr());
@@ -2210,7 +2218,7 @@ impl Context {
                     header_encoding_c.as_ptr(),
                     outstream.as_mut_ptr(),
                     errstream.as_mut_ptr(),
-                    changelists.map_or(std::ptr::null(), |cl| cl.as_ptr()),
+                    changelists.map_or(std::ptr::null(), |cl| unsafe { cl.as_ptr() }),
                     self.as_mut_ptr(),
                     pool.as_mut_ptr(),
                 )
@@ -2247,13 +2255,13 @@ impl Context {
                 .collect();
 
             let patterns = if !pattern_cstrings.is_empty() {
-                let mut array = apr::tables::ArrayHeader::<*const i8>::new(pool);
+                let mut array = apr::tables::TypedArray::<*const i8>::new(pool, 0);
                 for pattern_c in pattern_cstrings.iter() {
                     array.push(pattern_c.as_ptr());
                 }
                 Some(array)
             } else if patterns.is_some() {
-                Some(apr::tables::ArrayHeader::<*const i8>::new(pool))
+                Some(apr::tables::TypedArray::<*const i8>::new(pool, 0))
             } else {
                 None
             };
@@ -3385,14 +3393,13 @@ impl Context {
 
             let mut result = std::collections::HashMap::new();
             if !props_hash.is_null() {
-                let hash =
-                    apr::hash::Hash::<&[u8], Option<&crate::SvnString>>::from_ptr(props_hash);
-                for (key, value_opt) in hash.iter(&pool) {
-                    if let Some(value) = value_opt {
-                        let bytes = value.as_bytes().to_vec();
-                        let key_str = String::from_utf8_lossy(key).to_string();
-                        result.insert(key_str, bytes);
-                    }
+                let hash = unsafe {
+                    apr::hash::TypedHash::<subversion_sys::svn_string_t>::from_ptr(props_hash)
+                };
+                for (key, value) in hash.iter() {
+                    let bytes = crate::svn_string_helpers::to_vec(&value);
+                    let key_str = String::from_utf8_lossy(key).to_string();
+                    result.insert(key_str, bytes);
                 }
             }
 
@@ -3708,6 +3715,122 @@ impl Conflict {
             .to_str()
             .unwrap()
             .to_owned())
+    }
+
+    /// Resolve a text conflict
+    pub fn text_resolve(
+        &mut self,
+        choice: crate::TextConflictChoice,
+        ctx: &mut Context,
+    ) -> Result<(), Error> {
+        unsafe {
+            let err = subversion_sys::svn_client_conflict_text_resolve_by_id(
+                self.ptr,
+                choice.into(),
+                ctx.as_mut_ptr(),
+                apr::pool::Pool::new().as_mut_ptr(),
+            );
+            svn_result(err)
+        }
+    }
+
+    /// Resolve a property conflict
+    pub fn prop_resolve(
+        &mut self,
+        propname: &str,
+        choice: crate::TextConflictChoice,
+        ctx: &mut Context,
+    ) -> Result<(), Error> {
+        let propname_c = std::ffi::CString::new(propname)?;
+        unsafe {
+            let err = subversion_sys::svn_client_conflict_prop_resolve_by_id(
+                self.ptr,
+                propname_c.as_ptr(),
+                choice.into(),
+                ctx.as_mut_ptr(),
+                apr::pool::Pool::new().as_mut_ptr(),
+            );
+            svn_result(err)
+        }
+    }
+
+    /// Resolve a tree conflict
+    pub fn tree_resolve(
+        &mut self,
+        choice: crate::TreeConflictChoice,
+        ctx: &mut Context,
+    ) -> Result<(), Error> {
+        unsafe {
+            let err = subversion_sys::svn_client_conflict_tree_resolve_by_id(
+                self.ptr,
+                choice.into(),
+                ctx.as_mut_ptr(),
+                apr::pool::Pool::new().as_mut_ptr(),
+            );
+            svn_result(err)
+        }
+    }
+
+    /// Get whether the conflict has text, property, or tree conflicts
+    pub fn get_conflicted(&self) -> Result<(bool, Vec<String>, bool), Error> {
+        let pool = apr::pool::Pool::new();
+        let mut text_conflicted: subversion_sys::svn_boolean_t = 0;
+        let mut props_conflicted: *mut apr_sys::apr_array_header_t = std::ptr::null_mut();
+        let mut tree_conflicted: subversion_sys::svn_boolean_t = 0;
+
+        unsafe {
+            let err = subversion_sys::svn_client_conflict_get_conflicted(
+                &mut text_conflicted,
+                &mut props_conflicted,
+                &mut tree_conflicted,
+                self.ptr,
+                pool.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            );
+            svn_result(err)?;
+
+            let has_text_conflict = text_conflicted != 0;
+            let has_tree_conflict = tree_conflicted != 0;
+
+            let mut prop_conflicts = Vec::new();
+            if !props_conflicted.is_null() {
+                // Property conflicts array contains property names
+                let array = unsafe {
+                    apr::tables::TypedArray::<*const std::ffi::c_char>::from_ptr(props_conflicted)
+                };
+                for cstr_ptr in array.iter() {
+                    let cstr = unsafe { std::ffi::CStr::from_ptr(cstr_ptr) };
+                    let propname = cstr.to_string_lossy().into_owned();
+                    prop_conflicts.push(propname);
+                }
+            }
+
+            Ok((has_text_conflict, prop_conflicts, has_tree_conflict))
+        }
+    }
+
+    /// Get the operation that caused the conflict
+    pub fn get_operation(&self) -> Result<crate::conflict::ConflictAction, Error> {
+        unsafe {
+            let operation = subversion_sys::svn_client_conflict_get_operation(self.ptr);
+            Ok(operation.into())
+        }
+    }
+
+    /// Get whether the conflict involves a binary file
+    pub fn text_get_mime_type(&self) -> Result<Option<String>, Error> {
+        unsafe {
+            let mime_type = subversion_sys::svn_client_conflict_text_get_mime_type(self.ptr);
+            if mime_type.is_null() {
+                Ok(None)
+            } else {
+                Ok(Some(
+                    std::ffi::CStr::from_ptr(mime_type)
+                        .to_string_lossy()
+                        .into_owned(),
+                ))
+            }
+        }
     }
 }
 

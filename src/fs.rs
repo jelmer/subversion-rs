@@ -228,17 +228,16 @@ impl Fs {
             return Ok(std::collections::HashMap::new());
         }
 
-        let revprops = apr::hash::Hash::<&[u8], Option<&crate::SvnString>>::from_ptr(props);
+        let revprops =
+            unsafe { apr::hash::TypedHash::<subversion_sys::svn_string_t>::from_ptr(props) };
 
         let revprops = revprops
-            .iter(&pool)
-            .filter_map(|(k, v_opt)| {
-                v_opt.map(|v| {
-                    (
-                        String::from_utf8_lossy(k).into_owned(),
-                        v.as_bytes().to_vec(),
-                    )
-                })
+            .iter()
+            .map(|(k, v)| {
+                (
+                    String::from_utf8_lossy(k).into_owned(),
+                    crate::svn_string_helpers::to_vec(&v),
+                )
             })
             .collect();
 
@@ -467,13 +466,13 @@ impl Root {
 
             let mut result = std::collections::HashMap::new();
             if !props.is_null() {
-                let hash = apr::hash::Hash::<&[u8], Option<&crate::SvnString>>::from_ptr(props);
-                for (k, v_opt) in hash.iter(pool) {
-                    if let Some(v) = v_opt {
-                        let key = String::from_utf8_lossy(k).into_owned();
-                        let value = v.as_bytes().to_vec();
-                        result.insert(key, value);
-                    }
+                let hash = unsafe {
+                    apr::hash::TypedHash::<subversion_sys::svn_string_t>::from_ptr(props)
+                };
+                for (k, v) in hash.iter() {
+                    let key = String::from_utf8_lossy(k).into_owned();
+                    let value = crate::svn_string_helpers::to_vec(&v);
+                    result.insert(key, value);
                 }
             }
             Ok(result)
@@ -493,13 +492,11 @@ impl Root {
 
             let mut result = std::collections::HashMap::new();
             if !changed_paths.is_null() {
-                let hash =
-                    apr::hash::Hash::<&[u8], *mut subversion_sys::svn_fs_path_change2_t>::from_ptr(
-                        changed_paths,
-                    );
-                for (k, v) in hash.iter(pool) {
+                let hash = unsafe { apr::hash::Hash::from_ptr(changed_paths) };
+                for (k, v) in hash.iter() {
                     let path = String::from_utf8_lossy(k).into_owned();
-                    let change = FsPathChange::from_raw(v);
+                    let change =
+                        FsPathChange::from_raw(v as *mut subversion_sys::svn_fs_path_change2_t);
                     result.insert(path, change);
                 }
             }
@@ -541,12 +538,10 @@ impl Root {
 
             let mut result = std::collections::HashMap::new();
             if !entries.is_null() {
-                let hash = apr::hash::Hash::<&[u8], *mut subversion_sys::svn_fs_dirent_t>::from_ptr(
-                    entries,
-                );
-                for (k, v) in hash.iter(pool) {
+                let hash = unsafe { apr::hash::Hash::from_ptr(entries) };
+                for (k, v) in hash.iter() {
                     let name = String::from_utf8_lossy(k).into_owned();
-                    let entry = FsDirEntry::from_raw(v);
+                    let entry = FsDirEntry::from_raw(v as *mut subversion_sys::svn_fs_dirent_t);
                     result.insert(name, entry);
                 }
             }
@@ -1423,7 +1418,7 @@ mod tests {
         let fs_path = dir.path().join("test-fs");
 
         // Create a filesystem
-        let mut fs = Fs::create(&fs_path).unwrap();
+        let fs = Fs::create(&fs_path).unwrap();
 
         // Create first revision with a file
         let mut txn = fs.begin_txn(Revnum(0)).unwrap();
@@ -1509,7 +1504,7 @@ mod tests {
         let fs_path = dir.path().join("test-fs");
 
         // Create a filesystem
-        let mut fs = Fs::create(&fs_path).unwrap();
+        let fs = Fs::create(&fs_path).unwrap();
 
         // Create first revision with a file
         let mut txn = fs.begin_txn(Revnum(0)).unwrap();

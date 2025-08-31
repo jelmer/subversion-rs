@@ -578,7 +578,8 @@ pub fn match_ignore_list(path: &str, patterns: &[&str]) -> Result<bool, crate::E
 
     with_tmp_pool(|pool| {
         // Create APR array of patterns
-        let mut patterns_array = apr::tables::ArrayHeader::<*const i8>::new(pool);
+        let mut patterns_array =
+            apr::tables::TypedArray::<*const i8>::new(pool, patterns.len() as i32);
         for pattern in patterns {
             let pattern_cstr = std::ffi::CString::new(*pattern)?;
             patterns_array.push(pattern_cstr.as_ptr());
@@ -820,14 +821,12 @@ impl Context {
         }
 
         let props_hash =
-            unsafe { apr::hash::Hash::<&str, Option<&crate::SvnString>>::from_ptr(props) };
+            unsafe { apr::hash::TypedHash::<subversion_sys::svn_string_t>::from_ptr(props) };
 
         let mut result = std::collections::HashMap::new();
-        for (key, svn_str_opt) in props_hash.iter(&pool) {
-            if let Some(svn_str) = svn_str_opt {
-                let value = svn_str.as_bytes().to_vec();
-                result.insert(String::from_utf8_lossy(key).to_string(), value);
-            }
+        for (key, svn_str) in props_hash.iter() {
+            let value = crate::svn_string_helpers::to_vec(&svn_str);
+            result.insert(String::from_utf8_lossy(key).to_string(), value);
         }
 
         Ok(Some(result))

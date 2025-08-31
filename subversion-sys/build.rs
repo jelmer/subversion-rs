@@ -30,6 +30,7 @@ fn create_svn_bindings(
         .header(svn_path.join("svn_iter.h").to_str().unwrap())
         .header(svn_path.join("svn_subst.h").to_str().unwrap())
         .header(svn_path.join("svn_utf.h").to_str().unwrap())
+        .header(svn_path.join("svn_diff.h").to_str().unwrap())
         .allowlist_file(".*/svn_.*.h")
         .blocklist_type("apr_.*")
         .derive_default(true)
