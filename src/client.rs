@@ -490,19 +490,10 @@ impl AddOptions {
 }
 
 /// Options for delete
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct DeleteOptions {
     pub force: bool,
     pub keep_local: bool,
-}
-
-impl Default for DeleteOptions {
-    fn default() -> Self {
-        Self {
-            force: false,
-            keep_local: false,
-        }
-    }
 }
 
 impl DeleteOptions {
@@ -3747,7 +3738,7 @@ mod tests {
         let revnum = ctx
             .checkout(
                 url,
-                &td.path().join("wc"),
+                td.path().join("wc"),
                 &CheckoutOptions {
                     peg_revision: Revision::Head,
                     revision: Revision::Head,
@@ -4001,7 +3992,7 @@ mod tests {
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         ctx.checkout(
-            crate::uri::Uri::new(&url.to_string()).unwrap(),
+            crate::uri::Uri::new(url.as_ref()).unwrap(),
             &wc_path,
             &CheckoutOptions {
                 peg_revision: Revision::Head,
@@ -4020,9 +4011,9 @@ mod tests {
         // Test diff between repository revisions using direct function
         let diff_result = ctx.diff(
             &[], // diff_options
-            &url.to_string(),
+            url.as_ref(),
             &Revision::Head,
-            &url.to_string(),
+            url.as_ref(),
             &Revision::Head,
             None, // relative_to_dir
             Depth::Infinity,
@@ -4060,7 +4051,7 @@ mod tests {
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         ctx.checkout(
-            crate::uri::Uri::new(&url.to_string()).unwrap(),
+            crate::uri::Uri::new(url.as_ref()).unwrap(),
             &wc_path,
             &CheckoutOptions {
                 peg_revision: Revision::Head,

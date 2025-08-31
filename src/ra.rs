@@ -1964,7 +1964,7 @@ mod tests {
             root.make_file(&filename).unwrap();
             let mut stream = root.apply_text(&filename).unwrap();
             use std::io::Write;
-            write!(stream, "Content for file {}\n", i).unwrap();
+            writeln!(stream, "Content for file {}", i).unwrap();
             drop(stream);
 
             // Set revision properties

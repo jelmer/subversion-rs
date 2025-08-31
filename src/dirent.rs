@@ -576,11 +576,11 @@ mod tests {
     #[test]
     fn test_canonicalize_dirent() {
         // SVN canonicalization removes trailing slashes and double slashes
-        let result = canonicalize_dirent(&std::path::Path::new("/home/user//project/")).unwrap();
+        let result = canonicalize_dirent(std::path::Path::new("/home/user//project/")).unwrap();
         assert_eq!(result, std::path::PathBuf::from("/home/user/project"));
 
         // SVN canonicalization handles empty paths
-        let result = canonicalize_dirent(&std::path::Path::new("")).unwrap();
+        let result = canonicalize_dirent(std::path::Path::new("")).unwrap();
         assert_eq!(result, std::path::PathBuf::from(""));
     }
 

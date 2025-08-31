@@ -578,7 +578,7 @@ pub fn match_ignore_list(path: &str, patterns: &[&str]) -> Result<bool, crate::E
 
     with_tmp_pool(|pool| {
         // Create APR array of patterns
-        let mut patterns_array = apr::tables::ArrayHeader::<*const i8>::new(&pool);
+        let mut patterns_array = apr::tables::ArrayHeader::<*const i8>::new(pool);
         for pattern in patterns {
             let pattern_cstr = std::ffi::CString::new(*pattern)?;
             patterns_array.push(pattern_cstr.as_ptr());
@@ -876,7 +876,7 @@ impl Context {
             }
         }
 
-        let mut boxed_callback: Box<Box<dyn FnMut(&str, &Status) -> Result<(), Error>>> =
+        let boxed_callback: Box<Box<dyn FnMut(&str, &Status) -> Result<(), Error>>> =
             Box::new(Box::new(status_func));
         let baton = Box::into_raw(boxed_callback) as *mut std::ffi::c_void;
 
@@ -943,8 +943,8 @@ impl Context {
     ) -> Result<(), Error> {
         let pool = apr::Pool::new();
 
-        let rev_date_cstr = rev_date.map(|s| std::ffi::CString::new(s)).transpose()?;
-        let rev_author_cstr = rev_author.map(|s| std::ffi::CString::new(s)).transpose()?;
+        let rev_date_cstr = rev_date.map(std::ffi::CString::new).transpose()?;
+        let rev_author_cstr = rev_author.map(std::ffi::CString::new).transpose()?;
 
         unsafe {
             let err = subversion_sys::svn_wc_process_committed_queue2(
@@ -1005,6 +1005,12 @@ impl Context {
 pub struct CommittedQueue {
     ptr: *mut subversion_sys::svn_wc_committed_queue_t,
     pool: apr::Pool,
+}
+
+impl Default for CommittedQueue {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CommittedQueue {
@@ -1126,8 +1132,7 @@ pub fn revision_status(
         })?;
 
         if status_ptr.is_null() {
-            return Err(Error::from(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            return Err(Error::from(std::io::Error::other(
                 "Failed to get revision status",
             )));
         }

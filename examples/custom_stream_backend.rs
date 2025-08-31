@@ -3,7 +3,7 @@
 //! This example shows how to create custom stream implementations
 //! that can be used with SVN's stream API.
 
-use std::io::{self, Read, Write};
+use std::io::{Read, Write};
 use subversion::io::{backend::*, Stream};
 
 /// Custom backend that logs all operations

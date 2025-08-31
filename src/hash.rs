@@ -42,7 +42,7 @@ pub fn read(
     let raw_hash = unsafe { apr_sys::apr_hash_make(pool.as_mut_ptr()) };
 
     let terminator_cstr = terminator
-        .map(|s| std::ffi::CString::new(s))
+        .map(std::ffi::CString::new)
         .transpose()
         .map_err(|_| Error::from_str("Invalid terminator string"))?;
 
@@ -143,7 +143,7 @@ pub fn write(
     }
 
     let terminator_cstr = terminator
-        .map(|s| std::ffi::CString::new(s))
+        .map(std::ffi::CString::new)
         .transpose()
         .map_err(|_| Error::from_str("Invalid terminator string"))?;
 
@@ -176,7 +176,7 @@ pub fn read_incremental(
     let raw_hash = unsafe { apr_sys::apr_hash_make(pool.as_mut_ptr()) };
 
     let terminator_cstr = terminator
-        .map(|s| std::ffi::CString::new(s))
+        .map(std::ffi::CString::new)
         .transpose()
         .map_err(|_| Error::from_str("Invalid terminator string"))?;
 
@@ -302,7 +302,7 @@ pub fn write_incremental(
     }
 
     let terminator_cstr = terminator
-        .map(|s| std::ffi::CString::new(s))
+        .map(std::ffi::CString::new)
         .transpose()
         .map_err(|_| Error::from_str("Invalid terminator string"))?;
 
