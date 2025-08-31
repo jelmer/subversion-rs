@@ -6,6 +6,8 @@ use std::collections::HashMap;
 use std::marker::PhantomData;
 use subversion_sys::svn_ra_session_t;
 
+// Removed global vtable storage - using simpler approach
+
 /// Dirent information from RA
 #[allow(dead_code)]
 pub struct Dirent {
@@ -339,17 +341,12 @@ impl Session {
         let err = unsafe {
             subversion_sys::svn_ra_rev_proplist(self.ptr, rev.into(), &mut props, pool.as_mut_ptr())
         };
-        let hash = apr::hash::Hash::<&str, &crate::SvnString>::from_ptr(props);
+        let hash = unsafe { apr::hash::TypedHash::<subversion_sys::svn_string_t>::from_ptr(props) };
         Error::from_raw(err)?;
         let pool = apr::pool::Pool::new();
         Ok(hash
-            .iter(&pool)
-            .map(|(k, v)| {
-                (
-                    String::from_utf8_lossy(k).into_owned(),
-                    v.as_bytes().to_vec(),
-                )
-            })
+            .iter()
+            .map(|(k, v)| (String::from_utf8_lossy(k).into_owned(), crate::to_vec(v)))
             .collect())
     }
 
@@ -398,8 +395,12 @@ impl Session {
             })
             .collect();
 
-        let mut hash_revprop_table =
-            apr::hash::Hash::from_iter(&pool, svn_strings.iter().map(|(k, v)| (*k, v)));
+        let mut hash_revprop_table = apr::hash::Hash::new(&pool);
+        for (k, v) in svn_strings.iter() {
+            unsafe {
+                hash_revprop_table.insert(k.as_bytes(), v.as_ptr() as *mut std::ffi::c_void);
+            }
+        }
 
         // Create C strings that will live as long as pool
         let c_strings: Vec<_> = lock_tokens
@@ -407,10 +408,12 @@ impl Session {
             .map(|(k, v)| (k.as_str(), std::ffi::CString::new(v.as_str()).unwrap()))
             .collect();
 
-        let c_string_ptrs: Vec<_> = c_strings.iter().map(|(k, v)| (*k, v.as_ptr())).collect();
-
-        let mut hash_lock_tokens =
-            apr::hash::Hash::from_iter(&pool, c_string_ptrs.iter().map(|(k, v)| (*k, v)));
+        let mut hash_lock_tokens = apr::hash::Hash::new(&pool);
+        for (k, v) in c_strings.iter() {
+            unsafe {
+                hash_lock_tokens.insert(k.as_bytes(), v.as_ptr() as *mut std::ffi::c_void);
+            }
+        }
         let result_pool = Pool::new();
         let err = unsafe {
             subversion_sys::svn_ra_get_commit_editor3(
@@ -455,17 +458,12 @@ impl Session {
             )
         };
         crate::Error::from_raw(err)?;
-        let hash = apr::hash::Hash::<&str, &crate::SvnString>::from_ptr(props);
+        let hash = unsafe { apr::hash::TypedHash::<subversion_sys::svn_string_t>::from_ptr(props) };
         let pool = apr::pool::Pool::new();
         Ok((
             Revnum::from_raw(fetched_rev).unwrap(),
-            hash.iter(&pool)
-                .map(|(k, v)| {
-                    (
-                        String::from_utf8_lossy(k).into_owned(),
-                        v.as_bytes().to_vec(),
-                    )
-                })
+            hash.iter()
+                .map(|(k, v)| (String::from_utf8_lossy(k).into_owned(), crate::to_vec(v)))
                 .collect(),
         ))
     }
@@ -496,21 +494,17 @@ impl Session {
         };
         let rc_pool = std::rc::Rc::new(pool);
         crate::Error::from_raw(err)?;
-        let props_hash = apr::hash::Hash::<&str, &crate::SvnString>::from_ptr(props);
+        let props_hash =
+            unsafe { apr::hash::TypedHash::<subversion_sys::svn_string_t>::from_ptr(props) };
         let dirents_hash =
-            apr::hash::Hash::<&str, &subversion_sys::svn_dirent_t>::from_ptr(dirents);
+            unsafe { apr::hash::TypedHash::<subversion_sys::svn_dirent_t>::from_ptr(dirents) };
         let iter_pool = apr::pool::Pool::new();
         let props = props_hash
-            .iter(&iter_pool)
-            .map(|(k, v)| {
-                (
-                    String::from_utf8_lossy(k).into_owned(),
-                    v.as_bytes().to_vec(),
-                )
-            })
+            .iter()
+            .map(|(k, v)| (String::from_utf8_lossy(k).into_owned(), crate::to_vec(v)))
             .collect();
         let dirents = dirents_hash
-            .iter(&iter_pool)
+            .iter()
             .map(|(k, v)| {
                 (
                     String::from_utf8_lossy(k).into_owned(),
@@ -532,9 +526,12 @@ impl Session {
     ) -> Result<(), Error> {
         let path = std::ffi::CString::new(path).unwrap();
         let pool = Pool::new();
-        let patterns: Option<apr::tables::ArrayHeader<*const std::os::raw::c_char>> =
+        let patterns: Option<apr::tables::TypedArray<*const std::os::raw::c_char>> =
             patterns.map(|patterns| {
-                let mut array = apr::tables::ArrayHeader::<*const std::os::raw::c_char>::new(&pool);
+                let mut array = apr::tables::TypedArray::<*const std::os::raw::c_char>::new(
+                    &pool,
+                    patterns.len() as i32,
+                );
                 for pattern in patterns {
                     array.push(pattern.as_ptr() as _);
                 }
@@ -570,7 +567,8 @@ impl Session {
         include_descendants: bool,
     ) -> Result<HashMap<String, crate::mergeinfo::Mergeinfo>, Error> {
         let pool = Pool::new();
-        let mut paths_array = apr::tables::ArrayHeader::<*const std::os::raw::c_char>::new(&pool);
+        let mut paths_array =
+            apr::tables::TypedArray::<*const std::os::raw::c_char>::new(&pool, paths.len() as i32);
         for path in paths {
             paths_array.push(path.as_ptr() as _);
         }
@@ -589,14 +587,17 @@ impl Session {
         };
         Error::from_raw(err)?;
         let pool = std::rc::Rc::new(pool);
-        let mergeinfo =
-            apr::hash::Hash::<&[u8], *mut subversion_sys::svn_mergeinfo_t>::from_ptr(mergeinfo);
+        let mergeinfo = unsafe { apr::hash::Hash::from_ptr(mergeinfo) };
         let iter_pool = apr::pool::Pool::new();
         Ok(mergeinfo
-            .iter(&iter_pool)
+            .iter()
             .map(|(k, v)| {
+                // The value is already apr_hash_t* (svn_mergeinfo_t)
                 (String::from_utf8_lossy(k).into_owned(), unsafe {
-                    crate::mergeinfo::Mergeinfo::from_ptr_and_pool(v, apr::Pool::new())
+                    crate::mergeinfo::Mergeinfo::from_ptr_and_pool(
+                        v as *mut *mut apr_sys::apr_hash_t,
+                        apr::Pool::new(),
+                    )
                 })
             })
             .collect())
@@ -863,7 +864,8 @@ impl Session {
             .iter()
             .map(|p| std::ffi::CString::new(*p).unwrap())
             .collect();
-        let mut paths_array = apr::tables::ArrayHeader::<*const std::os::raw::c_char>::new(&pool);
+        let mut paths_array =
+            apr::tables::TypedArray::<*const std::os::raw::c_char>::new(&pool, paths.len() as i32);
         for cstr in &path_cstrings {
             paths_array.push(cstr.as_ptr());
         }
@@ -873,8 +875,10 @@ impl Session {
             .iter()
             .map(|p| std::ffi::CString::new(*p).unwrap())
             .collect();
-        let mut revprops_array =
-            apr::tables::ArrayHeader::<*const std::os::raw::c_char>::new(&pool);
+        let mut revprops_array = apr::tables::TypedArray::<*const std::os::raw::c_char>::new(
+            &pool,
+            revprops.len() as i32,
+        );
         for cstr in &revprop_cstrings {
             revprops_array.push(cstr.as_ptr());
         }
@@ -912,7 +916,10 @@ impl Session {
         let path = std::ffi::CString::new(path).unwrap();
         let pool = Pool::new();
         let mut location_revisions_array =
-            apr::tables::ArrayHeader::<subversion_sys::svn_revnum_t>::new(&pool);
+            apr::tables::TypedArray::<subversion_sys::svn_revnum_t>::new(
+                &pool,
+                location_revisions.len() as i32,
+            );
         for rev in location_revisions {
             location_revisions_array.push((*rev).into());
         }
@@ -930,14 +937,18 @@ impl Session {
         };
         Error::from_raw(err)?;
 
-        let iter = apr::hash::Hash::<&Revnum, *const std::os::raw::c_char>::from_ptr(locations);
+        let iter = unsafe { apr::hash::Hash::from_ptr(locations) };
 
         let mut locations = HashMap::new();
         let pool = apr::pool::Pool::new();
-        for (k, v) in iter.iter(&pool) {
-            let revnum = k.as_ptr() as *const Revnum;
-            locations.insert(unsafe { *revnum }, unsafe {
-                std::ffi::CStr::from_ptr(v).to_string_lossy().into_owned()
+        for (k, v) in iter.iter() {
+            // The key is a pointer to svn_revnum_t (i64)
+            let revnum = unsafe { *(k.as_ptr() as *const subversion_sys::svn_revnum_t) };
+            // The value is a C string (path)
+            locations.insert(Revnum(revnum), unsafe {
+                std::ffi::CStr::from_ptr(v as *const std::ffi::c_char)
+                    .to_string_lossy()
+                    .into_owned()
             });
         }
 
@@ -980,9 +991,14 @@ impl Session {
         let pool = Pool::new();
         let scratch_pool = std::rc::Rc::new(Pool::new());
         let revnum_values: Vec<_> = path_revs.values().map(|v| v.0).collect();
-        let mut hash = apr::hash::Hash::<&str, &subversion_sys::svn_revnum_t>::new(&scratch_pool);
+        let mut hash = apr::hash::Hash::new(&scratch_pool);
         for ((k, _), revnum_val) in path_revs.iter().zip(revnum_values.iter()) {
-            hash.insert(k, revnum_val);
+            unsafe {
+                hash.insert(
+                    k.as_bytes(),
+                    revnum_val as *const _ as *mut std::ffi::c_void,
+                );
+            }
         }
         let comment = std::ffi::CString::new(comment).unwrap();
         let err = unsafe {
@@ -1008,13 +1024,15 @@ impl Session {
     ) -> Result<(), Error> {
         let pool = Pool::new();
         let scratch_pool = std::rc::Rc::new(Pool::new());
-        let mut hash = apr::hash::Hash::<&str, &*const std::os::raw::c_char>::new(&scratch_pool);
+        let mut hash = apr::hash::Hash::new(&scratch_pool);
         let path_token_ptrs: Vec<_> = path_tokens
             .iter()
             .map(|(k, v)| (k.as_str(), v.as_ptr() as *const std::os::raw::c_char))
             .collect();
         for (k, v) in path_token_ptrs.iter() {
-            hash.insert(k, v);
+            unsafe {
+                hash.insert(k.as_bytes(), *v as *mut std::ffi::c_void);
+            }
         }
         let err = unsafe {
             subversion_sys::svn_ra_unlock(
@@ -1063,15 +1081,15 @@ impl Session {
         };
         Error::from_raw(err)?;
         let _pool = std::rc::Rc::new(pool);
-        let hash = apr::hash::Hash::<&str, *mut subversion_sys::svn_lock_t>::from_ptr(locks);
+        let hash = unsafe { apr::hash::Hash::from_ptr(locks) };
         let iter_pool = apr::pool::Pool::new();
         Ok(hash
-            .iter(&iter_pool)
+            .iter()
             .map(|(k, v)| {
                 (
                     String::from_utf8_lossy(k).into_owned(),
                     crate::Lock {
-                        ptr: v,
+                        ptr: v as *const subversion_sys::svn_lock_t,
                         _pool: std::marker::PhantomData,
                     },
                 )
@@ -1121,18 +1139,18 @@ impl Session {
                     .as_mut()
                     .unwrap()
             };
-            let revprops = apr::hash::Hash::<&str, Option<&crate::SvnString>>::from_ptr(rev_props);
+            let revprops = unsafe {
+                apr::hash::TypedHash::<subversion_sys::svn_string_t>::from_ptr(rev_props)
+            };
 
             let pool = apr::pool::Pool::new();
             let revprops = revprops
-                .iter(&pool)
-                .filter_map(|(k, v_opt)| {
-                    v_opt.map(|v| {
-                        (
-                            std::str::from_utf8(k).unwrap().to_string(),
-                            v.as_bytes().to_vec(),
-                        )
-                    })
+                .iter()
+                .map(|(k, v)| {
+                    (
+                        std::str::from_utf8(k).unwrap().to_string(),
+                        crate::svn_string_helpers::to_vec(&v),
+                    )
                 })
                 .collect();
 
@@ -1178,18 +1196,18 @@ impl Session {
                 _pool: std::marker::PhantomData,
             };
 
-            let revprops = apr::hash::Hash::<&str, Option<&crate::SvnString>>::from_ptr(rev_props);
+            let revprops = unsafe {
+                apr::hash::TypedHash::<subversion_sys::svn_string_t>::from_ptr(rev_props)
+            };
 
             let pool = apr::pool::Pool::new();
             let revprops = revprops
-                .iter(&pool)
-                .filter_map(|(k, v_opt)| {
-                    v_opt.map(|v| {
-                        (
-                            std::str::from_utf8(k).unwrap().to_string(),
-                            v.as_bytes().to_vec(),
-                        )
-                    })
+                .iter()
+                .map(|(k, v)| {
+                    (
+                        std::str::from_utf8(k).unwrap().to_string(),
+                        crate::svn_string_helpers::to_vec(&v),
+                    )
                 })
                 .collect();
 
@@ -1225,17 +1243,24 @@ impl Session {
         editor: &mut dyn crate::delta::Editor,
     ) -> Result<(), Error> {
         let pool = Pool::new();
+        // Store the fat pointer as the editor baton
+        let editor_baton = Box::into_raw(Box::new(editor as *mut dyn crate::delta::Editor))
+            as *mut std::ffi::c_void;
         let err = unsafe {
             subversion_sys::svn_ra_replay(
                 self.ptr,
                 revision.into(),
                 low_water_mark.into(),
-                send_deltas.into(),
+                send_deltas as i32,
                 &crate::delta::WRAP_EDITOR,
-                editor as *mut _ as *mut std::ffi::c_void,
+                editor_baton,
                 pool.as_mut_ptr(),
             )
         };
+        // Clean up the baton after the call
+        unsafe {
+            let _baton_box = Box::from_raw(editor_baton as *mut *mut dyn crate::delta::Editor);
+        }
         Error::from_raw(err)?;
         Ok(())
     }
@@ -1293,16 +1318,16 @@ impl Session {
             let rev_props_hash = if rev_props.is_null() {
                 HashMap::new()
             } else {
-                let hash = apr::hash::Hash::<&str, Option<&crate::SvnString>>::from_ptr(rev_props);
+                let hash = unsafe {
+                    apr::hash::TypedHash::<subversion_sys::svn_string_t>::from_ptr(rev_props)
+                };
                 let iter_pool = apr::pool::Pool::new();
-                hash.iter(&iter_pool)
-                    .filter_map(|(k, v_opt)| {
-                        v_opt.map(|v| {
-                            (
-                                String::from_utf8_lossy(k).into_owned(),
-                                v.as_bytes().to_vec(),
-                            )
-                        })
+                hash.iter()
+                    .map(|(k, v)| {
+                        (
+                            String::from_utf8_lossy(k).into_owned(),
+                            crate::svn_string_helpers::to_vec(&v),
+                        )
                     })
                     .collect()
             };
@@ -1409,16 +1434,21 @@ impl Session {
             return Ok(Vec::new());
         }
 
-        // The array contains svn_prop_inherited_item_t structures
+        // The array contains POINTERS to svn_prop_inherited_item_t structures
         let array = unsafe {
             std::slice::from_raw_parts(
-                (*inherited_props_array).elts as *const subversion_sys::svn_prop_inherited_item_t,
+                (*inherited_props_array).elts
+                    as *const *const subversion_sys::svn_prop_inherited_item_t,
                 (*inherited_props_array).nelts as usize,
             )
         };
 
         let mut result = Vec::new();
-        for (i, item) in array.iter().enumerate() {
+        for (i, item_ptr) in array.iter().enumerate() {
+            if item_ptr.is_null() {
+                continue;
+            }
+            let item = unsafe { &**item_ptr };
             // Debug: Check if the item has valid pointers
             if item.path_or_url.is_null() {
                 eprintln!("Warning: item {} has null path_or_url", i);
@@ -1434,20 +1464,28 @@ impl Session {
             let props = if item.prop_hash.is_null() {
                 HashMap::new()
             } else {
-                // Use the new APR hash API with Option<SvnString> to handle NULL values gracefully
-                let hash =
-                    apr::hash::Hash::<&str, Option<&crate::SvnString>>::from_ptr(item.prop_hash);
-                let iter_pool = apr::pool::Pool::new();
-                hash.iter(&iter_pool)
-                    .filter_map(|(k, svn_str_opt)| {
-                        svn_str_opt.map(|svn_str| {
-                            (
-                                String::from_utf8_lossy(k).into_owned(),
-                                svn_str.as_bytes().to_vec(),
-                            )
-                        })
-                    })
-                    .collect()
+                // prop_hash is apr_hash_t with (const char *) keys and (svn_string_t *) values
+                // We must use raw Hash because the hash can contain NULL values
+                let hash = unsafe { apr::hash::Hash::from_ptr(item.prop_hash) };
+                let mut props = HashMap::new();
+
+                for (key, value) in hash.iter() {
+                    if value.is_null() {
+                        // Skip NULL values - these represent deleted properties
+                        continue;
+                    }
+
+                    // The value is a pointer to svn_string_t stored directly in the hash
+                    // Cast it to svn_string_t* and dereference it
+                    let svn_str_ptr = value as *const subversion_sys::svn_string_t;
+                    let svn_str = unsafe { &*svn_str_ptr };
+
+                    // Use helper function to safely extract data
+                    let data = crate::svn_string_helpers::to_vec(svn_str);
+                    props.insert(String::from_utf8_lossy(key).into_owned(), data);
+                }
+
+                props
             };
 
             result.push((path_or_url, props));
@@ -1609,6 +1647,8 @@ pub trait Reporter {
 pub struct Callbacks {
     ptr: *mut subversion_sys::svn_ra_callbacks2_t,
     pool: apr::Pool,
+    // Keep auth_baton alive for the lifetime of the callbacks, pinned to ensure stable address
+    auth_baton: Option<std::pin::Pin<Box<crate::auth::AuthBaton>>>,
     _phantom: PhantomData<*mut ()>,
 }
 
@@ -1635,8 +1675,21 @@ impl Callbacks {
         Ok(Callbacks {
             ptr: callbacks,
             pool,
+            auth_baton: None,
             _phantom: PhantomData,
         })
+    }
+
+    pub fn set_auth_baton(&mut self, auth_baton: crate::auth::AuthBaton) {
+        // Pin the auth_baton in a Box to get a stable address
+        let mut pinned_baton = Box::pin(auth_baton);
+        unsafe {
+            // Get a mutable reference through the pin and then get its pointer
+            let baton_ptr = pinned_baton.as_mut().get_mut().as_mut_ptr();
+            (*self.ptr).auth_baton = baton_ptr;
+        }
+        // Keep the pinned auth_baton alive
+        self.auth_baton = Some(pinned_baton);
     }
 
     fn as_mut_ptr(&mut self) -> *mut subversion_sys::svn_ra_callbacks2_t {
@@ -1662,7 +1715,25 @@ mod tests {
     /// Helper to create a test repo and open an RA session to it
     fn create_test_repo_with_session() -> (tempfile::TempDir, crate::repos::Repos, Session) {
         let (temp_dir, url, repo) = create_test_repo();
-        let (session, _, _) = Session::open(&url, None, None, None).unwrap();
+
+        // Create callbacks with authentication
+        let mut callbacks = Callbacks::new().unwrap();
+
+        // Set up authentication with a default username for file:// operations
+        let providers = vec![
+            crate::auth::get_username_provider(),
+            crate::auth::get_simple_provider(None::<&fn(&str) -> Result<bool, Error>>),
+        ];
+        let mut auth_baton = crate::auth::AuthBaton::open(&providers).unwrap();
+
+        // Set the default username for operations that require it (like locking)
+        auth_baton
+            .set(crate::auth::AuthSetting::Username("testuser"))
+            .unwrap();
+
+        callbacks.set_auth_baton(auth_baton);
+
+        let (session, _, _) = Session::open(&url, None, Some(&mut callbacks), None).unwrap();
         (temp_dir, repo, session)
     }
 
@@ -2031,43 +2102,46 @@ mod tests {
 
         // Create a simple editor to capture the replay
         struct TestEditor {
-            operations: std::cell::RefCell<Vec<String>>,
+            operations: Vec<String>,
         }
 
         impl crate::delta::Editor for TestEditor {
             fn set_target_revision(
                 &mut self,
-                _revision: crate::Revnum,
+                _revision: Option<crate::Revnum>,
             ) -> Result<(), crate::Error> {
-                self.operations
-                    .borrow_mut()
-                    .push("set_target_revision".to_string());
+                self.operations.push("set_target_revision".to_string());
                 Ok(())
             }
 
             fn open_root<'a>(
                 &'a mut self,
-                _base_revision: crate::Revnum,
+                _base_revision: Option<crate::Revnum>,
             ) -> Result<Box<dyn crate::delta::DirectoryEditor + 'a>, crate::Error> {
-                self.operations.borrow_mut().push("open_root".to_string());
-                Ok(Box::new(TestDirectoryEditor {
-                    operations: &self.operations,
-                }))
+                eprintln!("TestEditor::open_root: About to push operation");
+                self.operations.push("open_root".to_string());
+                eprintln!("TestEditor::open_root: Successfully pushed operation");
+                eprintln!("TestEditor::open_root: About to create TestDirectoryEditor");
+                let result = Box::new(TestDirectoryEditor {
+                    operations: &mut self.operations,
+                });
+                eprintln!("TestEditor::open_root: Successfully created TestDirectoryEditor");
+                Ok(result)
             }
 
             fn close(&mut self) -> Result<(), crate::Error> {
-                self.operations.borrow_mut().push("close".to_string());
+                self.operations.push("close".to_string());
                 Ok(())
             }
 
             fn abort(&mut self) -> Result<(), crate::Error> {
-                self.operations.borrow_mut().push("abort".to_string());
+                self.operations.push("abort".to_string());
                 Ok(())
             }
         }
 
         struct TestDirectoryEditor<'a> {
-            operations: &'a std::cell::RefCell<Vec<String>>,
+            operations: &'a mut Vec<String>,
         }
 
         impl<'a> crate::delta::DirectoryEditor for TestDirectoryEditor<'a> {
@@ -2076,9 +2150,7 @@ mod tests {
                 path: &str,
                 _revision: Option<crate::Revnum>,
             ) -> Result<(), crate::Error> {
-                self.operations
-                    .borrow_mut()
-                    .push(format!("delete_entry: {}", path));
+                self.operations.push(format!("delete_entry: {}", path));
                 Ok(())
             }
 
@@ -2087,9 +2159,7 @@ mod tests {
                 path: &str,
                 _copyfrom: Option<(&str, crate::Revnum)>,
             ) -> Result<Box<dyn crate::delta::DirectoryEditor + 'b>, crate::Error> {
-                self.operations
-                    .borrow_mut()
-                    .push(format!("add_directory: {}", path));
+                self.operations.push(format!("add_directory: {}", path));
                 Ok(Box::new(TestDirectoryEditor {
                     operations: self.operations,
                 }))
@@ -2100,9 +2170,7 @@ mod tests {
                 path: &str,
                 _base_revision: Option<crate::Revnum>,
             ) -> Result<Box<dyn crate::delta::DirectoryEditor + 'b>, crate::Error> {
-                self.operations
-                    .borrow_mut()
-                    .push(format!("open_directory: {}", path));
+                self.operations.push(format!("open_directory: {}", path));
                 Ok(Box::new(TestDirectoryEditor {
                     operations: self.operations,
                 }))
@@ -2113,16 +2181,12 @@ mod tests {
             }
 
             fn close(&mut self) -> Result<(), crate::Error> {
-                self.operations
-                    .borrow_mut()
-                    .push("close_directory".to_string());
+                self.operations.push("close_directory".to_string());
                 Ok(())
             }
 
             fn absent_directory(&mut self, path: &str) -> Result<(), crate::Error> {
-                self.operations
-                    .borrow_mut()
-                    .push(format!("absent_directory: {}", path));
+                self.operations.push(format!("absent_directory: {}", path));
                 Ok(())
             }
 
@@ -2131,9 +2195,7 @@ mod tests {
                 path: &str,
                 _copyfrom: Option<(&str, crate::Revnum)>,
             ) -> Result<Box<dyn crate::delta::FileEditor + 'b>, crate::Error> {
-                self.operations
-                    .borrow_mut()
-                    .push(format!("add_file: {}", path));
+                self.operations.push(format!("add_file: {}", path));
                 Ok(Box::new(TestFileEditor {
                     operations: self.operations,
                 }))
@@ -2144,24 +2206,20 @@ mod tests {
                 path: &str,
                 _base_revision: Option<crate::Revnum>,
             ) -> Result<Box<dyn crate::delta::FileEditor + 'b>, crate::Error> {
-                self.operations
-                    .borrow_mut()
-                    .push(format!("open_file: {}", path));
+                self.operations.push(format!("open_file: {}", path));
                 Ok(Box::new(TestFileEditor {
                     operations: self.operations,
                 }))
             }
 
             fn absent_file(&mut self, path: &str) -> Result<(), crate::Error> {
-                self.operations
-                    .borrow_mut()
-                    .push(format!("absent_file: {}", path));
+                self.operations.push(format!("absent_file: {}", path));
                 Ok(())
             }
         }
 
         struct TestFileEditor<'a> {
-            operations: &'a std::cell::RefCell<Vec<String>>,
+            operations: &'a mut Vec<String>,
         }
 
         impl<'a> crate::delta::FileEditor for TestFileEditor<'a> {
@@ -2174,9 +2232,7 @@ mod tests {
                 >,
                 crate::Error,
             > {
-                self.operations
-                    .borrow_mut()
-                    .push("apply_textdelta".to_string());
+                self.operations.push("apply_textdelta".to_string());
                 Ok(Box::new(|_window: &mut crate::delta::TxDeltaWindow| Ok(())))
             }
 
@@ -2185,14 +2241,14 @@ mod tests {
             }
 
             fn close(&mut self, _text_checksum: Option<&str>) -> Result<(), crate::Error> {
-                self.operations.borrow_mut().push("close_file".to_string());
+                self.operations.push("close_file".to_string());
                 Ok(())
             }
         }
 
-        let mut editor = TestEditor {
-            operations: std::cell::RefCell::new(Vec::new()),
-        };
+        let mut editor = Box::new(TestEditor {
+            operations: Vec::new(),
+        });
 
         // Replay the revision
         session
@@ -2200,18 +2256,20 @@ mod tests {
                 rev,
                 crate::Revnum::from(0u32), // low_water_mark
                 false,                     // send_deltas
-                &mut editor,
+                editor.as_mut(),
             )
             .unwrap();
 
         // Check that operations were recorded
-        let ops = editor.operations.into_inner();
+        let ops = &editor.operations;
+        println!("Operations recorded: {:?}", ops);
         assert!(!ops.is_empty(), "Should have recorded some operations");
 
         // We should have operations like set_target_revision, open_root, etc.
         assert!(ops
             .iter()
             .any(|op| op.contains("set_target_revision") || op.contains("open_root")));
+        println!("Replay completed successfully!");
     }
 
     #[test]
@@ -2321,7 +2379,7 @@ mod tests {
         // Check that we got locations for both revisions
         assert!(locations.contains_key(&rev1));
         assert!(locations.contains_key(&rev2));
-        assert_eq!(locations.get(&rev1).unwrap(), "original.txt");
-        assert_eq!(locations.get(&rev2).unwrap(), "original.txt");
+        assert_eq!(locations.get(&rev1).unwrap(), "/original.txt");
+        assert_eq!(locations.get(&rev2).unwrap(), "/original.txt");
     }
 }

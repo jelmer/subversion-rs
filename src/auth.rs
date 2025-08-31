@@ -1,6 +1,17 @@
 use crate::Error;
 use std::marker::PhantomData;
 
+pub enum AuthSetting<'a> {
+    Username(&'a str),
+    DefaultUsername(&'a str),
+    SslServerTrustFile(&'a str),
+    SslClientCertFile(&'a str),
+    SslClientCertPassword(&'a str),
+    ConfigDir(&'a str),
+    ServerGroup(&'a str),
+    ConfigCategoryServers(&'a str),
+}
+
 pub struct AuthBaton {
     ptr: *mut subversion_sys::svn_auth_baton_t,
     pool: apr::Pool,
@@ -87,6 +98,44 @@ impl AuthBaton {
         self.ptr
     }
 
+    pub fn set(&mut self, setting: AuthSetting) -> Result<(), Error> {
+        match setting {
+            AuthSetting::Username(value) => self.set_string_parameter("username", value),
+            AuthSetting::DefaultUsername(value) => {
+                self.set_string_parameter("svn:auth:username", value)
+            }
+            AuthSetting::SslServerTrustFile(value) => {
+                self.set_string_parameter("servers:global:ssl-trust-default-ca", value)
+            }
+            AuthSetting::SslClientCertFile(value) => {
+                self.set_string_parameter("servers:global:ssl-client-cert-file", value)
+            }
+            AuthSetting::SslClientCertPassword(value) => {
+                self.set_string_parameter("servers:global:ssl-client-cert-password", value)
+            }
+            AuthSetting::ConfigDir(value) => self.set_string_parameter("config-dir", value),
+            AuthSetting::ServerGroup(value) => self.set_string_parameter("servers:group", value),
+            AuthSetting::ConfigCategoryServers(value) => {
+                self.set_string_parameter("config:servers", value)
+            }
+        }
+    }
+
+    fn set_string_parameter(&mut self, param_name: &str, param_value: &str) -> Result<(), Error> {
+        // Store the value in the auth_baton's pool to ensure it persists
+        let persistent_value = apr::strings::pstrdup(param_value, &self.pool)?;
+
+        // Use the existing set_parameter method
+        unsafe {
+            self.set_parameter(
+                param_name,
+                persistent_value.as_ptr() as *const std::ffi::c_void,
+            );
+        }
+
+        Ok(())
+    }
+
     pub fn credentials<C: Credentials>(&mut self, realm: &str) -> Result<IterState<C>, Error> {
         let cred_kind = std::ffi::CString::new(C::kind()).unwrap();
         let realm = std::ffi::CString::new(realm).unwrap();
@@ -169,9 +218,9 @@ impl AuthBaton {
         let pool = apr::pool::Pool::new();
         let mut baton = std::ptr::null_mut();
         unsafe {
-            let mut provider_array = apr::tables::ArrayHeader::<
+            let mut provider_array = apr::tables::TypedArray::<
                 *const subversion_sys::svn_auth_provider_object_t,
-            >::new(&pool);
+            >::new(&pool, providers.len() as i32);
             for provider in providers {
                 provider_array.push(provider.as_auth_provider(&pool));
             }
@@ -776,10 +825,11 @@ pub fn get_platform_specific_client_providers() -> Result<Vec<AuthProvider>, Err
         )
     };
     Error::from_raw(err)?;
-    let providers =
-        apr::tables::ArrayHeader::<*mut subversion_sys::svn_auth_provider_object_t>::from_ptr(
+    let providers = unsafe {
+        apr::tables::TypedArray::<*mut subversion_sys::svn_auth_provider_object_t>::from_ptr(
             providers,
-        );
+        )
+    };
     Ok(providers
         .iter()
         .map(|p| AuthProvider {
