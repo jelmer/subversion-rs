@@ -115,7 +115,7 @@ pub fn write(
     terminator: Option<&str>,
 ) -> Result<(), Error> {
     let pool = apr::Pool::new();
-    let mut apr_hash = apr::hash::Hash::<&str, *mut subversion_sys::svn_string_t>::new(&pool);
+    let mut apr_hash = apr::hash::Hash::new(&pool);
 
     // Convert Rust HashMap to APR hash with svn_string_t values
     // We need to keep CStrings alive for the duration of the hash operations
@@ -254,7 +254,7 @@ pub fn write_incremental(
     let pool = apr::Pool::new();
 
     // Convert new hash to APR hash
-    let mut apr_hash = apr::hash::Hash::<&str, *mut subversion_sys::svn_string_t>::new(&pool);
+    let mut apr_hash = apr::hash::Hash::new(&pool);
     let mut key_cstrings = Vec::new();
     for (key, value) in hash.iter() {
         let key_cstr = std::ffi::CString::new(key.as_str()).unwrap();
@@ -278,7 +278,7 @@ pub fn write_incremental(
     }
 
     // Convert old hash to APR hash
-    let mut apr_oldhash = apr::hash::Hash::<&str, *mut subversion_sys::svn_string_t>::new(&pool);
+    let mut apr_oldhash = apr::hash::Hash::new(&pool);
     let mut old_key_cstrings = Vec::new();
     for (key, value) in oldhash.iter() {
         let key_cstr = std::ffi::CString::new(key.as_str()).unwrap();
@@ -337,7 +337,7 @@ where
     let pool = apr::Pool::new();
 
     // Convert hash_a to APR hash
-    let mut apr_hash_a = apr::hash::Hash::<&str, *mut subversion_sys::svn_string_t>::new(&pool);
+    let mut apr_hash_a = apr::hash::Hash::new(&pool);
     let mut keys_a_cstrings = Vec::new();
     for (key, value) in hash_a.iter() {
         let key_cstr = std::ffi::CString::new(key.as_str()).unwrap();
@@ -361,7 +361,7 @@ where
     }
 
     // Convert hash_b to APR hash
-    let mut apr_hash_b = apr::hash::Hash::<&str, *mut subversion_sys::svn_string_t>::new(&pool);
+    let mut apr_hash_b = apr::hash::Hash::new(&pool);
     let mut keys_b_cstrings = Vec::new();
     for (key, value) in hash_b.iter() {
         let key_cstr = std::ffi::CString::new(key.as_str()).unwrap();
@@ -435,7 +435,7 @@ where
 /// Creates a hash table using the provided keys, with all values set to empty strings.
 pub fn from_cstring_keys(keys: &[&str]) -> Result<HashMap<String, String>, Error> {
     let pool = apr::Pool::new();
-    let mut keys_array = apr::tables::ArrayHeader::<*const i8>::new(&pool);
+    let mut keys_array = apr::tables::TypedArray::<*const i8>::new(&pool, keys.len() as i32);
 
     let key_cstrings: Vec<std::ffi::CString> = keys
         .iter()

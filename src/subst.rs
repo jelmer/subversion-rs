@@ -108,9 +108,9 @@ pub fn translation_required(
                         )
                     })
                     .collect();
-                let mut hash = apr::hash::Hash::<&str, *const std::ffi::c_char>::new(pool);
+                let mut hash = apr::hash::Hash::new(pool);
                 for ((k, _), (_, v_cstr)) in kw.iter().zip(c_strings.iter()) {
-                    hash.insert(k, v_cstr.as_ptr());
+                    unsafe { hash.insert(k.as_bytes(), v_cstr.as_ptr() as *mut std::ffi::c_void); }
                 }
                 unsafe { hash.as_mut_ptr() }
             }
@@ -180,12 +180,12 @@ pub fn build_keywords(
             return Ok(HashMap::new());
         }
 
-        let hash = apr::hash::Hash::<&str, &crate::SvnString>::from_ptr(keywords_hash);
+        let hash = unsafe { apr::hash::TypedHash::<subversion_sys::svn_string_t>::from_ptr(keywords_hash) };
         let mut result = HashMap::new();
 
-        for (key, value) in hash.iter(pool) {
+        for (key, value) in hash.iter() {
             let key_string = String::from_utf8_lossy(key).into_owned();
-            let value_string = String::from_utf8_lossy(value.as_bytes()).into_owned();
+            let value_string = String::from_utf8_lossy(crate::svn_string_helpers::as_bytes(&value)).into_owned();
             result.insert(key_string, value_string);
         }
 
@@ -205,13 +205,13 @@ pub fn keywords_differ(
     with_tmp_pool(|pool| {
         let hash_a = match a {
             Some(kw) => {
-                let mut hash = apr::hash::Hash::<&str, *const std::ffi::c_char>::new(pool);
+                let mut hash = apr::hash::Hash::new(pool);
                 let c_strings: Vec<_> = kw
                     .iter()
                     .map(|(k, v)| (k.as_str(), std::ffi::CString::new(v.as_str()).unwrap()))
                     .collect();
                 for ((k, _), (_, v_cstr)) in kw.iter().zip(c_strings.iter()) {
-                    hash.insert(k, v_cstr.as_ptr());
+                    unsafe { hash.insert(k.as_bytes(), v_cstr.as_ptr() as *mut std::ffi::c_void); }
                 }
                 unsafe { hash.as_mut_ptr() }
             }
@@ -220,13 +220,13 @@ pub fn keywords_differ(
 
         let hash_b = match b {
             Some(kw) => {
-                let mut hash = apr::hash::Hash::<&str, *const std::ffi::c_char>::new(pool);
+                let mut hash = apr::hash::Hash::new(pool);
                 let c_strings: Vec<_> = kw
                     .iter()
                     .map(|(k, v)| (k.as_str(), std::ffi::CString::new(v.as_str()).unwrap()))
                     .collect();
                 for ((k, _), (_, v_cstr)) in kw.iter().zip(c_strings.iter()) {
-                    hash.insert(k, v_cstr.as_ptr());
+                    unsafe { hash.insert(k.as_bytes(), v_cstr.as_ptr() as *mut std::ffi::c_void); }
                 }
                 unsafe { hash.as_mut_ptr() }
             }
@@ -275,9 +275,9 @@ pub fn stream_translated(
                         )
                     })
                     .collect();
-                let mut hash = apr::hash::Hash::<&str, *const std::ffi::c_char>::new(pool);
+                let mut hash = apr::hash::Hash::new(pool);
                 for ((k, _), (_, v_cstr)) in kw.iter().zip(c_strings.iter()) {
-                    hash.insert(k, v_cstr.as_ptr());
+                    unsafe { hash.insert(k.as_bytes(), v_cstr.as_ptr() as *mut std::ffi::c_void); }
                 }
                 unsafe { hash.as_mut_ptr() }
             }
@@ -331,9 +331,9 @@ pub fn stream_translated_to_normal_form(
                         )
                     })
                     .collect();
-                let mut hash = apr::hash::Hash::<&str, *const std::ffi::c_char>::new(pool);
+                let mut hash = apr::hash::Hash::new(pool);
                 for ((k, _), (_, v_cstr)) in kw.iter().zip(c_strings.iter()) {
-                    hash.insert(k, v_cstr.as_ptr());
+                    unsafe { hash.insert(k.as_bytes(), v_cstr.as_ptr() as *mut std::ffi::c_void); }
                 }
                 unsafe { hash.as_mut_ptr() }
             }
@@ -392,9 +392,9 @@ pub fn translate_stream(
                         )
                     })
                     .collect();
-                let mut hash = apr::hash::Hash::<&str, *const std::ffi::c_char>::new(pool);
+                let mut hash = apr::hash::Hash::new(pool);
                 for ((k, _), (_, v_cstr)) in kw.iter().zip(c_strings.iter()) {
-                    hash.insert(k, v_cstr.as_ptr());
+                    unsafe { hash.insert(k.as_bytes(), v_cstr.as_ptr() as *mut std::ffi::c_void); }
                 }
                 unsafe { hash.as_mut_ptr() }
             }

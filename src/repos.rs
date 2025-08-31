@@ -81,9 +81,9 @@ impl Repos {
                 .iter()
                 .map(|(k, v)| (k.as_bytes(), v.as_bytes()))
                 .collect();
-            let mut hash = apr::hash::Hash::<&[u8], *const u8>::new(&pool);
+            let mut hash = apr::hash::Hash::new(&pool);
             for (k, v) in byte_pairs.iter() {
-                hash.insert(k, v.as_ptr());
+                unsafe { hash.insert(k, v.as_ptr() as *mut std::ffi::c_void); }
             }
             unsafe { hash.as_mut_ptr() }
         } else {
@@ -96,9 +96,9 @@ impl Repos {
                 .iter()
                 .map(|(k, v)| (k.as_bytes(), v.as_bytes()))
                 .collect();
-            let mut hash = apr::hash::Hash::<&[u8], *const u8>::new(&pool);
+            let mut hash = apr::hash::Hash::new(&pool);
             for (k, v) in byte_pairs.iter() {
-                hash.insert(k, v.as_ptr());
+                unsafe { hash.insert(k, v.as_ptr() as *mut std::ffi::c_void); }
             }
             unsafe { hash.as_mut_ptr() }
         } else {
@@ -154,10 +154,10 @@ impl Repos {
             )
         };
         Error::from_raw(ret)?;
-        let capabilities_hash = apr::hash::Hash::<&str, &str>::from_ptr(capabilities);
+        let capabilities_hash = unsafe { apr::hash::Hash::from_ptr(capabilities) };
         Ok(capabilities_hash
-            .keys(&pool)
-            .map(|k| String::from_utf8_lossy(k).to_string())
+            .iter()
+            .map(|(k, _)| String::from_utf8_lossy(k).to_string())
             .collect::<std::collections::HashSet<String>>())
     }
 
@@ -183,7 +183,7 @@ impl Repos {
             .iter()
             .map(|c| std::ffi::CString::new(*c).unwrap())
             .collect::<Vec<_>>();
-        let mut capabilities_array = apr::tables::ArrayHeader::<*const i8>::new(&pool);
+        let mut capabilities_array = apr::tables::TypedArray::<*const i8>::new(&pool, capabilities.len() as i32);
         for cap in capabilities.iter() {
             capabilities_array.push(cap.as_ptr());
         }
@@ -497,7 +497,7 @@ pub fn freeze(
         .map(|p| std::ffi::CString::new(*p).unwrap())
         .collect::<Vec<_>>();
     let pool = apr::Pool::new();
-    let mut paths_array = apr::tables::ArrayHeader::<*const i8>::new(&pool);
+    let mut paths_array = apr::tables::TypedArray::<*const i8>::new(&pool, paths.len() as i32);
     for path in paths.iter() {
         paths_array.push(path.as_ptr());
     }

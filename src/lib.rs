@@ -108,16 +108,6 @@ impl From<Revnum> for u64 {
     }
 }
 
-impl apr::hash::IntoHashKey for &Revnum {
-    fn into_hash_key(&self) -> &[u8] {
-        unsafe {
-            std::slice::from_raw_parts(
-                &self.0 as *const _ as *const u8,
-                std::mem::size_of::<subversion_sys::svn_revnum_t>(),
-            )
-        }
-    }
-}
 
 impl Revnum {
     pub fn from_raw(raw: subversion_sys::svn_revnum_t) -> Option<Self> {
@@ -1461,46 +1451,25 @@ pub fn checksum<'pool>(
     }
 }
 
-/// Zero-cost wrapper for SVN string that can be used with APR hash tables
-#[repr(transparent)]
-pub struct SvnString(subversion_sys::svn_string_t);
-
-impl std::fmt::Debug for SvnString {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SvnString")
-            .field("data", &self.to_str_lossy())
-            .field("len", &self.0.len)
-            .finish()
+/// Helper functions for working with svn_string_t directly
+mod svn_string_helpers {
+    use subversion_sys::svn_string_t;
+    
+    /// Get the data from an svn_string_t as bytes
+    pub fn as_bytes(s: &svn_string_t) -> &[u8] {
+        if s.data.is_null() || s.len == 0 {
+            &[]
+        } else {
+            unsafe { std::slice::from_raw_parts(s.data as *const u8, s.len) }
+        }
+    }
+    
+    /// Get the data from an svn_string_t as a Vec<u8>
+    pub fn to_vec(s: &svn_string_t) -> Vec<u8> {
+        as_bytes(s).to_vec()
     }
 }
 
-impl SvnString {
-    /// Get the data as bytes
-    pub fn as_bytes(&self) -> &[u8] {
-        unsafe { std::slice::from_raw_parts(self.0.data as *const u8, self.0.len) }
-    }
+// Re-export the helper functions
+pub use svn_string_helpers::*;
 
-    /// Get the data as a string
-    pub fn to_str(&self) -> Result<&str, std::str::Utf8Error> {
-        std::str::from_utf8(self.as_bytes())
-    }
-
-    /// Get the data as a string (lossy conversion)
-    pub fn to_str_lossy(&self) -> std::borrow::Cow<str> {
-        String::from_utf8_lossy(self.as_bytes())
-    }
-
-    /// Convert to Vec<u8>
-    pub fn to_vec(&self) -> Vec<u8> {
-        self.as_bytes().to_vec()
-    }
-
-    /// Get the raw pointer to the svn_string_t
-    pub fn as_ptr(&self) -> *const subversion_sys::svn_string_t {
-        &self.0 as *const _
-    }
-}
-
-// SvnString can be used directly with the new simplified APR hash API
-// The Hash<K, V> type uses lifetimes to ensure values outlive the hash
-// The APR crate provides blanket implementations of FromNullablePtr for &T and Option<&T>
