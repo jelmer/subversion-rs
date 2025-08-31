@@ -68,9 +68,9 @@ where
         let merge_options = if options.diff_options.is_empty() {
             ptr::null()
         } else {
-            let mut arr = apr::tables::ArrayHeader::<*const std::ffi::c_char>::new(&pool);
+            let mut arr = apr::tables::ArrayHeader::<*const std::ffi::c_char>::new(pool);
             for opt in &options.diff_options {
-                arr.push(apr::strings::pstrdup_raw(opt, &pool)? as *const _);
+                arr.push(apr::strings::pstrdup_raw(opt, pool)? as *const _);
             }
             arr.as_ptr()
         };
@@ -136,7 +136,7 @@ where
         let ranges_array = if let Some(ranges) = ranges_to_merge {
             let mut arr =
                 apr::tables::ArrayHeader::<*mut subversion_sys::svn_opt_revision_range_t>::new(
-                    &pool,
+                    pool,
                 );
             for range in ranges {
                 let range_ptr: *mut subversion_sys::svn_opt_revision_range_t = pool.calloc();
@@ -153,9 +153,9 @@ where
         let merge_options = if options.diff_options.is_empty() {
             ptr::null()
         } else {
-            let mut arr = apr::tables::ArrayHeader::<*const std::ffi::c_char>::new(&pool);
+            let mut arr = apr::tables::ArrayHeader::<*const std::ffi::c_char>::new(pool);
             for opt in &options.diff_options {
-                arr.push(apr::strings::pstrdup_raw(opt, &pool)? as *const _);
+                arr.push(apr::strings::pstrdup_raw(opt, pool)? as *const _);
             }
             arr.as_ptr()
         };

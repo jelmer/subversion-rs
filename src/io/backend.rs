@@ -109,6 +109,12 @@ pub struct BufferBackend {
     write_pos: usize,
 }
 
+impl Default for BufferBackend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BufferBackend {
     pub fn new() -> Self {
         Self {

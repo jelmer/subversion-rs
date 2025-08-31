@@ -97,6 +97,12 @@ impl Drop for StringBuf {
     }
 }
 
+impl Default for StringBuf {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl StringBuf {
     /// Create an empty string buffer
     pub fn new() -> Self {
@@ -125,7 +131,7 @@ impl StringBuf {
     pub fn as_bytes(&self) -> &[u8] {
         unsafe {
             let stringbuf = &*self.ptr;
-            std::slice::from_raw_parts(stringbuf.data as *const u8, stringbuf.len as usize)
+            std::slice::from_raw_parts(stringbuf.data as *const u8, stringbuf.len)
         }
     }
 
@@ -136,7 +142,7 @@ impl StringBuf {
 
     /// Get the length of the string buffer
     pub fn len(&self) -> usize {
-        unsafe { (*self.ptr).len as usize }
+        unsafe { (*self.ptr).len }
     }
 
     /// Check if the string buffer is empty
@@ -759,7 +765,7 @@ impl Stream {
                     formatted.push('%');
                 } else {
                     // Skip format specifier characters
-                    while let Some(spec_char) = chars.next() {
+                    for spec_char in chars.by_ref() {
                         if spec_char.is_alphabetic() {
                             if let Some(arg) = arg_iter.next() {
                                 formatted.push_str(&arg.to_string());
@@ -1024,10 +1030,7 @@ impl std::io::Write for Stream {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         match self.write(buf) {
             Ok(_) => Ok(buf.len()),
-            Err(e) => Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            )),
+            Err(e) => Err(std::io::Error::other(e.to_string())),
         }
     }
 
@@ -1040,10 +1043,7 @@ impl std::io::Read for Stream {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         match self.read(buf) {
             Ok(bytes_read) => Ok(bytes_read),
-            Err(e) => Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            )),
+            Err(e) => Err(std::io::Error::other(e.to_string())),
         }
     }
 }
@@ -1671,6 +1671,54 @@ pub fn stream_contents_same(stream1: &mut Stream, stream2: &mut Stream) -> Resul
     Ok(same != 0)
 }
 
+pub fn string_from_stream(stream: &mut Stream) -> Result<String, Error> {
+    let mut str = std::ptr::null_mut();
+    let pool = apr::pool::Pool::new();
+    let err = unsafe {
+        subversion_sys::svn_string_from_stream(
+            &mut str,
+            stream.ptr,
+            pool.as_mut_ptr(),
+            apr::pool::Pool::new().as_mut_ptr(),
+        )
+    };
+    Error::from_raw(err)?;
+    let data = (unsafe { (*str).data }) as *const i8;
+    let len = unsafe { (*str).len };
+    Ok(unsafe {
+        std::str::from_utf8(std::slice::from_raw_parts(data as *const u8, len))
+            .unwrap()
+            .to_string()
+    })
+}
+
+pub fn remove_dir(
+    path: &std::path::Path,
+    ignore_enoent: bool,
+    cancel_func: Option<&impl Fn() -> Result<(), Error>>,
+) -> Result<(), Error> {
+    let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
+    let err = unsafe {
+        subversion_sys::svn_io_remove_dir2(
+            path.as_ptr(),
+            ignore_enoent as i32,
+            if cancel_func.is_some() {
+                Some(crate::wrap_cancel_func)
+            } else {
+                None
+            },
+            if let Some(cancel_func) = cancel_func {
+                &cancel_func as *const _ as *mut std::ffi::c_void
+            } else {
+                std::ptr::null_mut()
+            },
+            apr::pool::Pool::new().as_mut_ptr(),
+        )
+    };
+    Error::from_raw(err)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1843,7 +1891,7 @@ mod tests {
         let mut stringbuf = StringBuf::new();
         let mut stream = Stream::from_stringbuf(&mut stringbuf);
 
-        write!(stream, "Hello {}", "world").unwrap();
+        write!(stream, "Hello world").unwrap();
         stream.flush().unwrap();
 
         assert!(stringbuf.to_string().contains("Hello world"));
@@ -2011,52 +2059,4 @@ mod tests {
         assert_eq!(n, 15);
         assert_eq!(&buf, b"Write test data");
     }
-}
-
-pub fn string_from_stream(stream: &mut Stream) -> Result<String, Error> {
-    let mut str = std::ptr::null_mut();
-    let pool = apr::pool::Pool::new();
-    let err = unsafe {
-        subversion_sys::svn_string_from_stream(
-            &mut str,
-            stream.ptr,
-            pool.as_mut_ptr(),
-            apr::pool::Pool::new().as_mut_ptr(),
-        )
-    };
-    Error::from_raw(err)?;
-    let data = (unsafe { (*str).data }) as *const i8;
-    let len = unsafe { (*str).len };
-    Ok(unsafe {
-        std::str::from_utf8(std::slice::from_raw_parts(data as *const u8, len))
-            .unwrap()
-            .to_string()
-    })
-}
-
-pub fn remove_dir(
-    path: &std::path::Path,
-    ignore_enoent: bool,
-    cancel_func: Option<&impl Fn() -> Result<(), Error>>,
-) -> Result<(), Error> {
-    let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
-    let err = unsafe {
-        subversion_sys::svn_io_remove_dir2(
-            path.as_ptr(),
-            ignore_enoent as i32,
-            if cancel_func.is_some() {
-                Some(crate::wrap_cancel_func)
-            } else {
-                None
-            },
-            if let Some(cancel_func) = cancel_func {
-                &cancel_func as *const _ as *mut std::ffi::c_void
-            } else {
-                std::ptr::null_mut()
-            },
-            apr::pool::Pool::new().as_mut_ptr(),
-        )
-    };
-    Error::from_raw(err)?;
-    Ok(())
 }
