@@ -108,7 +108,6 @@ impl From<Revnum> for u64 {
     }
 }
 
-
 impl Revnum {
     pub fn from_raw(raw: subversion_sys::svn_revnum_t) -> Option<Self> {
         if raw < 0 {
@@ -1096,9 +1095,12 @@ pub(crate) extern "C" fn wrap_log_entry_receiver(
     log_entry: *mut subversion_sys::svn_log_entry_t,
     _pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
-    eprintln!("wrap_log_entry_receiver called with baton={:p}, log_entry={:p}", baton, log_entry);
+    eprintln!(
+        "wrap_log_entry_receiver called with baton={:p}, log_entry={:p}",
+        baton, log_entry
+    );
     unsafe {
-        // Use single dereference pattern like commit callback: &mut *(baton as *mut &mut dyn FnMut(...))  
+        // Use single dereference pattern like commit callback: &mut *(baton as *mut &mut dyn FnMut(...))
         eprintln!("  Casting baton to single-boxed callback");
         let callback = &mut *(baton as *mut &mut dyn FnMut(&LogEntry) -> Result<(), Error>);
         eprintln!("  Creating LogEntry from raw");
@@ -1460,7 +1462,7 @@ pub fn checksum<'pool>(
 /// Helper functions for working with svn_string_t directly
 mod svn_string_helpers {
     use subversion_sys::svn_string_t;
-    
+
     /// Get the data from an svn_string_t as bytes
     pub fn as_bytes(s: &svn_string_t) -> &[u8] {
         if s.data.is_null() || s.len == 0 {
@@ -1469,7 +1471,7 @@ mod svn_string_helpers {
             unsafe { std::slice::from_raw_parts(s.data as *const u8, s.len) }
         }
     }
-    
+
     /// Get the data from an svn_string_t as a Vec<u8>
     pub fn to_vec(s: &svn_string_t) -> Vec<u8> {
         as_bytes(s).to_vec()
@@ -1478,4 +1480,3 @@ mod svn_string_helpers {
 
 // Re-export the helper functions
 pub use svn_string_helpers::*;
-

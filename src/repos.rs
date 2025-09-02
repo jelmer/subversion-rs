@@ -83,7 +83,9 @@ impl Repos {
                 .collect();
             let mut hash = apr::hash::Hash::new(&pool);
             for (k, v) in byte_pairs.iter() {
-                unsafe { hash.insert(k, v.as_ptr() as *mut std::ffi::c_void); }
+                unsafe {
+                    hash.insert(k, v.as_ptr() as *mut std::ffi::c_void);
+                }
             }
             unsafe { hash.as_mut_ptr() }
         } else {
@@ -98,7 +100,9 @@ impl Repos {
                 .collect();
             let mut hash = apr::hash::Hash::new(&pool);
             for (k, v) in byte_pairs.iter() {
-                unsafe { hash.insert(k, v.as_ptr() as *mut std::ffi::c_void); }
+                unsafe {
+                    hash.insert(k, v.as_ptr() as *mut std::ffi::c_void);
+                }
             }
             unsafe { hash.as_mut_ptr() }
         } else {
@@ -183,7 +187,8 @@ impl Repos {
             .iter()
             .map(|c| std::ffi::CString::new(*c).unwrap())
             .collect::<Vec<_>>();
-        let mut capabilities_array = apr::tables::TypedArray::<*const i8>::new(&pool, capabilities.len() as i32);
+        let mut capabilities_array =
+            apr::tables::TypedArray::<*const i8>::new(&pool, capabilities.len() as i32);
         for cap in capabilities.iter() {
             capabilities_array.push(cap.as_ptr());
         }

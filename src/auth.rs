@@ -103,25 +103,38 @@ impl AuthBaton {
     pub fn set(&mut self, setting: AuthSetting) -> Result<(), Error> {
         match setting {
             AuthSetting::Username(value) => self.set_string_parameter("username", value),
-            AuthSetting::DefaultUsername(value) => self.set_string_parameter("svn:auth:username", value),
-            AuthSetting::SslServerTrustFile(value) => self.set_string_parameter("servers:global:ssl-trust-default-ca", value),
-            AuthSetting::SslClientCertFile(value) => self.set_string_parameter("servers:global:ssl-client-cert-file", value),
-            AuthSetting::SslClientCertPassword(value) => self.set_string_parameter("servers:global:ssl-client-cert-password", value),
+            AuthSetting::DefaultUsername(value) => {
+                self.set_string_parameter("svn:auth:username", value)
+            }
+            AuthSetting::SslServerTrustFile(value) => {
+                self.set_string_parameter("servers:global:ssl-trust-default-ca", value)
+            }
+            AuthSetting::SslClientCertFile(value) => {
+                self.set_string_parameter("servers:global:ssl-client-cert-file", value)
+            }
+            AuthSetting::SslClientCertPassword(value) => {
+                self.set_string_parameter("servers:global:ssl-client-cert-password", value)
+            }
             AuthSetting::ConfigDir(value) => self.set_string_parameter("config-dir", value),
             AuthSetting::ServerGroup(value) => self.set_string_parameter("servers:group", value),
-            AuthSetting::ConfigCategoryServers(value) => self.set_string_parameter("config:servers", value),
+            AuthSetting::ConfigCategoryServers(value) => {
+                self.set_string_parameter("config:servers", value)
+            }
         }
     }
 
     fn set_string_parameter(&mut self, param_name: &str, param_value: &str) -> Result<(), Error> {
         // Store the value in the auth_baton's pool to ensure it persists
         let persistent_value = apr::strings::pstrdup(param_value, &self.pool)?;
-        
+
         // Use the existing set_parameter method
         unsafe {
-            self.set_parameter(param_name, persistent_value.as_ptr() as *const std::ffi::c_void);
+            self.set_parameter(
+                param_name,
+                persistent_value.as_ptr() as *const std::ffi::c_void,
+            );
         }
-        
+
         Ok(())
     }
 
@@ -817,7 +830,7 @@ pub fn get_platform_specific_client_providers() -> Result<Vec<AuthProvider>, Err
     Error::from_raw(err)?;
     let providers = unsafe {
         apr::tables::TypedArray::<*mut subversion_sys::svn_auth_provider_object_t>::from_ptr(
-            providers
+            providers,
         )
     };
     Ok(providers

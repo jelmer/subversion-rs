@@ -578,7 +578,8 @@ pub fn match_ignore_list(path: &str, patterns: &[&str]) -> Result<bool, crate::E
 
     with_tmp_pool(|pool| {
         // Create APR array of patterns
-        let mut patterns_array = apr::tables::TypedArray::<*const i8>::new(pool, patterns.len() as i32);
+        let mut patterns_array =
+            apr::tables::TypedArray::<*const i8>::new(pool, patterns.len() as i32);
         for pattern in patterns {
             let pattern_cstr = std::ffi::CString::new(*pattern)?;
             patterns_array.push(pattern_cstr.as_ptr());

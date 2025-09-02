@@ -239,7 +239,7 @@ impl ConflictChoice {
             ConflictChoice::Merged => 6,     // svn_wc_conflict_choose_merged
         }
     }
-    
+
     /// Convert to client conflict option ID for text conflicts
     pub fn to_text_option_id(&self) -> subversion_sys::svn_client_conflict_option_id_t {
         match self {
@@ -253,7 +253,7 @@ impl ConflictChoice {
             ConflictChoice::Merged => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_merged_text,
         }
     }
-    
+
     /// Convert to client conflict option ID for tree conflicts
     pub fn to_tree_option_id(&self) -> subversion_sys::svn_client_conflict_option_id_t {
         match self {

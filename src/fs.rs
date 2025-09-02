@@ -228,7 +228,8 @@ impl Fs {
             return Ok(std::collections::HashMap::new());
         }
 
-        let revprops = unsafe { apr::hash::TypedHash::<subversion_sys::svn_string_t>::from_ptr(props) };
+        let revprops =
+            unsafe { apr::hash::TypedHash::<subversion_sys::svn_string_t>::from_ptr(props) };
 
         let revprops = revprops
             .iter()
@@ -465,7 +466,9 @@ impl Root {
 
             let mut result = std::collections::HashMap::new();
             if !props.is_null() {
-                let hash = unsafe { apr::hash::TypedHash::<subversion_sys::svn_string_t>::from_ptr(props) };
+                let hash = unsafe {
+                    apr::hash::TypedHash::<subversion_sys::svn_string_t>::from_ptr(props)
+                };
                 for (k, v) in hash.iter() {
                     let key = String::from_utf8_lossy(k).into_owned();
                     let value = crate::svn_string_helpers::to_vec(&v);
@@ -489,12 +492,11 @@ impl Root {
 
             let mut result = std::collections::HashMap::new();
             if !changed_paths.is_null() {
-                let hash = unsafe {
-                    apr::hash::Hash::from_ptr(changed_paths)
-                };
+                let hash = unsafe { apr::hash::Hash::from_ptr(changed_paths) };
                 for (k, v) in hash.iter() {
                     let path = String::from_utf8_lossy(k).into_owned();
-                    let change = FsPathChange::from_raw(v as *mut subversion_sys::svn_fs_path_change2_t);
+                    let change =
+                        FsPathChange::from_raw(v as *mut subversion_sys::svn_fs_path_change2_t);
                     result.insert(path, change);
                 }
             }
@@ -547,17 +549,12 @@ impl Root {
         })
     }
     /// Check if file contents have changed between two paths
-    pub fn contents_changed(
-        &self,
-        path1: &str,
-        root2: &Root,
-        path2: &str,
-    ) -> Result<bool, Error> {
+    pub fn contents_changed(&self, path1: &str, root2: &Root, path2: &str) -> Result<bool, Error> {
         with_tmp_pool(|pool| unsafe {
             let path1_c = std::ffi::CString::new(path1)?;
             let path2_c = std::ffi::CString::new(path2)?;
             let mut changed: subversion_sys::svn_boolean_t = 0;
-            
+
             let err = subversion_sys::svn_fs_contents_changed(
                 &mut changed,
                 self.ptr,
@@ -567,23 +564,18 @@ impl Root {
                 pool.as_mut_ptr(),
             );
             svn_result(err)?;
-            
+
             Ok(changed != 0)
         })
     }
-    
+
     /// Check if properties have changed between two paths
-    pub fn props_changed(
-        &self,
-        path1: &str,
-        root2: &Root,
-        path2: &str,
-    ) -> Result<bool, Error> {
+    pub fn props_changed(&self, path1: &str, root2: &Root, path2: &str) -> Result<bool, Error> {
         with_tmp_pool(|pool| unsafe {
             let path1_c = std::ffi::CString::new(path1)?;
             let path2_c = std::ffi::CString::new(path2)?;
             let mut changed: subversion_sys::svn_boolean_t = 0;
-            
+
             let err = subversion_sys::svn_fs_props_changed(
                 &mut changed,
                 self.ptr,
@@ -593,17 +585,17 @@ impl Root {
                 pool.as_mut_ptr(),
             );
             svn_result(err)?;
-            
+
             Ok(changed != 0)
         })
     }
-    
+
     /// Get the history of a node
     pub fn node_history(&self, path: &str) -> Result<NodeHistory, Error> {
         with_tmp_pool(|pool| unsafe {
             let path_c = std::ffi::CString::new(path)?;
             let mut history: *mut subversion_sys::svn_fs_history_t = std::ptr::null_mut();
-            
+
             let err = subversion_sys::svn_fs_node_history(
                 &mut history,
                 self.ptr,
@@ -611,24 +603,24 @@ impl Root {
                 pool.as_mut_ptr(),
             );
             svn_result(err)?;
-            
+
             if history.is_null() {
                 return Err(Error::from_str("Failed to get node history"));
             }
-            
+
             Ok(NodeHistory {
                 ptr: history,
                 pool: apr::Pool::new(),
             })
         })
     }
-    
+
     /// Get the created revision of a path
     pub fn node_created_rev(&self, path: &str) -> Result<Revnum, Error> {
         with_tmp_pool(|pool| unsafe {
             let path_c = std::ffi::CString::new(path)?;
             let mut rev: subversion_sys::svn_revnum_t = -1;
-            
+
             let err = subversion_sys::svn_fs_node_created_rev(
                 &mut rev,
                 self.ptr,
@@ -636,17 +628,17 @@ impl Root {
                 pool.as_mut_ptr(),
             );
             svn_result(err)?;
-            
+
             Ok(Revnum(rev))
         })
     }
-    
+
     /// Get the node ID for a path
     pub fn node_id(&self, path: &str) -> Result<NodeId, Error> {
         with_tmp_pool(|pool| unsafe {
             let path_c = std::ffi::CString::new(path)?;
             let mut id: *const subversion_sys::svn_fs_id_t = std::ptr::null();
-            
+
             let err = subversion_sys::svn_fs_node_id(
                 &mut id,
                 self.ptr,
@@ -654,11 +646,11 @@ impl Root {
                 pool.as_mut_ptr(),
             );
             svn_result(err)?;
-            
+
             if id.is_null() {
                 return Err(Error::from_str("Failed to get node ID"));
             }
-            
+
             Ok(NodeId {
                 ptr: id,
                 _phantom: std::marker::PhantomData,
@@ -685,18 +677,18 @@ impl NodeHistory {
                 pool.as_mut_ptr(),
             );
             svn_result(err)?;
-            
+
             if prev_history.is_null() {
                 return Ok(None);
             }
-            
+
             // Update our pointer to the new history
             self.ptr = prev_history;
-            
+
             // Get the location info for this history entry
             let mut path: *const std::ffi::c_char = std::ptr::null();
             let mut rev: subversion_sys::svn_revnum_t = -1;
-            
+
             let err = subversion_sys::svn_fs_history_location(
                 &mut path,
                 &mut rev,
@@ -704,12 +696,14 @@ impl NodeHistory {
                 pool.as_mut_ptr(),
             );
             svn_result(err)?;
-            
+
             if path.is_null() {
                 return Ok(None);
             }
-            
-            let path_str = std::ffi::CStr::from_ptr(path).to_string_lossy().into_owned();
+
+            let path_str = std::ffi::CStr::from_ptr(path)
+                .to_string_lossy()
+                .into_owned();
             Ok(Some((path_str, Revnum(rev))))
         })
     }
@@ -736,7 +730,7 @@ impl NodeId {
             result == 0
         }
     }
-    
+
     /// Convert the node ID to a string representation
     pub fn to_string(&self, pool: &apr::Pool) -> Result<String, Error> {
         unsafe {
@@ -744,11 +738,11 @@ impl NodeId {
             if str_svn.is_null() {
                 return Err(Error::from_str("Failed to unparse node ID"));
             }
-            
+
             // svn_fs_unparse_id returns an svn_string_t
             let str_ptr = (*str_svn).data;
             let str_len = (*str_svn).len;
-            
+
             let bytes = std::slice::from_raw_parts(str_ptr as *const u8, str_len);
             let result = String::from_utf8_lossy(bytes).into_owned();
             Ok(result)
@@ -1422,110 +1416,136 @@ mod tests {
     fn test_node_history_and_content_comparison() {
         let dir = tempdir().unwrap();
         let fs_path = dir.path().join("test-fs");
-        
+
         // Create a filesystem
         let fs = Fs::create(&fs_path).unwrap();
-        
+
         // Create first revision with a file
         let mut txn = fs.begin_txn(Revnum(0)).unwrap();
         let mut txn_root = txn.root().unwrap();
-        
+
         // Create a file
         txn_root.make_file("test.txt").unwrap();
         let mut stream = txn_root.apply_text("test.txt").unwrap();
         use std::io::Write;
         write!(stream, "Initial content").unwrap();
         stream.close().unwrap();
-        
+
         // Commit the transaction
         let rev1 = txn.commit().unwrap();
-        
+
         // Create second revision modifying the file
         let mut txn2 = fs.begin_txn(rev1).unwrap();
         let mut txn_root2 = txn2.root().unwrap();
-        
+
         let mut stream2 = txn_root2.apply_text("test.txt").unwrap();
         write!(stream2, "Modified content").unwrap();
         stream2.close().unwrap();
-        
+
         let rev2 = txn2.commit().unwrap();
-        
+
         // Test content comparison
         let root1 = fs.revision_root(rev1).unwrap();
         let root2 = fs.revision_root(rev2).unwrap();
-        
+
         // Contents should be different between revisions
-        let contents_changed = root1.contents_changed("test.txt", &root2, "test.txt").unwrap();
-        assert!(contents_changed, "File contents should have changed between revisions");
-        
+        let contents_changed = root1
+            .contents_changed("test.txt", &root2, "test.txt")
+            .unwrap();
+        assert!(
+            contents_changed,
+            "File contents should have changed between revisions"
+        );
+
         // Contents should be the same when comparing the same revision
-        let contents_same = root1.contents_changed("test.txt", &root1, "test.txt").unwrap();
-        assert!(!contents_same, "File contents should be the same in the same revision");
-        
+        let contents_same = root1
+            .contents_changed("test.txt", &root1, "test.txt")
+            .unwrap();
+        assert!(
+            !contents_same,
+            "File contents should be the same in the same revision"
+        );
+
         // Test node history
         let _history = root2.node_history("test.txt").unwrap();
         // We should be able to get the history
         // Note: detailed history iteration would require more setup
-        
+
         // Test node created revision
         // Note: node_created_rev returns the revision where the current node instance was created
         let created_rev1 = root1.node_created_rev("test.txt").unwrap();
-        assert_eq!(created_rev1, rev1, "Node in rev1 should have been created in rev1");
-        
+        assert_eq!(
+            created_rev1, rev1,
+            "Node in rev1 should have been created in rev1"
+        );
+
         let created_rev2 = root2.node_created_rev("test.txt").unwrap();
-        assert_eq!(created_rev2, rev2, "Node in rev2 should have been created in rev2 (after modification)");
-        
+        assert_eq!(
+            created_rev2, rev2,
+            "Node in rev2 should have been created in rev2 (after modification)"
+        );
+
         // Test node ID
         let node_id1 = root1.node_id("test.txt").unwrap();
         let node_id2 = root2.node_id("test.txt").unwrap();
-        
+
         // Just verify we can get node IDs - comparison semantics may vary
         // based on SVN backend implementation
         let pool = apr::Pool::new();
         let _id1_str = node_id1.to_string(&pool).unwrap();
         let _id2_str = node_id2.to_string(&pool).unwrap();
-        
+
         // Cleanup handled by tempdir Drop
     }
-    
+
     #[test]
     fn test_props_changed() {
         let dir = tempdir().unwrap();
         let fs_path = dir.path().join("test-fs");
-        
+
         // Create a filesystem
         let fs = Fs::create(&fs_path).unwrap();
-        
+
         // Create first revision with a file
         let mut txn = fs.begin_txn(Revnum(0)).unwrap();
         let mut txn_root = txn.root().unwrap();
-        
+
         // Create a file with a property
         txn_root.make_file("test.txt").unwrap();
-        txn_root.change_node_prop("test.txt", "custom:prop", b"value1").unwrap();
-        
+        txn_root
+            .change_node_prop("test.txt", "custom:prop", b"value1")
+            .unwrap();
+
         let rev1 = txn.commit().unwrap();
-        
+
         // Create second revision changing the property
         let mut txn2 = fs.begin_txn(rev1).unwrap();
         let mut txn_root2 = txn2.root().unwrap();
-        
-        txn_root2.change_node_prop("test.txt", "custom:prop", b"value2").unwrap();
-        
+
+        txn_root2
+            .change_node_prop("test.txt", "custom:prop", b"value2")
+            .unwrap();
+
         let rev2 = txn2.commit().unwrap();
-        
+
         // Test property comparison
         let root1 = fs.revision_root(rev1).unwrap();
         let root2 = fs.revision_root(rev2).unwrap();
-        
+
         // Properties should be different between revisions
         let props_changed = root1.props_changed("test.txt", &root2, "test.txt").unwrap();
-        assert!(props_changed, "Properties should have changed between revisions");
-        
+        assert!(
+            props_changed,
+            "Properties should have changed between revisions"
+        );
+
         // Properties should be the same when comparing the same revision
         let props_same = root1.props_changed("test.txt", &root1, "test.txt").unwrap();
-        assert!(!props_same, "Properties should be the same in the same revision");
-        
+        assert!(
+            !props_same,
+            "Properties should be the same in the same revision"
+        );
+
         // Cleanup handled by tempdir Drop
     }
 }
