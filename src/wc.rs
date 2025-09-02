@@ -1138,6 +1138,41 @@ pub fn revision_status(
     })
 }
 
+// Note: Advanced conflict resolution functions like crop_tree and
+// mark_resolved require more complex FFI bindings that are not currently
+// implemented in the subversion-sys crate. The basic conflict detection
+// via Context.conflicted() is available and working.
+
+/// Conflict resolution choice
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i32)]
+pub enum ConflictChoice {
+    /// Postpone resolution
+    Postpone = subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_postpone,
+    /// Choose the base revision
+    Base = subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_base,
+    /// Choose the theirs revision
+    Theirs = subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_theirs_full,
+    /// Choose the mine/working revision
+    Mine = subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_mine_full,
+    /// Choose the theirs file for conflicts
+    TheirsConflict =
+        subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_theirs_conflict,
+    /// Choose the mine file for conflicts
+    MineConflict = subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_mine_conflict,
+    /// Merge the conflicted regions
+    Merged = subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_merged,
+}
+
+impl From<ConflictChoice> for subversion_sys::svn_wc_conflict_choice_t {
+    fn from(choice: ConflictChoice) -> Self {
+        choice as subversion_sys::svn_wc_conflict_choice_t
+    }
+}
+
+// Context methods for conflict resolution would go here when the
+// underlying FFI bindings are properly implemented
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1302,4 +1337,28 @@ mod tests {
         assert!(!is_wc_prop("svn:keywords"));
         assert!(!is_wc_prop("user:custom"));
     }
+
+    #[test]
+    fn test_conflict_choice_enum() {
+        // Test that ConflictChoice enum values map correctly
+        assert_eq!(
+            ConflictChoice::Postpone as i32,
+            subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_postpone
+        );
+        assert_eq!(
+            ConflictChoice::Base as i32,
+            subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_base
+        );
+        assert_eq!(
+            ConflictChoice::Theirs as i32,
+            subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_theirs_full
+        );
+        assert_eq!(
+            ConflictChoice::Mine as i32,
+            subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_mine_full
+        );
+    }
+
+    // Tests for conflict resolution functions would go here when
+    // the underlying FFI bindings are properly implemented
 }
