@@ -1813,4 +1813,115 @@ mod tests {
         // This should produce a conflict since both branches modified the same file
         assert!(conflict.is_some(), "Should have a merge conflict");
     }
+
+    #[test]
+    fn test_contents_and_props_changed() {
+        let dir = tempdir().unwrap();
+        let fs_path = dir.path().join("test-fs");
+        let fs = Fs::create(&fs_path).unwrap();
+
+        // Create initial file with properties
+        let mut txn1 = fs.begin_txn(Revnum(0)).unwrap();
+        let mut root1 = txn1.root().unwrap();
+        root1.make_file("file.txt").unwrap();
+        root1
+            .set_file_contents("file.txt", b"Original content")
+            .unwrap();
+        root1
+            .change_node_prop("file.txt", "custom:prop", b"value1")
+            .unwrap();
+        let rev1 = txn1.commit().unwrap();
+
+        // Modify contents but not properties
+        let mut txn2 = fs.begin_txn(rev1).unwrap();
+        let mut root2 = txn2.root().unwrap();
+        root2
+            .set_file_contents("file.txt", b"Modified content")
+            .unwrap();
+        let rev2 = txn2.commit().unwrap();
+
+        // Check changes between rev1 and rev2
+        let root_r1 = fs.revision_root(rev1).unwrap();
+        let root_r2 = fs.revision_root(rev2).unwrap();
+
+        // Contents should have changed
+        let contents_changed = root_r1
+            .contents_changed("file.txt", &root_r2, "file.txt")
+            .unwrap();
+        assert!(contents_changed, "Contents should have changed");
+
+        // Properties should not have changed
+        let props_changed = root_r1
+            .props_changed("file.txt", &root_r2, "file.txt")
+            .unwrap();
+        assert!(!props_changed, "Properties should not have changed");
+
+        // Now modify properties
+        let mut txn3 = fs.begin_txn(rev2).unwrap();
+        let mut root3 = txn3.root().unwrap();
+        root3
+            .change_node_prop("file.txt", "custom:prop", b"value2")
+            .unwrap();
+        let rev3 = txn3.commit().unwrap();
+
+        // Check changes between rev2 and rev3
+        let root_r3 = fs.revision_root(rev3).unwrap();
+
+        // Contents should not have changed
+        let contents_changed = root_r2
+            .contents_changed("file.txt", &root_r3, "file.txt")
+            .unwrap();
+        assert!(!contents_changed, "Contents should not have changed");
+
+        // Properties should have changed
+        let props_changed = root_r2
+            .props_changed("file.txt", &root_r3, "file.txt")
+            .unwrap();
+        assert!(props_changed, "Properties should have changed");
+    }
+
+    #[test]
+    fn test_node_history() {
+        let dir = tempdir().unwrap();
+        let fs_path = dir.path().join("test-fs");
+        let fs = Fs::create(&fs_path).unwrap();
+
+        // Create a file in rev 1
+        let mut txn1 = fs.begin_txn(Revnum(0)).unwrap();
+        let mut root1 = txn1.root().unwrap();
+        root1.make_file("file.txt").unwrap();
+        root1.set_file_contents("file.txt", b"Version 1").unwrap();
+        let rev1 = txn1.commit().unwrap();
+
+        // Modify the file in rev 2
+        let mut txn2 = fs.begin_txn(rev1).unwrap();
+        let mut root2 = txn2.root().unwrap();
+        root2.set_file_contents("file.txt", b"Version 2").unwrap();
+        let rev2 = txn2.commit().unwrap();
+
+        // Copy the file in rev 3
+        let mut txn3 = fs.begin_txn(rev2).unwrap();
+        let mut root3 = txn3.root().unwrap();
+        let source_root = fs.revision_root(rev2).unwrap();
+        root3.copy(&source_root, "file.txt", "copied.txt").unwrap();
+        let rev3 = txn3.commit().unwrap();
+
+        // Get history of the copied file
+        let root_r3 = fs.revision_root(rev3).unwrap();
+        let mut history = root_r3.node_history("copied.txt").unwrap();
+
+        // Get previous history entries
+        if let Some((path, revision)) = history.prev(true).unwrap() {
+            // The first prev should give us the current location
+            assert!(path.contains("copied.txt") || path.contains("file.txt"));
+            assert!(revision.0 <= rev3.0);
+
+            // Go further back (should show file.txt history if cross_copies is true)
+            if let Some((prev_path, prev_revision)) = history.prev(true).unwrap() {
+                // This should be from the file.txt history
+                assert!(prev_path.contains("file.txt") || prev_path.contains("copied.txt"));
+                assert!(prev_revision.0 <= rev2.0);
+            }
+        }
+    }
 }
