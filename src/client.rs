@@ -101,12 +101,8 @@ extern "C" fn wrap_proplist_receiver2(
             ) -> Result<(), Error>;
         let callback = &mut *(callback);
         let path: &str = std::ffi::CStr::from_ptr(path).to_str().unwrap();
-        let props =
-            unsafe { apr::hash::TypedHash::<subversion_sys::svn_string_t>::from_ptr(props) };
-        let props = props
-            .iter()
-            .map(|(k, v)| (String::from_utf8_lossy(k).to_string(), crate::to_vec(v)))
-            .collect::<HashMap<_, _>>();
+        let prop_hash = unsafe { crate::props::PropHash::from_ptr(props) };
+        let props = prop_hash.to_hashmap();
         let inherited_props = if inherited_props.is_null() {
             None
         } else {
@@ -3141,7 +3137,7 @@ impl Context {
     pub fn copy_builder<'a>(&'a mut self, dst_path: impl Into<String>) -> CopyBuilder<'a> {
         CopyBuilder::new(self, dst_path)
     }
-    
+
     /// Revert changes in the working copy
     ///
     /// This wraps svn_client_revert4 to revert local modifications.
@@ -3155,20 +3151,22 @@ impl Context {
         added_keep_local: bool,
     ) -> Result<(), Error> {
         let pool = Pool::new();
-        
+
         // Convert paths to APR array
         let mut paths_array = apr::tables::TypedArray::<*const i8>::new(&pool, paths.len() as i32);
-        let path_cstrings: Vec<_> = paths.iter()
+        let path_cstrings: Vec<_> = paths
+            .iter()
             .map(|p| std::ffi::CString::new(*p).unwrap())
             .collect();
         for cstring in &path_cstrings {
             paths_array.push(cstring.as_ptr());
         }
-        
+
         // Convert changelists if provided
         let changelists_array = if let Some(lists) = changelists {
             let mut array = apr::tables::TypedArray::<*const i8>::new(&pool, lists.len() as i32);
-            let list_cstrings: Vec<_> = lists.iter()
+            let list_cstrings: Vec<_> = lists
+                .iter()
                 .map(|l| std::ffi::CString::new(*l).unwrap())
                 .collect();
             for cstring in &list_cstrings {
@@ -3178,7 +3176,7 @@ impl Context {
         } else {
             std::ptr::null()
         };
-        
+
         let err = unsafe {
             subversion_sys::svn_client_revert4(
                 paths_array.as_ptr(),
@@ -3191,22 +3189,18 @@ impl Context {
                 pool.as_mut_ptr(),
             )
         };
-        
+
         Error::from_raw(err)?;
         Ok(())
     }
-    
+
     /// Mark conflicts as resolved
     ///
     /// This wraps svn_client_resolved to mark conflicts as resolved.
-    pub fn resolved(
-        &mut self,
-        path: &str,
-        recursive: bool,
-    ) -> Result<(), Error> {
+    pub fn resolved(&mut self, path: &str, recursive: bool) -> Result<(), Error> {
         let pool = Pool::new();
         let path = std::ffi::CString::new(path).unwrap();
-        
+
         let err = unsafe {
             subversion_sys::svn_client_resolved(
                 path.as_ptr(),
@@ -3215,11 +3209,11 @@ impl Context {
                 pool.as_mut_ptr(),
             )
         };
-        
+
         Error::from_raw(err)?;
         Ok(())
     }
-    
+
     /// Add paths to a changelist
     ///
     /// This wraps svn_client_add_to_changelist to add paths to a changelist.
@@ -3232,20 +3226,23 @@ impl Context {
     ) -> Result<(), Error> {
         let pool = Pool::new();
         let changelist = std::ffi::CString::new(changelist).unwrap();
-        
+
         // Convert targets to APR array
-        let mut targets_array = apr::tables::TypedArray::<*const i8>::new(&pool, targets.len() as i32);
-        let target_cstrings: Vec<_> = targets.iter()
+        let mut targets_array =
+            apr::tables::TypedArray::<*const i8>::new(&pool, targets.len() as i32);
+        let target_cstrings: Vec<_> = targets
+            .iter()
             .map(|t| std::ffi::CString::new(*t).unwrap())
             .collect();
         for cstring in &target_cstrings {
             targets_array.push(cstring.as_ptr());
         }
-        
+
         // Convert changelists if provided
         let changelists_array = if let Some(lists) = changelists {
             let mut array = apr::tables::TypedArray::<*const i8>::new(&pool, lists.len() as i32);
-            let list_cstrings: Vec<_> = lists.iter()
+            let list_cstrings: Vec<_> = lists
+                .iter()
                 .map(|l| std::ffi::CString::new(*l).unwrap())
                 .collect();
             for cstring in &list_cstrings {
@@ -3255,7 +3252,7 @@ impl Context {
         } else {
             std::ptr::null()
         };
-        
+
         let err = unsafe {
             subversion_sys::svn_client_add_to_changelist(
                 targets_array.as_ptr(),
@@ -3266,11 +3263,11 @@ impl Context {
                 pool.as_mut_ptr(),
             )
         };
-        
+
         Error::from_raw(err)?;
         Ok(())
     }
-    
+
     /// Remove paths from changelists
     ///
     /// This wraps svn_client_remove_from_changelists to remove paths from changelists.
@@ -3281,20 +3278,23 @@ impl Context {
         changelists: Option<&[&str]>,
     ) -> Result<(), Error> {
         let pool = Pool::new();
-        
+
         // Convert targets to APR array
-        let mut targets_array = apr::tables::TypedArray::<*const i8>::new(&pool, targets.len() as i32);
-        let target_cstrings: Vec<_> = targets.iter()
+        let mut targets_array =
+            apr::tables::TypedArray::<*const i8>::new(&pool, targets.len() as i32);
+        let target_cstrings: Vec<_> = targets
+            .iter()
             .map(|t| std::ffi::CString::new(*t).unwrap())
             .collect();
         for cstring in &target_cstrings {
             targets_array.push(cstring.as_ptr());
         }
-        
+
         // Convert changelists if provided
         let changelists_array = if let Some(lists) = changelists {
             let mut array = apr::tables::TypedArray::<*const i8>::new(&pool, lists.len() as i32);
-            let list_cstrings: Vec<_> = lists.iter()
+            let list_cstrings: Vec<_> = lists
+                .iter()
                 .map(|l| std::ffi::CString::new(*l).unwrap())
                 .collect();
             for cstring in &list_cstrings {
@@ -3304,7 +3304,7 @@ impl Context {
         } else {
             std::ptr::null()
         };
-        
+
         let err = unsafe {
             subversion_sys::svn_client_remove_from_changelists(
                 targets_array.as_ptr(),
@@ -3314,11 +3314,11 @@ impl Context {
                 pool.as_mut_ptr(),
             )
         };
-        
+
         Error::from_raw(err)?;
         Ok(())
     }
-    
+
     /// Merge changes between two sources
     ///
     /// This wraps svn_client_merge5 for merging between two sources.
@@ -3340,7 +3340,7 @@ impl Context {
         let source1 = std::ffi::CString::new(source1).unwrap();
         let source2 = std::ffi::CString::new(source2).unwrap();
         let target_wcpath = std::ffi::CString::new(target_wcpath).unwrap();
-        
+
         let err = unsafe {
             subversion_sys::svn_client_merge5(
                 source1.as_ptr(),
@@ -3360,13 +3360,13 @@ impl Context {
                 pool.as_mut_ptr(),
             )
         };
-        
+
         Error::from_raw(err)?;
         Ok(())
     }
-    
+
     /// Move (rename) a file or directory
-    /// 
+    ///
     /// This wraps svn_client_move7 to perform a versioned move operation.
     pub fn move_path(
         &mut self,
@@ -3379,18 +3379,20 @@ impl Context {
         revprop_table: Option<HashMap<String, Vec<u8>>>,
     ) -> Result<(), Error> {
         let pool = Pool::new();
-        
+
         // Convert source paths to APR array
-        let mut src_paths_array = apr::tables::TypedArray::<*const i8>::new(&pool, src_paths.len() as i32);
-        let src_cstrings: Vec<_> = src_paths.iter()
+        let mut src_paths_array =
+            apr::tables::TypedArray::<*const i8>::new(&pool, src_paths.len() as i32);
+        let src_cstrings: Vec<_> = src_paths
+            .iter()
             .map(|p| std::ffi::CString::new(*p).unwrap())
             .collect();
         for cstring in &src_cstrings {
             src_paths_array.push(cstring.as_ptr());
         }
-        
+
         let dst_path = std::ffi::CString::new(dst_path).unwrap();
-        
+
         // Convert revprop table if provided
         let mut revprop_hash = std::ptr::null_mut();
         if let Some(revprops) = revprop_table {
@@ -3399,14 +3401,17 @@ impl Context {
                 let key_cstring = std::ffi::CString::new(key).unwrap();
                 let svn_string = crate::string::BStr::from_bytes(&value, &pool);
                 unsafe {
-                    hash.insert(key_cstring.as_bytes(), svn_string.as_ptr() as *mut std::ffi::c_void);
+                    hash.insert(
+                        key_cstring.as_bytes(),
+                        svn_string.as_ptr() as *mut std::ffi::c_void,
+                    );
                 }
             }
             unsafe {
                 revprop_hash = hash.as_mut_ptr();
             }
         }
-        
+
         let err = unsafe {
             subversion_sys::svn_client_move7(
                 src_paths_array.as_ptr(),
@@ -3416,13 +3421,13 @@ impl Context {
                 allow_mixed_revisions as i32,
                 metadata_only as i32,
                 revprop_hash,
-                None, // commit_callback
+                None,                 // commit_callback
                 std::ptr::null_mut(), // commit_baton
                 self.ptr,
                 pool.as_mut_ptr(),
             )
         };
-        
+
         Error::from_raw(err)?;
         Ok(())
     }
@@ -4376,10 +4381,9 @@ mod tests {
             &[wc_path.to_str().unwrap()],
             &CommitOptions::default(),
             std::collections::HashMap::new(),
-            &mut |_info: &crate::CommitInfo| {
-                Ok(())
-            },
-        ).unwrap();
+            &mut |_info: &crate::CommitInfo| Ok(()),
+        )
+        .unwrap();
 
         // Now move the file
         let new_path = wc_path.join("renamed_file.txt");
@@ -4397,10 +4401,10 @@ mod tests {
 
         // Check that the new file exists
         assert!(new_path.exists());
-        
+
         // Check that the old file doesn't exist
         assert!(!test_file.exists());
-        
+
         // Check the content is preserved
         let content = std::fs::read(&new_path).unwrap();
         assert_eq!(content, b"Test content");
@@ -4436,19 +4440,20 @@ mod tests {
         // Create and commit a test file
         let test_file = wc_path.join("test_file.txt");
         std::fs::write(&test_file, b"Original content").unwrap();
-        
+
         ctx.add(&test_file, &AddOptions::default()).unwrap();
-        
+
         ctx.commit(
             &[wc_path.to_str().unwrap()],
             &CommitOptions::default(),
             std::collections::HashMap::new(),
             &mut |_info: &crate::CommitInfo| Ok(()),
-        ).unwrap();
+        )
+        .unwrap();
 
         // Modify the file
         std::fs::write(&test_file, b"Modified content").unwrap();
-        
+
         // Verify the file is modified
         assert_eq!(std::fs::read(&test_file).unwrap(), b"Modified content");
 
@@ -4456,7 +4461,7 @@ mod tests {
         let result = ctx.revert(
             &[test_file.to_str().unwrap()],
             Depth::Empty,
-            None, // changelists
+            None,  // changelists
             false, // clear_changelists
             false, // metadata_only
             false, // added_keep_local
@@ -4498,15 +4503,16 @@ mod tests {
         // Create a test file
         let test_file = wc_path.join("conflict_file.txt");
         std::fs::write(&test_file, b"Initial content").unwrap();
-        
+
         ctx.add(&test_file, &AddOptions::default()).unwrap();
-        
+
         ctx.commit(
             &[wc_path.to_str().unwrap()],
             &CommitOptions::default(),
             std::collections::HashMap::new(),
             &mut |_info: &crate::CommitInfo| Ok(()),
-        ).unwrap();
+        )
+        .unwrap();
 
         // Test the resolved function - it should not fail even without actual conflicts
         // (In a real scenario, this would be called after manually resolving conflicts)
