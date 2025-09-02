@@ -6,6 +6,15 @@ use std::collections::HashMap;
 use std::marker::PhantomData;
 use subversion_sys::svn_ra_session_t;
 
+/// Repository information struct
+#[derive(Debug, Clone)]
+pub struct RepositoryInfo {
+    pub uuid: String,
+    pub root_url: String,
+    pub latest_revision: Revnum,
+    pub session_url: String,
+}
+
 // Removed global vtable storage - using simpler approach
 
 /// Dirent information from RA
@@ -717,6 +726,15 @@ impl<'a> Session<'a> {
         Error::from_raw(err)?;
         Ok(crate::NodeKind::from(kind))
     }
+    
+    /// Check if a path exists in the repository at the given revision
+    /// 
+    /// This is a convenience method that uses check_path internally.
+    /// Returns true if the path exists (is a file or directory), false otherwise.
+    pub fn path_exists(&mut self, path: &str, rev: Revnum) -> Result<bool, Error> {
+        let kind = self.check_path(path, rev)?;
+        Ok(!matches!(kind, crate::NodeKind::None))
+    }
 
     pub fn do_status(
         &mut self,
@@ -784,6 +802,22 @@ impl<'a> Session<'a> {
             Ok(url.to_str().unwrap().to_string())
         })
     }
+    
+    /// Get comprehensive repository information
+    /// 
+    /// Returns a struct containing:
+    /// - Repository UUID
+    /// - Repository root URL
+    /// - Latest revision number
+    /// - Session URL
+    pub fn get_repository_info(&mut self) -> Result<RepositoryInfo, Error> {
+        Ok(RepositoryInfo {
+            uuid: self.get_uuid()?,
+            root_url: self.get_repos_root()?,
+            latest_revision: self.get_latest_revnum()?,
+            session_url: self.get_session_url()?,
+        })
+    }
 
     pub fn get_deleted_rev(
         &mut self,
@@ -822,6 +856,40 @@ impl<'a> Session<'a> {
         };
         Error::from_raw(err)?;
         Ok(has != 0)
+    }
+    
+    /// Get multiple files from the repository at once
+    /// 
+    /// This is more efficient than calling get_file() multiple times as it 
+    /// allows the RA layer to batch network operations.
+    pub fn get_files(
+        &mut self,
+        paths: &[&str],
+        rev: Revnum,
+    ) -> Result<Vec<(String, Vec<u8>, HashMap<String, Vec<u8>>)>, Error> {
+        let mut results = Vec::new();
+        
+        for path in paths {
+            let mut stream = crate::io::Stream::empty();
+            
+            let (_fetched_rev, props) = self.get_file(
+                path,
+                rev,
+                &mut stream,
+            )?;
+            
+            // Read the stream contents to a string, then convert to bytes
+            let content_str = crate::io::read_stream_to_string(&mut stream)?;
+            let contents = content_str.into_bytes();
+            
+            results.push((
+                path.to_string(),
+                contents,
+                props,
+            ));
+        }
+        
+        Ok(results)
     }
 
     pub fn diff(

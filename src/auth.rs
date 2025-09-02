@@ -17,6 +17,8 @@ pub struct AuthBaton {
     pool: apr::Pool,
     // Store parameter names to keep them alive for the lifetime of the baton
     parameter_names: std::collections::HashMap<String, std::ffi::CString>,
+    // Store providers to keep them alive for the lifetime of the baton
+    _providers: Vec<AuthProvider>,
 }
 unsafe impl Send for AuthBaton {}
 
@@ -201,14 +203,14 @@ impl AuthBaton {
         subversion_sys::svn_auth_set_parameter(self.ptr, name_ptr, value);
     }
 
-    pub fn open(providers: &[impl AsAuthProvider]) -> Result<Self, Error> {
+    pub fn open(providers: Vec<AuthProvider>) -> Result<Self, Error> {
         let pool = apr::pool::Pool::new();
         let mut baton = std::ptr::null_mut();
         unsafe {
             let mut provider_array = apr::tables::TypedArray::<
                 *const subversion_sys::svn_auth_provider_object_t,
             >::new(&pool, providers.len() as i32);
-            for provider in providers {
+            for provider in &providers {
                 provider_array.push(provider.as_auth_provider(&pool));
             }
             subversion_sys::svn_auth_open(&mut baton, provider_array.as_ptr(), pool.as_mut_ptr());
@@ -216,6 +218,7 @@ impl AuthBaton {
                 ptr: baton,
                 pool,
                 parameter_names: std::collections::HashMap::new(),
+                _providers: providers,
             })
         }
     }
@@ -889,14 +892,14 @@ mod tests {
             get_simple_provider(None::<&fn(&str) -> Result<bool, Error>>),
         ];
 
-        let baton = AuthBaton::open(&providers);
+        let baton = AuthBaton::open(providers);
         assert!(baton.is_ok());
     }
 
     #[test]
     fn test_auth_baton_parameter_safety() {
         let providers = vec![get_username_provider()];
-        let mut baton = AuthBaton::open(&providers).unwrap();
+        let mut baton = AuthBaton::open(providers).unwrap();
 
         // Test setting and getting a parameter
         let test_key = "test_param";

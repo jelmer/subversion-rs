@@ -1096,10 +1096,16 @@ pub(crate) extern "C" fn wrap_log_entry_receiver(
     log_entry: *mut subversion_sys::svn_log_entry_t,
     _pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
+    eprintln!("wrap_log_entry_receiver called with baton={:p}, log_entry={:p}", baton, log_entry);
     unsafe {
+        // Use single dereference pattern like commit callback: &mut *(baton as *mut &mut dyn FnMut(...))  
+        eprintln!("  Casting baton to single-boxed callback");
         let callback = &mut *(baton as *mut &mut dyn FnMut(&LogEntry) -> Result<(), Error>);
+        eprintln!("  Creating LogEntry from raw");
         let log_entry = LogEntry::from_raw(log_entry);
+        eprintln!("  Calling callback");
         let ret = callback(&log_entry);
+        eprintln!("  Callback returned, processing result");
         if let Err(mut err) = ret {
             err.as_mut_ptr()
         } else {
