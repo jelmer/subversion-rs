@@ -4100,6 +4100,75 @@ mod tests {
     }
 
     #[test]
+    fn test_move_path() {
+        let td = tempfile::tempdir().unwrap();
+        let repo_path = td.path().join("repo");
+        let wc_path = td.path().join("wc");
+
+        // Create a test repository
+        crate::repos::Repos::create(&repo_path).unwrap();
+
+        // Check out working copy
+        let mut ctx = Context::new().unwrap();
+        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        let url = crate::uri::Uri::new(&url_str).unwrap();
+
+        ctx.checkout(
+            url,
+            &wc_path,
+            &CheckoutOptions {
+                peg_revision: Revision::Head,
+                revision: Revision::Head,
+                depth: Depth::Infinity,
+                ignore_externals: false,
+                allow_unver_obstructions: false,
+            },
+        )
+        .unwrap();
+
+        // Create a test file
+        let test_file = wc_path.join("test_file.txt");
+        std::fs::write(&test_file, b"Test content").unwrap();
+
+        // Add the file
+        ctx.add(&test_file, &AddOptions::default()).unwrap();
+
+        // Commit the file
+        ctx.commit(
+            &[wc_path.to_str().unwrap()],
+            &CommitOptions::default(),
+            std::collections::HashMap::new(),
+            &mut |_info: &crate::CommitInfo| {
+                Ok(())
+            },
+        ).unwrap();
+
+        // Now move the file
+        let new_path = wc_path.join("renamed_file.txt");
+        let result = ctx.move_path(
+            &[test_file.to_str().unwrap()],
+            new_path.to_str().unwrap(),
+            false, // move_as_child
+            false, // make_parents
+            true,  // allow_mixed_revisions
+            false, // metadata_only
+            None,  // revprop_table
+        );
+
+        assert!(result.is_ok());
+
+        // Check that the new file exists
+        assert!(new_path.exists());
+        
+        // Check that the old file doesn't exist
+        assert!(!test_file.exists());
+        
+        // Check the content is preserved
+        let content = std::fs::read(&new_path).unwrap();
+        assert_eq!(content, b"Test content");
+    }
+
+    #[test]
     fn test_proplist_all() {
         let td = tempfile::tempdir().unwrap();
         let repo_path = td.path().join("repo");
