@@ -1301,20 +1301,8 @@ impl<'a> Session<'a> {
                     .as_mut()
                     .unwrap()
             };
-            let revprops = unsafe {
-                apr::hash::TypedHash::<subversion_sys::svn_string_t>::from_ptr(rev_props)
-            };
-
-            let pool = apr::pool::Pool::new();
-            let revprops = revprops
-                .iter()
-                .map(|(k, v)| {
-                    (
-                        std::str::from_utf8(k).unwrap().to_string(),
-                        crate::svn_string_helpers::to_vec(&v),
-                    )
-                })
-                .collect();
+            let prop_hash = unsafe { crate::props::PropHash::from_ptr(rev_props) };
+            let revprops = prop_hash.to_hashmap();
 
             match (baton.0)(Revnum::from_raw(revision).unwrap(), &revprops) {
                 Ok(mut e) => {
@@ -1358,20 +1346,8 @@ impl<'a> Session<'a> {
                 _pool: std::marker::PhantomData,
             };
 
-            let revprops = unsafe {
-                apr::hash::TypedHash::<subversion_sys::svn_string_t>::from_ptr(rev_props)
-            };
-
-            let pool = apr::pool::Pool::new();
-            let revprops = revprops
-                .iter()
-                .map(|(k, v)| {
-                    (
-                        std::str::from_utf8(k).unwrap().to_string(),
-                        crate::svn_string_helpers::to_vec(&v),
-                    )
-                })
-                .collect();
+            let prop_hash = unsafe { crate::props::PropHash::from_ptr(rev_props) };
+            let revprops = prop_hash.to_hashmap();
 
             match (baton.1)(Revnum::from_raw(revision).unwrap(), &mut editor, &revprops) {
                 Ok(_) => std::ptr::null_mut(),
@@ -1480,18 +1456,8 @@ impl<'a> Session<'a> {
             let rev_props_hash = if rev_props.is_null() {
                 HashMap::new()
             } else {
-                let hash = unsafe {
-                    apr::hash::TypedHash::<subversion_sys::svn_string_t>::from_ptr(rev_props)
-                };
-                let iter_pool = apr::pool::Pool::new();
-                hash.iter()
-                    .map(|(k, v)| {
-                        (
-                            String::from_utf8_lossy(k).into_owned(),
-                            crate::svn_string_helpers::to_vec(&v),
-                        )
-                    })
-                    .collect()
+                let prop_hash = unsafe { crate::props::PropHash::from_ptr(rev_props) };
+                prop_hash.to_hashmap()
             };
 
             // Convert prop_diffs array to HashMap

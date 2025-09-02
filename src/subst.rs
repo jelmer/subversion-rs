@@ -182,19 +182,8 @@ pub fn build_keywords(
             return Ok(HashMap::new());
         }
 
-        let hash = unsafe {
-            apr::hash::TypedHash::<subversion_sys::svn_string_t>::from_ptr(keywords_hash)
-        };
-        let mut result = HashMap::new();
-
-        for (key, value) in hash.iter() {
-            let key_string = String::from_utf8_lossy(key).into_owned();
-            let value_string =
-                String::from_utf8_lossy(crate::svn_string_helpers::as_bytes(&value)).into_owned();
-            result.insert(key_string, value_string);
-        }
-
-        Ok(result)
+        let prop_hash = unsafe { crate::props::PropHash::from_ptr(keywords_hash) };
+        Ok(prop_hash.to_string_hashmap())
     })
 }
 

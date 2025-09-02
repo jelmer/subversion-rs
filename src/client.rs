@@ -224,27 +224,16 @@ unsafe extern "C" fn blame_receiver_wrapper(
 
     // Extract revprops
     let revprops = if !rev_props.is_null() {
-        let props =
-            unsafe { apr::hash::TypedHash::<subversion_sys::svn_string_t>::from_ptr(rev_props) };
-        let pool = apr::Pool::from_raw(pool);
-        props
-            .iter()
-            .map(|(k, v)| (String::from_utf8_lossy(k).into_owned(), crate::to_vec(v)))
-            .collect()
+        let prop_hash = unsafe { crate::props::PropHash::from_ptr(rev_props) };
+        prop_hash.to_hashmap()
     } else {
         HashMap::new()
     };
 
     // Extract merged revprops
     let merged_revprops = if !merged_rev_props.is_null() {
-        let props = unsafe {
-            apr::hash::TypedHash::<subversion_sys::svn_string_t>::from_ptr(merged_rev_props)
-        };
-        let pool = apr::Pool::from_raw(pool);
-        props
-            .iter()
-            .map(|(k, v)| (String::from_utf8_lossy(k).into_owned(), crate::to_vec(v)))
-            .collect()
+        let prop_hash = unsafe { crate::props::PropHash::from_ptr(merged_rev_props) };
+        prop_hash.to_hashmap()
     } else {
         HashMap::new()
     };
@@ -1548,12 +1537,8 @@ impl Context {
                 apr::pool::Pool::new().as_mut_ptr(),
             );
             Error::from_raw(err)?;
-            let props =
-                unsafe { apr::hash::TypedHash::<subversion_sys::svn_string_t>::from_ptr(props) };
-            Ok(props
-                .iter()
-                .map(|(k, v)| (String::from_utf8_lossy(k).to_string(), crate::to_vec(v)))
-                .collect())
+            let prop_hash = unsafe { crate::props::PropHash::from_ptr(props) };
+            Ok(prop_hash.to_hashmap())
         }
     }
 
@@ -2000,16 +1985,8 @@ impl Context {
             }
 
             // Convert apr hash to Rust HashMap
-            // The hash values are svn_string_t structs (not pointers)
-            let hash =
-                unsafe { apr::hash::TypedHash::<subversion_sys::svn_string_t>::from_ptr(props) };
-            let mut result = std::collections::HashMap::new();
-            for (k, v) in hash.iter() {
-                let key = String::from_utf8_lossy(k).into_owned();
-                let value = crate::svn_string_helpers::to_vec(&v);
-                result.insert(key, value);
-            }
-            Ok(result)
+            let prop_hash = unsafe { crate::props::PropHash::from_ptr(props) };
+            Ok(prop_hash.to_hashmap())
         })
     }
 
@@ -2107,16 +2084,8 @@ impl Context {
                 let path_str = unsafe { std::ffi::CStr::from_ptr(path).to_str().unwrap() };
 
                 // Convert props hash
-                let hash = unsafe {
-                    apr::hash::TypedHash::<subversion_sys::svn_string_t>::from_ptr(props)
-                };
-                let mut prop_hash = std::collections::HashMap::new();
-                let pool = apr::Pool::new();
-                for (k, v) in hash.iter() {
-                    let key = String::from_utf8_lossy(k).into_owned();
-                    let value = crate::svn_string_helpers::to_vec(&v);
-                    prop_hash.insert(key, value);
-                }
+                let prop_hash_wrapper = unsafe { crate::props::PropHash::from_ptr(props) };
+                let prop_hash = prop_hash_wrapper.to_hashmap();
 
                 match receiver(path_str, prop_hash) {
                     Ok(()) => std::ptr::null_mut(),
@@ -3681,17 +3650,12 @@ impl Context {
             );
             Error::from_raw(err)?;
 
-            let mut result = std::collections::HashMap::new();
-            if !props_hash.is_null() {
-                let hash = unsafe {
-                    apr::hash::TypedHash::<subversion_sys::svn_string_t>::from_ptr(props_hash)
-                };
-                for (key, value) in hash.iter() {
-                    let bytes = crate::svn_string_helpers::to_vec(&value);
-                    let key_str = String::from_utf8_lossy(key).to_string();
-                    result.insert(key_str, bytes);
-                }
-            }
+            let result = if !props_hash.is_null() {
+                let prop_hash = unsafe { crate::props::PropHash::from_ptr(props_hash) };
+                prop_hash.to_hashmap()
+            } else {
+                std::collections::HashMap::new()
+            };
 
             Ok(result)
         }

@@ -228,18 +228,8 @@ impl Fs {
             return Ok(std::collections::HashMap::new());
         }
 
-        let revprops =
-            unsafe { apr::hash::TypedHash::<subversion_sys::svn_string_t>::from_ptr(props) };
-
-        let revprops = revprops
-            .iter()
-            .map(|(k, v)| {
-                (
-                    String::from_utf8_lossy(k).into_owned(),
-                    crate::svn_string_helpers::to_vec(&v),
-                )
-            })
-            .collect();
+        let prop_hash = unsafe { crate::props::PropHash::from_ptr(props) };
+        let revprops = prop_hash.to_hashmap();
 
         Ok(revprops)
     }
@@ -464,17 +454,12 @@ impl Root {
             );
             svn_result(err)?;
 
-            let mut result = std::collections::HashMap::new();
-            if !props.is_null() {
-                let hash = unsafe {
-                    apr::hash::TypedHash::<subversion_sys::svn_string_t>::from_ptr(props)
-                };
-                for (k, v) in hash.iter() {
-                    let key = String::from_utf8_lossy(k).into_owned();
-                    let value = crate::svn_string_helpers::to_vec(&v);
-                    result.insert(key, value);
-                }
-            }
+            let result = if !props.is_null() {
+                let prop_hash = unsafe { crate::props::PropHash::from_ptr(props) };
+                prop_hash.to_hashmap()
+            } else {
+                std::collections::HashMap::new()
+            };
             Ok(result)
         })
     }
