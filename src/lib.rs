@@ -16,6 +16,7 @@ pub mod auth;
 pub mod cache;
 #[cfg(feature = "client")]
 pub mod client;
+pub mod cmdline;
 pub mod config;
 #[cfg(feature = "client")]
 pub mod conflict;
@@ -31,6 +32,7 @@ pub mod iter;
 #[cfg(feature = "client")]
 pub mod merge;
 pub mod mergeinfo;
+pub mod nls;
 pub mod opt;
 pub mod props;
 #[cfg(feature = "ra")]
@@ -45,6 +47,7 @@ pub mod utf;
 pub mod version;
 #[cfg(feature = "wc")]
 pub mod wc;
+pub mod x509;
 pub mod xml;
 use bitflags::bitflags;
 use std::str::FromStr;
