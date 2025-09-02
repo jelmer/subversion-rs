@@ -6,6 +6,15 @@ use std::collections::HashMap;
 use std::marker::PhantomData;
 use subversion_sys::svn_ra_session_t;
 
+/// Repository information struct
+#[derive(Debug, Clone)]
+pub struct RepositoryInfo {
+    pub uuid: String,
+    pub root_url: String,
+    pub latest_revision: Revnum,
+    pub session_url: String,
+}
+
 // Removed global vtable storage - using simpler approach
 
 /// Dirent information from RA
@@ -177,6 +186,15 @@ impl<'a> Session<'a> {
         let mut session = std::ptr::null_mut();
         let uuid = uuid.map(|uuid| std::ffi::CString::new(uuid).unwrap());
 
+        // Create default callbacks if none provided - SVN requires valid callbacks
+        let mut default_callbacks;
+        let callbacks_ptr = if let Some(callbacks) = callbacks.as_mut() {
+            callbacks.as_mut_ptr()
+        } else {
+            default_callbacks = Callbacks::new()?;
+            default_callbacks.as_mut_ptr()
+        };
+
         let err = unsafe {
             subversion_sys::svn_ra_open5(
                 &mut session,
@@ -188,12 +206,7 @@ impl<'a> Session<'a> {
                 } else {
                     std::ptr::null()
                 },
-                if let Some(callbacks) = callbacks.as_mut() {
-                    callbacks.as_mut_ptr()
-                } else {
-                    // SVN requires callbacks - pass NULL and let SVN handle it
-                    std::ptr::null_mut()
-                },
+                callbacks_ptr,
                 std::ptr::null_mut(),
                 if let Some(config) = config.as_mut() {
                     config.as_mut_ptr()
@@ -711,6 +724,15 @@ impl<'a> Session<'a> {
         Ok(crate::NodeKind::from(kind))
     }
 
+    /// Check if a path exists in the repository at the given revision
+    ///
+    /// This is a convenience method that uses check_path internally.
+    /// Returns true if the path exists (is a file or directory), false otherwise.
+    pub fn path_exists(&mut self, path: &str, rev: Revnum) -> Result<bool, Error> {
+        let kind = self.check_path(path, rev)?;
+        Ok(!matches!(kind, crate::NodeKind::None))
+    }
+
     pub fn do_status(
         &mut self,
         status_target: &str,
@@ -778,6 +800,22 @@ impl<'a> Session<'a> {
         })
     }
 
+    /// Get comprehensive repository information
+    ///
+    /// Returns a struct containing:
+    /// - Repository UUID
+    /// - Repository root URL
+    /// - Latest revision number
+    /// - Session URL
+    pub fn get_repository_info(&mut self) -> Result<RepositoryInfo, Error> {
+        Ok(RepositoryInfo {
+            uuid: self.get_uuid()?,
+            root_url: self.get_repos_root()?,
+            latest_revision: self.get_latest_revnum()?,
+            session_url: self.get_session_url()?,
+        })
+    }
+
     pub fn get_deleted_rev(
         &mut self,
         path: &str,
@@ -815,6 +853,33 @@ impl<'a> Session<'a> {
         };
         Error::from_raw(err)?;
         Ok(has != 0)
+    }
+
+    /// Get multiple files from the repository at once
+    ///
+    /// This is more efficient than calling get_file() multiple times as it
+    /// allows the RA layer to batch network operations.
+    pub fn get_files(
+        &mut self,
+        paths: &[&str],
+        rev: Revnum,
+    ) -> Result<Vec<(String, Vec<u8>, HashMap<String, Vec<u8>>)>, Error> {
+        let mut results = Vec::new();
+
+        for path in paths {
+            // Use a StringBuf-backed stream to collect the file contents
+            let mut stringbuf = crate::io::StringBuf::new();
+            let mut stream = crate::io::Stream::from_stringbuf(&mut stringbuf);
+
+            let (_fetched_rev, props) = self.get_file(path, rev, &mut stream)?;
+
+            // Get contents from the stringbuf
+            let contents = stringbuf.as_bytes().to_vec();
+
+            results.push((path.to_string(), contents, props));
+        }
+
+        Ok(results)
     }
 
     pub fn diff(
@@ -1069,18 +1134,21 @@ impl<'a> Session<'a> {
         let pool = Pool::new();
         let scratch_pool = std::rc::Rc::new(Pool::new());
         let mut hash = apr::hash::Hash::new(&scratch_pool);
-        // Convert paths to proper C strings
+        // Convert paths and tokens to proper C strings and keep them alive
         let path_cstrings: Vec<std::ffi::CString> = path_tokens
             .keys()
             .map(|k| std::ffi::CString::new(k.as_str()).unwrap())
             .collect();
-        let path_token_ptrs: Vec<_> = path_tokens
+        let token_cstrings: Vec<std::ffi::CString> = path_tokens
             .values()
-            .map(|v| v.as_ptr() as *const std::os::raw::c_char)
+            .map(|v| std::ffi::CString::new(v.as_str()).unwrap())
             .collect();
-        for (cstring, v) in path_cstrings.iter().zip(path_token_ptrs.iter()) {
+        for (path_cstring, token_cstring) in path_cstrings.iter().zip(token_cstrings.iter()) {
             unsafe {
-                hash.insert(cstring.as_bytes_with_nul(), *v as *mut std::ffi::c_void);
+                hash.insert(
+                    path_cstring.as_bytes_with_nul(),
+                    token_cstring.as_ptr() as *mut std::ffi::c_void,
+                );
             }
         }
 
@@ -1824,6 +1892,72 @@ mod tests {
         assert!(callbacks.is_ok());
         let callbacks = callbacks.unwrap();
         assert!(!callbacks.ptr.is_null());
+    }
+
+    #[test]
+    fn test_get_repository_info() {
+        let (_temp_dir, _repo, mut session, _callbacks) = create_test_repo_with_session();
+
+        let info = session.get_repository_info().unwrap();
+
+        // Check that all fields are populated
+        assert!(!info.uuid.is_empty());
+        assert!(info.root_url.starts_with("file://"));
+        assert_eq!(info.latest_revision, crate::Revnum(0)); // New repo starts at r0
+        assert!(info.session_url.starts_with("file://"));
+        assert_eq!(info.root_url, info.session_url); // For a new repo, both should be the same
+    }
+
+    #[test]
+    fn test_path_exists() {
+        let (_temp_dir, _repo, mut session, _callbacks) = create_test_repo_with_session();
+
+        // Test that root exists
+        assert!(session.path_exists("", crate::Revnum(0)).unwrap());
+
+        // Test that a non-existent path doesn't exist
+        assert!(!session
+            .path_exists("nonexistent.txt", crate::Revnum(0))
+            .unwrap());
+    }
+
+    #[test]
+    fn test_get_files() {
+        let (_temp_dir, repo, mut session, _callbacks) = create_test_repo_with_session();
+
+        // Create some test files in the repository
+        let fs = repo.fs().unwrap();
+        let mut txn = fs.begin_txn(crate::Revnum(0)).unwrap();
+        let mut txn_root = txn.root().unwrap();
+
+        // Create test files
+        txn_root.make_file("file1.txt").unwrap();
+        let mut stream1 = txn_root.apply_text("file1.txt").unwrap();
+        stream1.write(b"Content of file 1").unwrap();
+        stream1.close().unwrap();
+
+        txn_root.make_file("file2.txt").unwrap();
+        let mut stream2 = txn_root.apply_text("file2.txt").unwrap();
+        stream2.write(b"Content of file 2").unwrap();
+        stream2.close().unwrap();
+
+        // Commit the transaction
+        txn.commit().unwrap();
+
+        // Now test get_files
+        let files = session
+            .get_files(&["file1.txt", "file2.txt"], crate::Revnum(1))
+            .unwrap();
+
+        assert_eq!(files.len(), 2);
+
+        // Check first file
+        assert_eq!(files[0].0, "file1.txt");
+        assert_eq!(files[0].1, b"Content of file 1");
+
+        // Check second file
+        assert_eq!(files[1].0, "file2.txt");
+        assert_eq!(files[1].1, b"Content of file 2");
     }
 
     #[test]
