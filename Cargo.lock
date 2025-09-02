@@ -652,6 +652,7 @@ dependencies = [
  "apr-sys",
  "bitflags",
  "ctor",
+ "indexmap",
  "lazy_static",
  "pyo3",
  "subversion-sys",
