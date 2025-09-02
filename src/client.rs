@@ -3142,6 +3142,84 @@ impl Context {
         CopyBuilder::new(self, dst_path)
     }
     
+    /// Revert changes in the working copy
+    ///
+    /// This wraps svn_client_revert4 to revert local modifications.
+    pub fn revert(
+        &mut self,
+        paths: &[&str],
+        depth: Depth,
+        changelists: Option<&[&str]>,
+        clear_changelists: bool,
+        metadata_only: bool,
+        added_keep_local: bool,
+    ) -> Result<(), Error> {
+        let pool = Pool::new();
+        
+        // Convert paths to APR array
+        let mut paths_array = apr::tables::TypedArray::<*const i8>::new(&pool, paths.len() as i32);
+        let path_cstrings: Vec<_> = paths.iter()
+            .map(|p| std::ffi::CString::new(*p).unwrap())
+            .collect();
+        for cstring in &path_cstrings {
+            paths_array.push(cstring.as_ptr());
+        }
+        
+        // Convert changelists if provided
+        let changelists_array = if let Some(lists) = changelists {
+            let mut array = apr::tables::TypedArray::<*const i8>::new(&pool, lists.len() as i32);
+            let list_cstrings: Vec<_> = lists.iter()
+                .map(|l| std::ffi::CString::new(*l).unwrap())
+                .collect();
+            for cstring in &list_cstrings {
+                array.push(cstring.as_ptr());
+            }
+            unsafe { array.as_ptr() }
+        } else {
+            std::ptr::null()
+        };
+        
+        let err = unsafe {
+            subversion_sys::svn_client_revert4(
+                paths_array.as_ptr(),
+                depth.into(),
+                changelists_array,
+                clear_changelists as i32,
+                metadata_only as i32,
+                added_keep_local as i32,
+                self.ptr,
+                pool.as_mut_ptr(),
+            )
+        };
+        
+        Error::from_raw(err)?;
+        Ok(())
+    }
+    
+    /// Mark conflicts as resolved
+    ///
+    /// This wraps svn_client_resolved to mark conflicts as resolved.
+    pub fn resolved(
+        &mut self,
+        path: &str,
+        recursive: bool,
+    ) -> Result<(), Error> {
+        let pool = Pool::new();
+        let path = std::ffi::CString::new(path).unwrap();
+        
+        let err = unsafe {
+            subversion_sys::svn_client_resolved(
+                path.as_ptr(),
+                recursive as i32,
+                self.ptr,
+                pool.as_mut_ptr(),
+            )
+        };
+        
+        Error::from_raw(err)?;
+        Ok(())
+    }
+    
     /// Move (rename) a file or directory
     /// 
     /// This wraps svn_client_move7 to perform a versioned move operation.
