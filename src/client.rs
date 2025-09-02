@@ -3208,6 +3208,151 @@ impl Context {
         Ok(())
     }
     
+    /// Add paths to a changelist
+    ///
+    /// This wraps svn_client_add_to_changelist to add paths to a changelist.
+    pub fn add_to_changelist(
+        &mut self,
+        targets: &[&str],
+        changelist: &str,
+        depth: Depth,
+        changelists: Option<&[&str]>,
+    ) -> Result<(), Error> {
+        let pool = Pool::new();
+        let changelist = std::ffi::CString::new(changelist).unwrap();
+        
+        // Convert targets to APR array
+        let mut targets_array = apr::tables::TypedArray::<*const i8>::new(&pool, targets.len() as i32);
+        let target_cstrings: Vec<_> = targets.iter()
+            .map(|t| std::ffi::CString::new(*t).unwrap())
+            .collect();
+        for cstring in &target_cstrings {
+            targets_array.push(cstring.as_ptr());
+        }
+        
+        // Convert changelists if provided
+        let changelists_array = if let Some(lists) = changelists {
+            let mut array = apr::tables::TypedArray::<*const i8>::new(&pool, lists.len() as i32);
+            let list_cstrings: Vec<_> = lists.iter()
+                .map(|l| std::ffi::CString::new(*l).unwrap())
+                .collect();
+            for cstring in &list_cstrings {
+                array.push(cstring.as_ptr());
+            }
+            unsafe { array.as_ptr() }
+        } else {
+            std::ptr::null()
+        };
+        
+        let err = unsafe {
+            subversion_sys::svn_client_add_to_changelist(
+                targets_array.as_ptr(),
+                changelist.as_ptr(),
+                depth.into(),
+                changelists_array,
+                self.ptr,
+                pool.as_mut_ptr(),
+            )
+        };
+        
+        Error::from_raw(err)?;
+        Ok(())
+    }
+    
+    /// Remove paths from changelists
+    ///
+    /// This wraps svn_client_remove_from_changelists to remove paths from changelists.
+    pub fn remove_from_changelists(
+        &mut self,
+        targets: &[&str],
+        depth: Depth,
+        changelists: Option<&[&str]>,
+    ) -> Result<(), Error> {
+        let pool = Pool::new();
+        
+        // Convert targets to APR array
+        let mut targets_array = apr::tables::TypedArray::<*const i8>::new(&pool, targets.len() as i32);
+        let target_cstrings: Vec<_> = targets.iter()
+            .map(|t| std::ffi::CString::new(*t).unwrap())
+            .collect();
+        for cstring in &target_cstrings {
+            targets_array.push(cstring.as_ptr());
+        }
+        
+        // Convert changelists if provided
+        let changelists_array = if let Some(lists) = changelists {
+            let mut array = apr::tables::TypedArray::<*const i8>::new(&pool, lists.len() as i32);
+            let list_cstrings: Vec<_> = lists.iter()
+                .map(|l| std::ffi::CString::new(*l).unwrap())
+                .collect();
+            for cstring in &list_cstrings {
+                array.push(cstring.as_ptr());
+            }
+            unsafe { array.as_ptr() }
+        } else {
+            std::ptr::null()
+        };
+        
+        let err = unsafe {
+            subversion_sys::svn_client_remove_from_changelists(
+                targets_array.as_ptr(),
+                depth.into(),
+                changelists_array,
+                self.ptr,
+                pool.as_mut_ptr(),
+            )
+        };
+        
+        Error::from_raw(err)?;
+        Ok(())
+    }
+    
+    /// Merge changes between two sources
+    ///
+    /// This wraps svn_client_merge5 for merging between two sources.
+    pub fn merge_sources(
+        &mut self,
+        source1: &str,
+        revision1: &Revision,
+        source2: &str,
+        revision2: &Revision,
+        target_wcpath: &str,
+        depth: Depth,
+        ignore_ancestry: bool,
+        record_only: bool,
+        force_delete: bool,
+        dry_run: bool,
+        allow_mixed_rev: bool,
+    ) -> Result<(), Error> {
+        let pool = Pool::new();
+        let source1 = std::ffi::CString::new(source1).unwrap();
+        let source2 = std::ffi::CString::new(source2).unwrap();
+        let target_wcpath = std::ffi::CString::new(target_wcpath).unwrap();
+        
+        let err = unsafe {
+            subversion_sys::svn_client_merge5(
+                source1.as_ptr(),
+                &revision1.clone().into(),
+                source2.as_ptr(),
+                &revision2.clone().into(),
+                target_wcpath.as_ptr(),
+                depth.into(),
+                ignore_ancestry as i32,
+                ignore_ancestry as i32, // ignore_mergeinfo
+                record_only as i32,
+                force_delete as i32,
+                dry_run as i32,
+                allow_mixed_rev as i32,
+                std::ptr::null_mut(), // merge_options
+                self.ptr,
+                pool.as_mut_ptr(),
+            )
+        };
+        
+        Error::from_raw(err)?;
+        Ok(())
+    }
+    
     /// Move (rename) a file or directory
     /// 
     /// This wraps svn_client_move7 to perform a versioned move operation.
