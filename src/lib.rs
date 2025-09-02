@@ -13,6 +13,7 @@ pub(crate) fn svn_result(code: *mut subversion_sys::svn_error_t) -> Result<(), E
 }
 
 pub mod auth;
+pub mod cache;
 #[cfg(feature = "client")]
 pub mod client;
 pub mod config;
@@ -35,6 +36,7 @@ pub mod props;
 #[cfg(feature = "ra")]
 pub mod ra;
 pub mod repos;
+pub mod sorts;
 pub mod string;
 pub mod subst;
 pub mod time;
