@@ -1544,7 +1544,6 @@ impl<'a> Session<'a> {
         Ok(())
     }
 
-    /// Get inherited properties for a path
     pub fn get_inherited_props(
         &mut self,
         path: &str,
