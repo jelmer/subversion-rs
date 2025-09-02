@@ -870,7 +870,9 @@ impl<'a> Session<'a> {
         let mut results = Vec::new();
         
         for path in paths {
-            let mut stream = crate::io::Stream::empty();
+            // Use a StringBuf-backed stream to collect the file contents
+            let mut stringbuf = crate::io::StringBuf::new();
+            let mut stream = crate::io::Stream::from_stringbuf(&mut stringbuf);
             
             let (_fetched_rev, props) = self.get_file(
                 path,
@@ -878,9 +880,8 @@ impl<'a> Session<'a> {
                 &mut stream,
             )?;
             
-            // Read the stream contents to a string, then convert to bytes
-            let content_str = crate::io::read_stream_to_string(&mut stream)?;
-            let contents = content_str.into_bytes();
+            // Get contents from the stringbuf
+            let contents = stringbuf.as_bytes().to_vec();
             
             results.push((
                 path.to_string(),
@@ -1844,6 +1845,68 @@ mod tests {
         assert!(callbacks.is_ok());
         let callbacks = callbacks.unwrap();
         assert!(!callbacks.ptr.is_null());
+    }
+    
+    #[test]
+    fn test_get_repository_info() {
+        let (_temp_dir, _repo, mut session, _callbacks) = create_test_repo_with_session();
+        
+        let info = session.get_repository_info().unwrap();
+        
+        // Check that all fields are populated
+        assert!(!info.uuid.is_empty());
+        assert!(info.root_url.starts_with("file://"));
+        assert_eq!(info.latest_revision, crate::Revnum(0)); // New repo starts at r0
+        assert!(info.session_url.starts_with("file://"));
+        assert_eq!(info.root_url, info.session_url); // For a new repo, both should be the same
+    }
+    
+    #[test]
+    fn test_path_exists() {
+        let (_temp_dir, _repo, mut session, _callbacks) = create_test_repo_with_session();
+        
+        // Test that root exists
+        assert!(session.path_exists("", crate::Revnum(0)).unwrap());
+        
+        // Test that a non-existent path doesn't exist
+        assert!(!session.path_exists("nonexistent.txt", crate::Revnum(0)).unwrap());
+    }
+    
+    #[test]
+    fn test_get_files() {
+        let (_temp_dir, repo, mut session, _callbacks) = create_test_repo_with_session();
+        
+        // Create some test files in the repository
+        let fs = repo.fs().unwrap();
+        let mut txn = fs.begin_txn(crate::Revnum(0)).unwrap();
+        let mut txn_root = txn.root().unwrap();
+        
+        // Create test files
+        txn_root.make_file("file1.txt").unwrap();
+        let mut stream1 = txn_root.apply_text("file1.txt").unwrap();
+        stream1.write(b"Content of file 1").unwrap();
+        stream1.close().unwrap();
+        
+        txn_root.make_file("file2.txt").unwrap();
+        let mut stream2 = txn_root.apply_text("file2.txt").unwrap();
+        stream2.write(b"Content of file 2").unwrap();
+        stream2.close().unwrap();
+        
+        // Commit the transaction
+        txn.commit().unwrap();
+        
+        // Now test get_files
+        let files = session.get_files(&["file1.txt", "file2.txt"], crate::Revnum(1)).unwrap();
+        
+        assert_eq!(files.len(), 2);
+        
+        // Check first file
+        assert_eq!(files[0].0, "file1.txt");
+        assert_eq!(files[0].1, b"Content of file 1");
+        
+        // Check second file
+        assert_eq!(files[1].0, "file2.txt");
+        assert_eq!(files[1].1, b"Content of file 2");
     }
 
     #[test]
