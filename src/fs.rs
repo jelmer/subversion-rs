@@ -942,6 +942,79 @@ impl TxnRoot {
             Ok(crate::NodeKind::from(kind))
         }
     }
+
+    /// Set file contents directly
+    pub fn set_file_contents(&mut self, path: &str, contents: &[u8]) -> Result<(), Error> {
+        let path_cstr = std::ffi::CString::new(path)?;
+        let pool = apr::Pool::new();
+
+        unsafe {
+            let mut stream = std::ptr::null_mut();
+            let err = subversion_sys::svn_fs_apply_text(
+                &mut stream,
+                self.ptr,
+                path_cstr.as_ptr(),
+                std::ptr::null(), // result_checksum
+                pool.as_mut_ptr(),
+            );
+            Error::from_raw(err)?;
+
+            // Write the contents to the stream
+            let bytes_written = subversion_sys::svn_stream_write(
+                stream,
+                contents.as_ptr() as *const std::ffi::c_char,
+                &mut (contents.len() as usize),
+            );
+            Error::from_raw(bytes_written)?;
+
+            // Close the stream
+            let err = subversion_sys::svn_stream_close(stream);
+            Error::from_raw(err)?;
+        }
+
+        Ok(())
+    }
+
+    /// Get the contents of a file as bytes
+    pub fn file_contents(&self, path: &str) -> Result<Vec<u8>, Error> {
+        let path_cstr = std::ffi::CString::new(path)?;
+        let pool = apr::Pool::new();
+
+        unsafe {
+            let mut stream = std::ptr::null_mut();
+            let err = subversion_sys::svn_fs_file_contents(
+                &mut stream,
+                self.ptr,
+                path_cstr.as_ptr(),
+                pool.as_mut_ptr(),
+            );
+            Error::from_raw(err)?;
+
+            // Read all contents from the stream
+            let mut contents = Vec::new();
+            let mut buffer = [0u8; 4096];
+            loop {
+                let mut len = buffer.len();
+                let err = subversion_sys::svn_stream_read2(
+                    stream,
+                    buffer.as_mut_ptr() as *mut std::ffi::c_char,
+                    &mut len,
+                );
+                Error::from_raw(err)?;
+
+                if len == 0 {
+                    break;
+                }
+
+                contents.extend_from_slice(&buffer[..len]);
+            }
+
+            let err = subversion_sys::svn_stream_close(stream);
+            Error::from_raw(err)?;
+
+            Ok(contents)
+        }
+    }
 }
 
 impl Fs {
@@ -984,6 +1057,102 @@ impl Fs {
                 pool,
                 _phantom: std::marker::PhantomData,
             })
+        }
+    }
+
+    /// List all uncommitted transactions
+    pub fn list_transactions(&self) -> Result<Vec<String>, Error> {
+        let pool = apr::Pool::new();
+        unsafe {
+            let mut names_array = std::ptr::null_mut();
+            let err = subversion_sys::svn_fs_list_transactions(
+                &mut names_array,
+                self.as_ptr() as *mut _,
+                pool.as_mut_ptr(),
+            );
+            Error::from_raw(err)?;
+
+            if names_array.is_null() {
+                return Ok(Vec::new());
+            }
+
+            let array = &*names_array;
+            let mut result = Vec::new();
+            for i in 0..array.nelts {
+                let name_ptr = *((array.elts as *const *const std::ffi::c_char).add(i as usize));
+                if !name_ptr.is_null() {
+                    let name = std::ffi::CStr::from_ptr(name_ptr).to_str()?.to_string();
+                    result.push(name);
+                }
+            }
+            Ok(result)
+        }
+    }
+
+    /// Purge (remove) an uncommitted transaction
+    pub fn purge_txn(&self, name: &str) -> Result<(), Error> {
+        let pool = apr::Pool::new();
+        let name_cstr = std::ffi::CString::new(name)?;
+        unsafe {
+            let err = subversion_sys::svn_fs_purge_txn(
+                self.as_ptr() as *mut _,
+                name_cstr.as_ptr(),
+                pool.as_mut_ptr(),
+            );
+            Error::from_raw(err)
+        }
+    }
+
+    /// Merge changes between trees
+    ///
+    /// This performs a 3-way merge between a common ancestor and two descendant trees.
+    /// Returns the conflicts if any occurred during the merge.
+    pub fn merge(
+        &self,
+        source: &Root,
+        target: &mut TxnRoot,
+        ancestor: &Root,
+        ancestor_path: &str,
+        source_path: &str,
+        target_path: &str,
+    ) -> Result<Option<String>, Error> {
+        let pool = apr::Pool::new();
+        let ancestor_path_cstr = std::ffi::CString::new(ancestor_path)?;
+        let source_path_cstr = std::ffi::CString::new(source_path)?;
+        let target_path_cstr = std::ffi::CString::new(target_path)?;
+
+        unsafe {
+            let mut conflict_ptr = std::ptr::null();
+            let err = subversion_sys::svn_fs_merge(
+                &mut conflict_ptr,
+                source.ptr,
+                source_path_cstr.as_ptr(),
+                target.ptr,
+                target_path_cstr.as_ptr(),
+                ancestor.ptr,
+                ancestor_path_cstr.as_ptr(),
+                pool.as_mut_ptr(),
+            );
+
+            // Check if error is a merge conflict
+            if !err.is_null() {
+                let err_code = (*err).apr_err;
+                if err_code == subversion_sys::svn_errno_t_SVN_ERR_FS_CONFLICT as i32 {
+                    // Get conflict string if available
+                    let conflict = if !conflict_ptr.is_null() {
+                        Some(std::ffi::CStr::from_ptr(conflict_ptr).to_str()?.to_string())
+                    } else {
+                        None
+                    };
+                    // Clear the error since we're handling it
+                    subversion_sys::svn_error_clear(err);
+                    return Ok(conflict);
+                }
+                // Other errors propagate normally
+                Error::from_raw(err)?;
+            }
+
+            Ok(None)
         }
     }
 }
@@ -1523,5 +1692,125 @@ mod tests {
         );
 
         // Cleanup handled by tempdir Drop
+    }
+
+    #[test]
+    fn test_transaction_operations() {
+        let dir = tempdir().unwrap();
+        let fs_path = dir.path().join("test-fs");
+        let fs = Fs::create(&fs_path).unwrap();
+
+        // Test list_transactions with no transactions
+        let txns = fs.list_transactions().unwrap();
+        assert_eq!(txns.len(), 0, "Should have no transactions initially");
+
+        // Create a transaction
+        let txn = fs.begin_txn(Revnum(0)).unwrap();
+        let txn_name = txn.name().unwrap();
+
+        // Now we should see it in the list
+        let txns = fs.list_transactions().unwrap();
+        assert_eq!(txns.len(), 1, "Should have one transaction");
+        assert_eq!(txns[0], txn_name);
+
+        // Abort the transaction
+        txn.abort().unwrap();
+
+        // Should be empty again
+        let txns = fs.list_transactions().unwrap();
+        assert_eq!(txns.len(), 0, "Should have no transactions after abort");
+    }
+
+    #[test]
+    fn test_txn_file_operations() {
+        let dir = tempdir().unwrap();
+        let fs_path = dir.path().join("test-fs");
+        let fs = Fs::create(&fs_path).unwrap();
+
+        // First create a file in revision 1
+        let mut txn1 = fs.begin_txn(Revnum(0)).unwrap();
+        let mut txn_root1 = txn1.root().unwrap();
+        txn_root1.make_file("test.txt").unwrap();
+        txn_root1
+            .set_file_contents("test.txt", b"Hello, World!")
+            .unwrap();
+        let rev1 = txn1.commit().unwrap();
+
+        // Now test moving the file in a new transaction
+        let mut txn2 = fs.begin_txn(rev1).unwrap();
+        let mut txn_root2 = txn2.root().unwrap();
+
+        // Move requires copying from the base revision then deleting the old
+        let base_root = fs.revision_root(rev1).unwrap();
+        txn_root2
+            .copy(&base_root, "test.txt", "renamed.txt")
+            .unwrap();
+        txn_root2.delete("test.txt").unwrap();
+
+        // Check that old path doesn't exist and new one does
+        let old_kind = txn_root2.check_path("test.txt").unwrap();
+        assert_eq!(old_kind, crate::NodeKind::None);
+
+        let new_kind = txn_root2.check_path("renamed.txt").unwrap();
+        assert_eq!(new_kind, crate::NodeKind::File);
+
+        let rev2 = txn2.commit().unwrap();
+
+        // Verify in committed revision
+        let root = fs.revision_root(rev2).unwrap();
+        let mut stream = root.file_contents("renamed.txt").unwrap();
+        let mut contents = Vec::new();
+        let mut buffer = [0u8; 1024];
+        loop {
+            let bytes_read = stream.read_full(&mut buffer).unwrap();
+            if bytes_read == 0 {
+                break;
+            }
+            contents.extend_from_slice(&buffer[..bytes_read]);
+        }
+        assert_eq!(contents, b"Hello, World!");
+    }
+
+    #[test]
+    fn test_merge_trees() {
+        let dir = tempdir().unwrap();
+        let fs_path = dir.path().join("test-fs");
+        let fs = Fs::create(&fs_path).unwrap();
+
+        // Create initial revision with a file
+        let mut txn1 = fs.begin_txn(Revnum(0)).unwrap();
+        let mut root1 = txn1.root().unwrap();
+        root1.make_file("file.txt").unwrap();
+        root1
+            .set_file_contents("file.txt", b"Initial content")
+            .unwrap();
+        let rev1 = txn1.commit().unwrap();
+
+        // Create two divergent changes
+        // Branch 1: modify the file
+        let mut txn2 = fs.begin_txn(rev1).unwrap();
+        let mut root2 = txn2.root().unwrap();
+        root2
+            .set_file_contents("file.txt", b"Branch 1 content")
+            .unwrap();
+        let rev2 = txn2.commit().unwrap();
+
+        // Branch 2: also modify the file (creating a conflict)
+        let mut txn3 = fs.begin_txn(rev1).unwrap();
+        let mut root3 = txn3.root().unwrap();
+        root3
+            .set_file_contents("file.txt", b"Branch 2 content")
+            .unwrap();
+
+        // Try to merge branch 1 into branch 2
+        let ancestor = fs.revision_root(rev1).unwrap();
+        let source = fs.revision_root(rev2).unwrap();
+
+        let conflict = fs
+            .merge(&source, &mut root3, &ancestor, "", "", "")
+            .unwrap();
+
+        // This should produce a conflict since both branches modified the same file
+        assert!(conflict.is_some(), "Should have a merge conflict");
     }
 }
