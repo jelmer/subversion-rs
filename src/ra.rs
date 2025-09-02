@@ -176,6 +176,15 @@ impl<'a> Session<'a> {
         let mut session = std::ptr::null_mut();
         let uuid = uuid.map(|uuid| std::ffi::CString::new(uuid).unwrap());
         
+        // Create default callbacks if none provided - SVN requires valid callbacks
+        let mut default_callbacks;
+        let callbacks_ptr = if let Some(callbacks) = callbacks.as_mut() {
+            callbacks.as_mut_ptr()
+        } else {
+            default_callbacks = Callbacks::new()?;
+            default_callbacks.as_mut_ptr()
+        };
+        
         let err = unsafe {
             subversion_sys::svn_ra_open5(
                 &mut session,
@@ -187,12 +196,7 @@ impl<'a> Session<'a> {
                 } else {
                     std::ptr::null()
                 },
-                if let Some(callbacks) = callbacks.as_mut() {
-                    callbacks.as_mut_ptr()
-                } else {
-                    // SVN requires callbacks - pass NULL and let SVN handle it
-                    std::ptr::null_mut()
-                },
+                callbacks_ptr,
                 std::ptr::null_mut(),
                 if let Some(config) = config.as_mut() {
                     config.as_mut_ptr()
@@ -1043,16 +1047,21 @@ impl<'a> Session<'a> {
         let pool = Pool::new();
         let scratch_pool = std::rc::Rc::new(Pool::new());
         let mut hash = apr::hash::Hash::new(&scratch_pool);
-        // Convert paths to proper C strings
+        // Convert paths and tokens to proper C strings and keep them alive
         let path_cstrings: Vec<std::ffi::CString> = path_tokens.keys()
             .map(|k| std::ffi::CString::new(k.as_str()).unwrap())
             .collect();
-        let path_token_ptrs: Vec<_> = path_tokens
+        let token_cstrings: Vec<std::ffi::CString> = path_tokens
             .values()
-            .map(|v| v.as_ptr() as *const std::os::raw::c_char)
+            .map(|v| std::ffi::CString::new(v.as_str()).unwrap())
             .collect();
-        for (cstring, v) in path_cstrings.iter().zip(path_token_ptrs.iter()) {
-            unsafe { hash.insert(cstring.as_bytes_with_nul(), *v as *mut std::ffi::c_void); }
+        for (path_cstring, token_cstring) in path_cstrings.iter().zip(token_cstrings.iter()) {
+            unsafe { 
+                hash.insert(
+                    path_cstring.as_bytes_with_nul(), 
+                    token_cstring.as_ptr() as *mut std::ffi::c_void
+                ); 
+            }
         }
         
         // Box the reference like get_log does
