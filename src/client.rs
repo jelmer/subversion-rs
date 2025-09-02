@@ -3129,6 +3129,68 @@ impl Context {
     pub fn copy_builder<'a>(&'a mut self, dst_path: impl Into<String>) -> CopyBuilder<'a> {
         CopyBuilder::new(self, dst_path)
     }
+    
+    /// Move (rename) a file or directory
+    /// 
+    /// This wraps svn_client_move7 to perform a versioned move operation.
+    pub fn move_path(
+        &mut self,
+        src_paths: &[&str],
+        dst_path: &str,
+        move_as_child: bool,
+        make_parents: bool,
+        allow_mixed_revisions: bool,
+        metadata_only: bool,
+        revprop_table: Option<HashMap<String, Vec<u8>>>,
+    ) -> Result<(), Error> {
+        let pool = Pool::new();
+        
+        // Convert source paths to APR array
+        let mut src_paths_array = apr::tables::TypedArray::<*const i8>::new(&pool, src_paths.len() as i32);
+        let src_cstrings: Vec<_> = src_paths.iter()
+            .map(|p| std::ffi::CString::new(*p).unwrap())
+            .collect();
+        for cstring in &src_cstrings {
+            src_paths_array.push(cstring.as_ptr());
+        }
+        
+        let dst_path = std::ffi::CString::new(dst_path).unwrap();
+        
+        // Convert revprop table if provided
+        let mut revprop_hash = std::ptr::null_mut();
+        if let Some(revprops) = revprop_table {
+            let mut hash = apr::hash::Hash::new(&pool);
+            for (key, value) in revprops {
+                let key_cstring = std::ffi::CString::new(key).unwrap();
+                let svn_string = crate::string::BStr::from_bytes(&value, &pool);
+                unsafe {
+                    hash.insert(key_cstring.as_bytes(), svn_string.as_ptr() as *mut std::ffi::c_void);
+                }
+            }
+            unsafe {
+                revprop_hash = hash.as_mut_ptr();
+            }
+        }
+        
+        let err = unsafe {
+            subversion_sys::svn_client_move7(
+                src_paths_array.as_ptr(),
+                dst_path.as_ptr(),
+                move_as_child as i32,
+                make_parents as i32,
+                allow_mixed_revisions as i32,
+                metadata_only as i32,
+                revprop_hash,
+                None, // commit_callback
+                std::ptr::null_mut(), // commit_baton
+                self.ptr,
+                pool.as_mut_ptr(),
+            )
+        };
+        
+        Error::from_raw(err)?;
+        Ok(())
+    }
 
     /// Create a builder for info operations
     pub fn info_builder<'a>(&'a mut self, abspath_or_url: impl Into<String>) -> InfoBuilder<'a> {
