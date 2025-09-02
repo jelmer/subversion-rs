@@ -820,16 +820,8 @@ impl Context {
             return Ok(None);
         }
 
-        let props_hash =
-            unsafe { apr::hash::TypedHash::<subversion_sys::svn_string_t>::from_ptr(props) };
-
-        let mut result = std::collections::HashMap::new();
-        for (key, svn_str) in props_hash.iter() {
-            let value = crate::svn_string_helpers::to_vec(&svn_str);
-            result.insert(String::from_utf8_lossy(key).to_string(), value);
-        }
-
-        Ok(Some(result))
+        let prop_hash = unsafe { crate::props::PropHash::from_ptr(props) };
+        Ok(Some(prop_hash.to_hashmap()))
     }
 
     /// Walk the status of a working copy tree
