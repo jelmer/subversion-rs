@@ -4247,6 +4247,119 @@ mod tests {
     }
 
     #[test]
+    fn test_revert() {
+        let td = tempfile::tempdir().unwrap();
+        let repo_path = td.path().join("repo");
+        let wc_path = td.path().join("wc");
+
+        // Create a test repository
+        crate::repos::Repos::create(&repo_path).unwrap();
+
+        // Check out working copy
+        let mut ctx = Context::new().unwrap();
+        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        let url = crate::uri::Uri::new(&url_str).unwrap();
+
+        ctx.checkout(
+            url,
+            &wc_path,
+            &CheckoutOptions {
+                peg_revision: Revision::Head,
+                revision: Revision::Head,
+                depth: Depth::Infinity,
+                ignore_externals: false,
+                allow_unver_obstructions: false,
+            },
+        )
+        .unwrap();
+
+        // Create and commit a test file
+        let test_file = wc_path.join("test_file.txt");
+        std::fs::write(&test_file, b"Original content").unwrap();
+        
+        ctx.add(&test_file, &AddOptions::default()).unwrap();
+        
+        ctx.commit(
+            &[wc_path.to_str().unwrap()],
+            &CommitOptions::default(),
+            std::collections::HashMap::new(),
+            &mut |_info: &crate::CommitInfo| Ok(()),
+        ).unwrap();
+
+        // Modify the file
+        std::fs::write(&test_file, b"Modified content").unwrap();
+        
+        // Verify the file is modified
+        assert_eq!(std::fs::read(&test_file).unwrap(), b"Modified content");
+
+        // Revert the changes
+        let result = ctx.revert(
+            &[test_file.to_str().unwrap()],
+            Depth::Empty,
+            None, // changelists
+            false, // clear_changelists
+            false, // metadata_only
+            false, // added_keep_local
+        );
+
+        assert!(result.is_ok());
+
+        // Verify the file is reverted to original content
+        assert_eq!(std::fs::read(&test_file).unwrap(), b"Original content");
+    }
+
+    #[test]
+    fn test_resolved() {
+        let td = tempfile::tempdir().unwrap();
+        let repo_path = td.path().join("repo");
+        let wc_path = td.path().join("wc");
+
+        // Create a test repository
+        crate::repos::Repos::create(&repo_path).unwrap();
+
+        // Check out working copy
+        let mut ctx = Context::new().unwrap();
+        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        let url = crate::uri::Uri::new(&url_str).unwrap();
+
+        ctx.checkout(
+            url,
+            &wc_path,
+            &CheckoutOptions {
+                peg_revision: Revision::Head,
+                revision: Revision::Head,
+                depth: Depth::Infinity,
+                ignore_externals: false,
+                allow_unver_obstructions: false,
+            },
+        )
+        .unwrap();
+
+        // Create a test file
+        let test_file = wc_path.join("conflict_file.txt");
+        std::fs::write(&test_file, b"Initial content").unwrap();
+        
+        ctx.add(&test_file, &AddOptions::default()).unwrap();
+        
+        ctx.commit(
+            &[wc_path.to_str().unwrap()],
+            &CommitOptions::default(),
+            std::collections::HashMap::new(),
+            &mut |_info: &crate::CommitInfo| Ok(()),
+        ).unwrap();
+
+        // Test the resolved function - it should not fail even without actual conflicts
+        // (In a real scenario, this would be called after manually resolving conflicts)
+        let result = ctx.resolved(
+            test_file.to_str().unwrap(),
+            false, // recursive
+        );
+
+        // The function should succeed (even if there were no conflicts to resolve)
+        assert!(result.is_ok());
+    }
+
+    #[test]
     fn test_proplist_all() {
         let td = tempfile::tempdir().unwrap();
         let repo_path = td.path().join("repo");
