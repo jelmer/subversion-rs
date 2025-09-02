@@ -1612,7 +1612,6 @@ impl<'a> Session<'a> {
         Ok(result)
     }
 
-
     /// Perform a diff operation between two revisions
     ///
     /// This wraps svn_ra_do_diff3 to compute differences between revisions.

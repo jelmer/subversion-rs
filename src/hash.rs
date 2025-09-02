@@ -575,7 +575,7 @@ mod tests {
 // ============================================================================
 
 /// A safe wrapper for APR hashes containing path -> svn_dirent_t mappings
-/// 
+///
 /// This wrapper encapsulates the common pattern of working with directory entry
 /// hashes from Subversion's C API, reducing unsafe code and providing convenient
 /// conversion methods.
@@ -585,7 +585,7 @@ pub struct DirentHash<'a> {
 
 impl<'a> DirentHash<'a> {
     /// Create a DirentHash from a raw APR hash pointer
-    /// 
+    ///
     /// # Safety
     /// The caller must ensure that:
     /// - `ptr` is a valid APR hash containing svn_dirent_t values
@@ -629,7 +629,7 @@ impl<'a> DirentHash<'a> {
 }
 
 /// A safe wrapper for APR hashes containing path -> svn_fs_path_change2_t mappings
-/// 
+///
 /// This wrapper encapsulates the common pattern of working with changed path
 /// hashes from Subversion's FS API.
 pub struct PathChangeHash<'a> {
@@ -638,7 +638,7 @@ pub struct PathChangeHash<'a> {
 
 impl<'a> PathChangeHash<'a> {
     /// Create a PathChangeHash from a raw APR hash pointer
-    /// 
+    ///
     /// # Safety
     /// The caller must ensure that:
     /// - `ptr` is a valid APR hash containing svn_fs_path_change2_t values
@@ -654,9 +654,8 @@ impl<'a> PathChangeHash<'a> {
         let mut result = HashMap::new();
         for (k, v) in self.inner.iter() {
             let path = String::from_utf8_lossy(k).into_owned();
-            let change = crate::fs::FsPathChange::from_raw(
-                v as *mut subversion_sys::svn_fs_path_change2_t
-            );
+            let change =
+                crate::fs::FsPathChange::from_raw(v as *mut subversion_sys::svn_fs_path_change2_t);
             result.insert(path, change);
         }
         result
@@ -674,7 +673,7 @@ impl<'a> PathChangeHash<'a> {
 }
 
 /// A safe wrapper for APR hashes containing path -> svn_fs_dirent_t mappings
-/// 
+///
 /// This wrapper encapsulates the common pattern of working with directory
 /// entry hashes from Subversion's FS API.
 pub struct FsDirentHash<'a> {
@@ -683,7 +682,7 @@ pub struct FsDirentHash<'a> {
 
 impl<'a> FsDirentHash<'a> {
     /// Create a FsDirentHash from a raw APR hash pointer
-    /// 
+    ///
     /// # Safety
     /// The caller must ensure that:
     /// - `ptr` is a valid APR hash containing svn_fs_dirent_t values
@@ -699,9 +698,7 @@ impl<'a> FsDirentHash<'a> {
         let mut result = HashMap::new();
         for (k, v) in self.inner.iter() {
             let name = String::from_utf8_lossy(k).into_owned();
-            let entry = crate::fs::FsDirEntry::from_raw(
-                v as *mut subversion_sys::svn_fs_dirent_t
-            );
+            let entry = crate::fs::FsDirEntry::from_raw(v as *mut subversion_sys::svn_fs_dirent_t);
             result.insert(name, entry);
         }
         result

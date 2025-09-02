@@ -62,7 +62,7 @@ pub fn name_is_valid(name: &str) -> bool {
 }
 
 /// A safe wrapper for APR hashes containing property name -> svn_string_t mappings
-/// 
+///
 /// This wrapper encapsulates the common pattern of working with property hashes
 /// from Subversion's C API, reducing unsafe code and providing convenient
 /// conversion methods.
@@ -72,7 +72,7 @@ pub struct PropHash<'a> {
 
 impl<'a> PropHash<'a> {
     /// Create a PropHash from a raw APR hash pointer
-    /// 
+    ///
     /// # Safety
     /// The caller must ensure that:
     /// - `ptr` is a valid APR hash containing svn_string_t values
@@ -84,7 +84,7 @@ impl<'a> PropHash<'a> {
     }
 
     /// Convert the properties to a HashMap<String, Vec<u8>>
-    /// 
+    ///
     /// This is the most common conversion pattern in the codebase.
     pub fn to_hashmap(&self) -> std::collections::HashMap<String, Vec<u8>> {
         self.inner
@@ -98,7 +98,7 @@ impl<'a> PropHash<'a> {
     }
 
     /// Convert the properties to a HashMap<String, String>
-    /// 
+    ///
     /// This is useful when you know the properties contain valid UTF-8 text.
     /// Non-UTF-8 bytes will be replaced with the UTF-8 replacement character.
     pub fn to_string_hashmap(&self) -> std::collections::HashMap<String, String> {
@@ -106,7 +106,8 @@ impl<'a> PropHash<'a> {
             .iter()
             .map(|(k, v)| {
                 let key = String::from_utf8_lossy(k).into_owned();
-                let value = String::from_utf8_lossy(crate::svn_string_helpers::as_bytes(v)).into_owned();
+                let value =
+                    String::from_utf8_lossy(crate::svn_string_helpers::as_bytes(v)).into_owned();
                 (key, value)
             })
             .collect()
@@ -122,7 +123,7 @@ impl<'a> PropHash<'a> {
     }
 
     /// Iterate over the properties as (key: &str, value: &str) pairs
-    /// 
+    ///
     /// Non-UTF-8 bytes in values will be replaced with the UTF-8 replacement character.
     pub fn iter_strings(&self) -> impl Iterator<Item = (&str, std::borrow::Cow<str>)> {
         self.inner.iter().map(|(k, v)| {
@@ -148,7 +149,9 @@ impl<'a> PropHash<'a> {
         // Try to find the key in the hash
         for (k, v) in self.inner.iter() {
             if k == name.as_bytes() {
-                return Some(String::from_utf8_lossy(crate::svn_string_helpers::as_bytes(v)).into_owned());
+                return Some(
+                    String::from_utf8_lossy(crate::svn_string_helpers::as_bytes(v)).into_owned(),
+                );
             }
         }
         None
