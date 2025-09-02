@@ -569,3 +569,148 @@ mod tests {
         assert!(!result_hash.is_empty());
     }
 }
+
+// ============================================================================
+// Safe Hash Wrappers for Common Patterns
+// ============================================================================
+
+/// A safe wrapper for APR hashes containing path -> svn_dirent_t mappings
+///
+/// This wrapper encapsulates the common pattern of working with directory entry
+/// hashes from Subversion's C API, reducing unsafe code and providing convenient
+/// conversion methods.
+pub struct DirentHash<'a> {
+    inner: apr::hash::TypedHash<'a, subversion_sys::svn_dirent_t>,
+}
+
+impl<'a> DirentHash<'a> {
+    /// Create a DirentHash from a raw APR hash pointer
+    ///
+    /// # Safety
+    /// The caller must ensure that:
+    /// - `ptr` is a valid APR hash containing svn_dirent_t values
+    /// - The hash and its contents remain valid for the lifetime of this wrapper
+    pub unsafe fn from_ptr(ptr: *mut apr_sys::apr_hash_t) -> Self {
+        Self {
+            inner: apr::hash::TypedHash::<subversion_sys::svn_dirent_t>::from_ptr(ptr),
+        }
+    }
+
+    /// Convert the dirents to a HashMap<String, crate::Dirent>
+    pub fn to_hashmap(&self) -> HashMap<String, crate::ra::Dirent> {
+        self.inner
+            .iter()
+            .map(|(k, v)| {
+                let key = String::from_utf8_lossy(k).into_owned();
+                let dirent = crate::ra::Dirent::from_raw(v as *const _ as *mut _);
+                (key, dirent)
+            })
+            .collect()
+    }
+
+    /// Iterate over the dirents as (path: &str, dirent: crate::ra::Dirent) pairs
+    pub fn iter(&self) -> impl Iterator<Item = (&str, crate::ra::Dirent)> + '_ {
+        self.inner.iter().map(|(k, v)| {
+            let path = std::str::from_utf8(k).unwrap_or("");
+            let dirent = crate::ra::Dirent::from_raw(v as *const _ as *mut _);
+            (path, dirent)
+        })
+    }
+
+    /// Check if the hash is empty
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    /// Get the number of dirents
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+}
+
+/// A safe wrapper for APR hashes containing path -> svn_fs_path_change2_t mappings
+///
+/// This wrapper encapsulates the common pattern of working with changed path
+/// hashes from Subversion's FS API.
+pub struct PathChangeHash<'a> {
+    inner: apr::hash::Hash<'a>,
+}
+
+impl<'a> PathChangeHash<'a> {
+    /// Create a PathChangeHash from a raw APR hash pointer
+    ///
+    /// # Safety
+    /// The caller must ensure that:
+    /// - `ptr` is a valid APR hash containing svn_fs_path_change2_t values
+    /// - The hash and its contents remain valid for the lifetime of this wrapper
+    pub unsafe fn from_ptr(ptr: *mut apr_sys::apr_hash_t) -> Self {
+        Self {
+            inner: apr::hash::Hash::from_ptr(ptr),
+        }
+    }
+
+    /// Convert the path changes to a HashMap<String, FsPathChange>
+    pub fn to_hashmap(&self) -> HashMap<String, crate::fs::FsPathChange> {
+        let mut result = HashMap::new();
+        for (k, v) in self.inner.iter() {
+            let path = String::from_utf8_lossy(k).into_owned();
+            let change =
+                crate::fs::FsPathChange::from_raw(v as *mut subversion_sys::svn_fs_path_change2_t);
+            result.insert(path, change);
+        }
+        result
+    }
+
+    /// Check if the hash is empty
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    /// Get the number of path changes
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+}
+
+/// A safe wrapper for APR hashes containing path -> svn_fs_dirent_t mappings
+///
+/// This wrapper encapsulates the common pattern of working with directory
+/// entry hashes from Subversion's FS API.
+pub struct FsDirentHash<'a> {
+    inner: apr::hash::Hash<'a>,
+}
+
+impl<'a> FsDirentHash<'a> {
+    /// Create a FsDirentHash from a raw APR hash pointer
+    ///
+    /// # Safety
+    /// The caller must ensure that:
+    /// - `ptr` is a valid APR hash containing svn_fs_dirent_t values
+    /// - The hash and its contents remain valid for the lifetime of this wrapper
+    pub unsafe fn from_ptr(ptr: *mut apr_sys::apr_hash_t) -> Self {
+        Self {
+            inner: apr::hash::Hash::from_ptr(ptr),
+        }
+    }
+
+    /// Convert the dirents to a HashMap<String, FsDirEntry>
+    pub fn to_hashmap(&self) -> HashMap<String, crate::fs::FsDirEntry> {
+        let mut result = HashMap::new();
+        for (k, v) in self.inner.iter() {
+            let name = String::from_utf8_lossy(k).into_owned();
+            let entry = crate::fs::FsDirEntry::from_raw(v as *mut subversion_sys::svn_fs_dirent_t);
+            result.insert(name, entry);
+        }
+        result
+    }
+
+    /// Check if the hash is empty
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    /// Get the number of dirents
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+}

@@ -475,17 +475,12 @@ impl Root {
             );
             svn_result(err)?;
 
-            let mut result = std::collections::HashMap::new();
-            if !changed_paths.is_null() {
-                let hash = unsafe { apr::hash::Hash::from_ptr(changed_paths) };
-                for (k, v) in hash.iter() {
-                    let path = String::from_utf8_lossy(k).into_owned();
-                    let change =
-                        FsPathChange::from_raw(v as *mut subversion_sys::svn_fs_path_change2_t);
-                    result.insert(path, change);
-                }
+            if changed_paths.is_null() {
+                Ok(std::collections::HashMap::new())
+            } else {
+                let hash = unsafe { crate::hash::PathChangeHash::from_ptr(changed_paths) };
+                Ok(hash.to_hashmap())
             }
-            Ok(result)
         })
     }
 
@@ -521,16 +516,12 @@ impl Root {
             );
             svn_result(err)?;
 
-            let mut result = std::collections::HashMap::new();
-            if !entries.is_null() {
-                let hash = unsafe { apr::hash::Hash::from_ptr(entries) };
-                for (k, v) in hash.iter() {
-                    let name = String::from_utf8_lossy(k).into_owned();
-                    let entry = FsDirEntry::from_raw(v as *mut subversion_sys::svn_fs_dirent_t);
-                    result.insert(name, entry);
-                }
+            if entries.is_null() {
+                Ok(std::collections::HashMap::new())
+            } else {
+                let hash = unsafe { crate::hash::FsDirentHash::from_ptr(entries) };
+                Ok(hash.to_hashmap())
             }
-            Ok(result)
         })
     }
     /// Check if file contents have changed between two paths
