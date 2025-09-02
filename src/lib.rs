@@ -45,6 +45,7 @@ pub mod utf;
 pub mod version;
 #[cfg(feature = "wc")]
 pub mod wc;
+pub mod xml;
 use bitflags::bitflags;
 use std::str::FromStr;
 use subversion_sys::{svn_opt_revision_t, svn_opt_revision_value_t};
