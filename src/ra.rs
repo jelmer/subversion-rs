@@ -549,18 +549,9 @@ impl<'a> Session<'a> {
         let rc_pool = std::rc::Rc::new(pool);
         crate::Error::from_raw(err)?;
         let prop_hash = unsafe { crate::props::PropHash::from_ptr(props) };
-        let dirents_hash =
-            unsafe { apr::hash::TypedHash::<subversion_sys::svn_dirent_t>::from_ptr(dirents) };
+        let dirents_hash = unsafe { crate::hash::DirentHash::from_ptr(dirents) };
         let props = prop_hash.to_hashmap();
-        let dirents = dirents_hash
-            .iter()
-            .map(|(k, v)| {
-                (
-                    String::from_utf8_lossy(k).into_owned(),
-                    Dirent::from_raw(v as *const _ as *mut _),
-                )
-            })
-            .collect();
+        let dirents = dirents_hash.to_hashmap();
         Ok((Revnum::from_raw(fetched_rev).unwrap(), dirents, props))
     }
 
