@@ -1,4 +1,3 @@
-use crate::config::Config;
 use crate::delta::Editor;
 use crate::{svn_result, with_tmp_pool, Depth, Error, Revnum};
 use apr::pool::Pool;
@@ -213,7 +212,7 @@ impl<'a> Session<'a> {
         url: &str,
         uuid: Option<&str>,
         mut callbacks: Option<&'a mut Callbacks>,
-        mut config: Option<&mut Config>,
+        mut config: Option<&mut crate::config::ConfigHash>,
     ) -> Result<(Self, Option<String>, Option<String>), Error> {
         let url = std::ffi::CString::new(url).unwrap();
         let mut corrected_url = std::ptr::null();
@@ -1372,9 +1371,6 @@ impl<'a> Session<'a> {
         editor: &mut dyn crate::delta::Editor,
     ) -> Result<(), Error> {
         let pool = Pool::new();
-        // Store the fat pointer as the editor baton
-        let editor_baton = Box::into_raw(Box::new(editor as *mut dyn crate::delta::Editor))
-            as *mut std::ffi::c_void;
         let err = unsafe {
             subversion_sys::svn_ra_replay(
                 self.ptr,
@@ -1382,14 +1378,10 @@ impl<'a> Session<'a> {
                 low_water_mark.into(),
                 send_deltas as i32,
                 &crate::delta::WRAP_EDITOR,
-                editor_baton,
+                &mut (editor as &mut dyn crate::delta::Editor) as *mut _ as *mut std::ffi::c_void,
                 pool.as_mut_ptr(),
             )
         };
-        // Clean up the baton after the call
-        unsafe {
-            let _baton_box = Box::from_raw(editor_baton as *mut *mut dyn crate::delta::Editor);
-        }
         Error::from_raw(err)?;
         Ok(())
     }
@@ -2430,34 +2422,31 @@ mod tests {
         }
 
         impl crate::delta::Editor for TestEditor {
-            fn set_target_revision(
-                &mut self,
-                _revision: Option<crate::Revnum>,
-            ) -> Result<(), crate::Error> {
+            fn set_target_revision(&mut self, revision: Option<crate::Revnum>) -> Result<(), crate::Error> {
                 self.operations
                     .borrow_mut()
-                    .push("set_target_revision".to_string());
+                    .push(format!("set_target_revision({:?})", revision));
                 Ok(())
             }
-
+            
             fn open_root(
                 &mut self,
-                _base_revision: Option<crate::Revnum>,
-            ) -> Result<Box<dyn crate::delta::DirectoryEditor + 'static>, crate::Error>
-            {
-                self.operations.borrow_mut().push("open_root".to_string());
-                Ok(Box::new(TestDirectoryEditor {
+                base_revision: Option<crate::Revnum>,
+            ) -> Result<Box<dyn crate::delta::DirectoryEditor + 'static>, crate::Error> {
+                self.operations.borrow_mut().push(format!("open_root({:?})", base_revision));
+                let dir_editor = TestDirectoryEditor {
                     operations: self.operations.clone(),
-                }))
+                };
+                Ok(Box::new(dir_editor))
             }
-
+            
             fn close(&mut self) -> Result<(), crate::Error> {
-                self.operations.borrow_mut().push("close".to_string());
+                self.operations.borrow_mut().push("close_edit".to_string());
                 Ok(())
             }
-
+            
             fn abort(&mut self) -> Result<(), crate::Error> {
-                self.operations.borrow_mut().push("abort".to_string());
+                self.operations.borrow_mut().push("abort_edit".to_string());
                 Ok(())
             }
         }

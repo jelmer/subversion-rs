@@ -484,7 +484,7 @@ impl From<svn_opt_revision_t> for Revision {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Depth {
     #[default]
     Unknown,
@@ -1481,6 +1481,17 @@ mod svn_string_helpers {
     /// Get the data from an svn_string_t as a Vec<u8>
     pub fn to_vec(s: &svn_string_t) -> Vec<u8> {
         as_bytes(s).to_vec()
+    }
+    
+    /// Create a new svn_string_t from bytes
+    pub fn svn_string_ncreate(data: &[u8], pool: &apr::Pool) -> *mut svn_string_t {
+        unsafe {
+            subversion_sys::svn_string_ncreate(
+                data.as_ptr() as *const i8,
+                data.len(),
+                pool.as_mut_ptr(),
+            )
+        }
     }
 }
 

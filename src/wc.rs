@@ -1080,6 +1080,169 @@ pub fn cleanup(
 }
 
 /// Get the working copy revision status
+/// Add a path to version control
+pub fn add(
+    ctx: &mut Context,
+    path: &std::path::Path,
+    depth: crate::Depth,
+    force: bool,
+    no_ignore: bool,
+    no_autoprops: bool,
+    add_parents: bool,
+) -> Result<(), Error> {
+    let path_str = path.to_string_lossy();
+    let path_cstr = std::ffi::CString::new(path_str.as_ref())?;
+    
+    with_tmp_pool(|pool| unsafe {
+        let err = subversion_sys::svn_wc_add_from_disk3(
+            ctx.as_mut_ptr(),
+            path_cstr.as_ptr(),
+            std::ptr::null_mut(), // props (use auto-props if enabled)
+            force as i32,
+            None, // notify_func
+            std::ptr::null_mut(), // notify_baton
+            pool.as_mut_ptr(),
+        );
+        Error::from_raw(err)
+    })
+}
+
+/// Delete a path from version control
+pub fn delete(
+    ctx: &mut Context,
+    path: &std::path::Path,
+    keep_local: bool,
+    delete_unversioned_target: bool,
+) -> Result<(), Error> {
+    let path_str = path.to_string_lossy();
+    let path_cstr = std::ffi::CString::new(path_str.as_ref())?;
+    
+    with_tmp_pool(|pool| unsafe {
+        let err = subversion_sys::svn_wc_delete4(
+            ctx.as_mut_ptr(),
+            path_cstr.as_ptr(),
+            keep_local as i32,
+            delete_unversioned_target as i32,
+            None, // cancel_func
+            std::ptr::null_mut(), // cancel_baton
+            None, // notify_func
+            std::ptr::null_mut(), // notify_baton
+            pool.as_mut_ptr(),
+        );
+        Error::from_raw(err)
+    })
+}
+
+/// Revert changes to a path
+pub fn revert(
+    ctx: &mut Context,
+    path: &std::path::Path,
+    depth: crate::Depth,
+    use_commit_times: bool,
+    clear_changelists: bool,
+    metadata_only: bool,
+) -> Result<(), Error> {
+    let path_str = path.to_string_lossy();
+    let path_cstr = std::ffi::CString::new(path_str.as_ref())?;
+    
+    with_tmp_pool(|pool| unsafe {
+        let err = subversion_sys::svn_wc_revert6(
+            ctx.as_mut_ptr(),
+            path_cstr.as_ptr(),
+            depth.into(),
+            use_commit_times as i32,
+            std::ptr::null(), // changelists
+            clear_changelists as i32,
+            metadata_only as i32,
+            1, // added_keep_local (keep added files)
+            None, // cancel_func
+            std::ptr::null_mut(), // cancel_baton
+            None, // notify_func
+            std::ptr::null_mut(), // notify_baton
+            pool.as_mut_ptr(),
+        );
+        Error::from_raw(err)
+    })
+}
+
+/// Copy or move a path within the working copy
+pub fn copy_or_move(
+    ctx: &mut Context,
+    src: &std::path::Path,
+    dst: &std::path::Path,
+    is_move: bool,
+    metadata_only: bool,
+) -> Result<(), Error> {
+    let src_str = src.to_string_lossy();
+    let src_cstr = std::ffi::CString::new(src_str.as_ref())?;
+    let dst_str = dst.to_string_lossy();
+    let dst_cstr = std::ffi::CString::new(dst_str.as_ref())?;
+    
+    with_tmp_pool(|pool| unsafe {
+        if is_move {
+            let err = subversion_sys::svn_wc_move(
+                ctx.as_mut_ptr(),
+                src_cstr.as_ptr(),
+                dst_cstr.as_ptr(),
+                metadata_only as i32,
+                None, // cancel_func
+                std::ptr::null_mut(), // cancel_baton
+                None, // notify_func
+                std::ptr::null_mut(), // notify_baton
+                pool.as_mut_ptr(),
+            );
+            Error::from_raw(err)
+        } else {
+            let err = subversion_sys::svn_wc_copy3(
+                ctx.as_mut_ptr(),
+                src_cstr.as_ptr(),
+                dst_cstr.as_ptr(),
+                metadata_only as i32,
+                None, // cancel_func
+                std::ptr::null_mut(), // cancel_baton
+                None, // notify_func
+                std::ptr::null_mut(), // notify_baton
+                pool.as_mut_ptr(),
+            );
+            Error::from_raw(err)
+        }
+    })
+}
+
+/// Resolve a conflict on a path
+pub fn resolve_conflict(
+    ctx: &mut Context,
+    path: &std::path::Path,
+    depth: crate::Depth,
+    resolve_text: bool,
+    resolve_props: bool,
+    resolve_tree: bool,
+    conflict_choice: ConflictChoice,
+) -> Result<(), Error> {
+    let path_str = path.to_string_lossy();
+    let path_cstr = std::ffi::CString::new(path_str.as_ref())?;
+    
+    with_tmp_pool(|pool| unsafe {
+        let err = subversion_sys::svn_wc_resolved_conflict5(
+            ctx.as_mut_ptr(),
+            path_cstr.as_ptr(),
+            depth.into(),
+            resolve_text as i32,
+            std::ptr::null(), // resolve_prop (resolve all props if resolve_props is true)
+            resolve_tree as i32,
+            conflict_choice.into(),
+            None, // cancel_func
+            std::ptr::null_mut(), // cancel_baton
+            None, // notify_func
+            std::ptr::null_mut(), // notify_baton
+            pool.as_mut_ptr(),
+        );
+        Error::from_raw(err)
+    })
+}
+
+
+
 pub fn revision_status(
     wc_path: &std::path::Path,
     trail_url: Option<&str>,

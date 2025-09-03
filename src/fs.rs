@@ -740,6 +740,18 @@ impl Drop for Transaction {
 }
 
 impl Transaction {
+    /// Create Transaction from existing pointer with pool (for repos integration)
+    pub(crate) unsafe fn from_ptr_and_pool(
+        ptr: *mut subversion_sys::svn_fs_txn_t,
+        pool: apr::Pool,
+    ) -> Self {
+        Self {
+            ptr,
+            pool,
+            _phantom: std::marker::PhantomData,
+        }
+    }
+    
     /// Get the transaction name
     pub fn name(&self) -> Result<String, Error> {
         with_tmp_pool(|pool| unsafe {
