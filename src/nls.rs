@@ -85,12 +85,16 @@ impl MessageCatalog {
 
     /// Add a translation
     pub fn add_translation(&mut self, message_id: &str, translation: &str) {
-        self.translations.insert(message_id.to_string(), translation.to_string());
+        self.translations
+            .insert(message_id.to_string(), translation.to_string());
     }
 
     /// Get a translation, fallback to message_id if not found
     pub fn translate(&self, message_id: &str) -> String {
-        self.translations.get(message_id).cloned().unwrap_or_else(|| message_id.to_string())
+        self.translations
+            .get(message_id)
+            .cloned()
+            .unwrap_or_else(|| message_id.to_string())
     }
 
     /// Check if a translation exists
@@ -101,10 +105,11 @@ impl MessageCatalog {
 
 /// Global NLS state
 static CURRENT_LOCALE: Mutex<Option<LocaleInfo>> = Mutex::new(None);
-static MESSAGE_CATALOGS: LazyLock<Mutex<HashMap<String, MessageCatalog>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+static MESSAGE_CATALOGS: LazyLock<Mutex<HashMap<String, MessageCatalog>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Initialize NLS with default locale
-/// 
+///
 /// Note: This is currently a placeholder since svn_nls_init() is not available
 /// in subversion-sys bindings.
 pub fn init() -> Result<(), Error> {
@@ -114,7 +119,7 @@ pub fn init() -> Result<(), Error> {
     // TODO: When subversion-sys exposes NLS functions, implement:
     // - svn_nls_init()
     // - Load message catalogs from system
-    
+
     Ok(())
 }
 
@@ -144,7 +149,7 @@ pub fn get_locale() -> Result<LocaleInfo, Error> {
 pub fn detect_system_locale() -> LocaleInfo {
     // Try various environment variables
     let locale_vars = ["LC_ALL", "LC_MESSAGES", "LANG"];
-    
+
     for var in &locale_vars {
         if let Ok(value) = std::env::var(var) {
             if !value.is_empty() && value != "C" && value != "POSIX" {
@@ -169,7 +174,7 @@ pub fn register_message_catalog(catalog: MessageCatalog) -> Result<(), Error> {
 /// Translate a message using current locale
 pub fn translate_message(message_id: &str) -> Result<String, Error> {
     let locale = get_locale()?;
-    
+
     if let Ok(catalogs) = MESSAGE_CATALOGS.lock() {
         if let Some(catalog) = catalogs.get(&locale.language) {
             return Ok(catalog.translate(message_id));
@@ -183,7 +188,7 @@ pub fn translate_message(message_id: &str) -> Result<String, Error> {
 /// Translate a message with format arguments
 pub fn translate_message_with_args(message_id: &str, args: &[&str]) -> Result<String, Error> {
     let translated = translate_message(message_id)?;
-    
+
     // Simple placeholder replacement (e.g., {0}, {1}, etc.)
     let mut result = translated;
     for (i, arg) in args.iter().enumerate() {
@@ -195,7 +200,11 @@ pub fn translate_message_with_args(message_id: &str, args: &[&str]) -> Result<St
 }
 
 /// Convert text between character encodings
-pub fn convert_encoding(text: &str, from_encoding: &str, to_encoding: &str) -> Result<String, Error> {
+pub fn convert_encoding(
+    text: &str,
+    from_encoding: &str,
+    to_encoding: &str,
+) -> Result<String, Error> {
     // For UTF-8 to UTF-8, no conversion needed
     if from_encoding.to_uppercase() == to_encoding.to_uppercase() {
         return Ok(text.to_string());
@@ -204,10 +213,12 @@ pub fn convert_encoding(text: &str, from_encoding: &str, to_encoding: &str) -> R
     // TODO: When subversion-sys exposes encoding functions, implement:
     // - Use SVN's character encoding conversion functions
     // - Handle various encodings (ISO-8859-1, Windows-1252, etc.)
-    
+
     // For now, assume UTF-8 input and validate
     if !text.is_ascii() && to_encoding.to_uppercase() != "UTF-8" {
-        return Err(Error::from_str("Character encoding conversion not fully implemented"));
+        return Err(Error::from_str(
+            "Character encoding conversion not fully implemented",
+        ));
     }
 
     Ok(text.to_string())
@@ -231,7 +242,7 @@ pub fn is_language_supported(language: &str) -> Result<bool, Error> {
 /// Create a basic error message catalog for common SVN errors
 pub fn create_default_error_catalog() -> MessageCatalog {
     let mut catalog = MessageCatalog::new("en");
-    
+
     // Common error messages
     catalog.add_translation("file_not_found", "File not found");
     catalog.add_translation("permission_denied", "Permission denied");
@@ -241,7 +252,7 @@ pub fn create_default_error_catalog() -> MessageCatalog {
     catalog.add_translation("merge_conflict", "Merge conflict");
     catalog.add_translation("network_error", "Network error");
     catalog.add_translation("authentication_failed", "Authentication failed");
-    
+
     catalog
 }
 
@@ -262,13 +273,28 @@ impl PluralRule {
     /// Get the plural form index for a count
     pub fn get_plural_index(&self, count: u32) -> usize {
         match self {
-            PluralRule::English => if count == 1 { 0 } else { 1 },
-            PluralRule::Romance => if count <= 1 { 0 } else { 1 },
+            PluralRule::English => {
+                if count == 1 {
+                    0
+                } else {
+                    1
+                }
+            }
+            PluralRule::Romance => {
+                if count <= 1 {
+                    0
+                } else {
+                    1
+                }
+            }
             PluralRule::Slavic => {
                 // Simplified Slavic rule (actual rules are more complex)
                 if count % 10 == 1 && count % 100 != 11 {
                     0 // singular
-                } else if count % 10 >= 2 && count % 10 <= 4 && (count % 100 < 10 || count % 100 >= 20) {
+                } else if count % 10 >= 2
+                    && count % 10 <= 4
+                    && (count % 100 < 10 || count % 100 >= 20)
+                {
                     1 // paucal
                 } else {
                     2 // plural
@@ -280,9 +306,13 @@ impl PluralRule {
 }
 
 /// Translate a message with plural forms
-pub fn translate_plural(message_id: &str, plural_forms: &[&str], count: u32) -> Result<String, Error> {
+pub fn translate_plural(
+    message_id: &str,
+    plural_forms: &[&str],
+    count: u32,
+) -> Result<String, Error> {
     let locale = get_locale()?;
-    
+
     // Determine plural rule based on language
     let rule = match locale.language.as_str() {
         "en" => PluralRule::English,
@@ -354,7 +384,8 @@ mod tests {
 
     #[test]
     fn test_message_with_args() {
-        let result = translate_message_with_args("Hello {0}, you have {1} messages", &["Alice", "5"]);
+        let result =
+            translate_message_with_args("Hello {0}, you have {1} messages", &["Alice", "5"]);
         match result {
             Ok(msg) => assert_eq!(msg, "Hello Alice, you have 5 messages"),
             Err(_) => {} // OK if NLS is not fully initialized
