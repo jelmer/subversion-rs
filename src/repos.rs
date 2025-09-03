@@ -445,6 +445,236 @@ impl Repos {
         Error::from_raw(ret)?;
         Ok(())
     }
+
+    /// Dump the contents of the repository to a stream
+    pub fn dump_fs(
+        &self,
+        stream: &mut crate::io::Stream,
+        start_rev: Option<Revnum>,
+        end_rev: Option<Revnum>,
+        incremental: bool,
+        use_deltas: bool,
+        notify_func: Option<&impl Fn(&Notify)>,
+        cancel_func: Option<&impl Fn() -> bool>,
+    ) -> Result<(), Error> {
+        let pool = apr::Pool::new();
+        let ret = unsafe {
+            subversion_sys::svn_repos_dump_fs4(
+                self.ptr,
+                stream.as_mut_ptr(),
+                start_rev.map(|r| r.0).unwrap_or(0),
+                end_rev.map(|r| r.0).unwrap_or(-1),
+                incremental as i32,
+                use_deltas as i32,
+                1, // include_revprops
+                1, // include_changes
+                if notify_func.is_some() {
+                    Some(wrap_notify_func)
+                } else {
+                    None
+                },
+                notify_func
+                    .map(|f| Box::into_raw(Box::new(f)) as *mut std::ffi::c_void)
+                    .unwrap_or(std::ptr::null_mut()),
+                None,                 // filter_func
+                std::ptr::null_mut(), // filter_baton
+                if cancel_func.is_some() {
+                    Some(crate::wrap_cancel_func)
+                } else {
+                    None
+                },
+                cancel_func
+                    .map(|f| Box::into_raw(Box::new(f)) as *mut std::ffi::c_void)
+                    .unwrap_or(std::ptr::null_mut()),
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(ret)?;
+        Ok(())
+    }
+
+    /// Get the UUID of the repository
+    pub fn uuid(&self) -> Result<String, Error> {
+        let pool = apr::Pool::new();
+        let mut uuid_ptr = std::ptr::null();
+        let ret = unsafe {
+            subversion_sys::svn_fs_get_uuid(
+                unsafe { subversion_sys::svn_repos_fs(self.ptr) },
+                &mut uuid_ptr,
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(ret)?;
+
+        if uuid_ptr.is_null() {
+            Ok(String::new())
+        } else {
+            let uuid_cstr = unsafe { std::ffi::CStr::from_ptr(uuid_ptr) };
+            Ok(uuid_cstr.to_str()?.to_string())
+        }
+    }
+
+    /// Set the UUID of the repository
+    pub fn set_uuid(&self, uuid: &str) -> Result<(), Error> {
+        let pool = apr::Pool::new();
+        let uuid_cstr = std::ffi::CString::new(uuid)?;
+        let ret = unsafe {
+            subversion_sys::svn_fs_set_uuid(
+                unsafe { subversion_sys::svn_repos_fs(self.ptr) },
+                uuid_cstr.as_ptr(),
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(ret)?;
+        Ok(())
+    }
+
+    /// Get the youngest revision in the repository
+    pub fn youngest_rev(&self) -> Result<Revnum, Error> {
+        let pool = apr::Pool::new();
+        let mut revnum: subversion_sys::svn_revnum_t = 0;
+        let ret = unsafe {
+            subversion_sys::svn_fs_youngest_rev(
+                &mut revnum,
+                unsafe { subversion_sys::svn_repos_fs(self.ptr) },
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(ret)?;
+        Ok(Revnum(revnum))
+    }
+
+    /// Begin a transaction
+    pub fn begin_txn_for_commit(
+        &self,
+        revnum: Revnum,
+        author: &str,
+        log_msg: &str,
+    ) -> Result<crate::fs::Transaction, Error> {
+        let pool = apr::Pool::new();
+        let mut txn_ptr = std::ptr::null_mut();
+
+        // Create revision properties
+        let mut revprop_table = apr::hash::Hash::new(&pool);
+
+        // Add author
+        let author_key = b"svn:author";
+        let author_val = crate::svn_string_helpers::svn_string_ncreate(author.as_bytes(), &pool);
+        unsafe {
+            revprop_table.insert(author_key, author_val as *mut std::ffi::c_void);
+        }
+
+        // Add log message
+        let log_key = b"svn:log";
+        let log_val = crate::svn_string_helpers::svn_string_ncreate(log_msg.as_bytes(), &pool);
+        unsafe {
+            revprop_table.insert(log_key, log_val as *mut std::ffi::c_void);
+        }
+
+        let ret = unsafe {
+            subversion_sys::svn_repos_fs_begin_txn_for_commit2(
+                &mut txn_ptr,
+                self.ptr,
+                revnum.0,
+                revprop_table.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(ret)?;
+
+        Ok(unsafe { crate::fs::Transaction::from_ptr_and_pool(txn_ptr, pool) })
+    }
+
+    /// Get revision properties
+    pub fn rev_proplist(
+        &self,
+        revnum: Revnum,
+    ) -> Result<std::collections::HashMap<String, Vec<u8>>, Error> {
+        let pool = apr::Pool::new();
+        let mut props_ptr = std::ptr::null_mut();
+
+        // Use authz_read_func that always allows access for simplicity
+        extern "C" fn authz_read_func(
+            _allowed: *mut i32,
+            _root: *mut subversion_sys::svn_fs_root_t,
+            _path: *const std::ffi::c_char,
+            _baton: *mut std::ffi::c_void,
+            _pool: *mut apr_sys::apr_pool_t,
+        ) -> *mut subversion_sys::svn_error_t {
+            unsafe {
+                *_allowed = 1; // Always allow
+            }
+            std::ptr::null_mut() // No error
+        }
+
+        let ret = unsafe {
+            subversion_sys::svn_repos_fs_revision_proplist(
+                &mut props_ptr,
+                self.ptr,
+                revnum.0,
+                Some(authz_read_func),
+                std::ptr::null_mut(),
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(ret)?;
+
+        if props_ptr.is_null() {
+            Ok(std::collections::HashMap::new())
+        } else {
+            let prop_hash = unsafe { crate::props::PropHash::from_ptr(props_ptr) };
+            Ok(prop_hash.to_hashmap())
+        }
+    }
+
+    /// Change a revision property
+    pub fn change_rev_prop(
+        &self,
+        revnum: Revnum,
+        name: &str,
+        value: Option<&[u8]>,
+    ) -> Result<(), Error> {
+        let pool = apr::Pool::new();
+        let name_cstr = std::ffi::CString::new(name)?;
+
+        let value_ptr = if let Some(val) = value {
+            crate::svn_string_helpers::svn_string_ncreate(val, &pool)
+        } else {
+            std::ptr::null_mut()
+        };
+
+        // Use authz_read_func that always allows access
+        extern "C" fn authz_read_func(
+            _allowed: *mut i32,
+            _root: *mut subversion_sys::svn_fs_root_t,
+            _path: *const std::ffi::c_char,
+            _baton: *mut std::ffi::c_void,
+            _pool: *mut apr_sys::apr_pool_t,
+        ) -> *mut subversion_sys::svn_error_t {
+            unsafe {
+                *_allowed = 1; // Always allow
+            }
+            std::ptr::null_mut()
+        }
+
+        let ret = unsafe {
+            subversion_sys::svn_repos_fs_change_rev_prop4(
+                self.ptr,
+                revnum.0,
+                std::ptr::null(), // author
+                name_cstr.as_ptr(),
+                std::ptr::null_mut(), // old_value_p
+                value_ptr,
+                1, // use_pre_revprop_change_hook
+                1, // use_post_revprop_change_hook
+                Some(authz_read_func),
+                std::ptr::null_mut(),
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(ret)?;
+        Ok(())
+    }
 }
 
 pub fn recover(
