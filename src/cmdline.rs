@@ -93,7 +93,9 @@ impl TerminalInfo {
         let supports_utf8 = std::env::var("LC_ALL")
             .or_else(|_| std::env::var("LC_CTYPE"))
             .or_else(|_| std::env::var("LANG"))
-            .map(|locale| locale.to_uppercase().contains("UTF-8") || locale.to_uppercase().contains("UTF8"))
+            .map(|locale| {
+                locale.to_uppercase().contains("UTF-8") || locale.to_uppercase().contains("UTF8")
+            })
             .unwrap_or(true); // Default to UTF-8 support
 
         // Detect if output is redirected
@@ -267,7 +269,7 @@ impl ProgressNotifier {
         }
 
         let progress = (completed as f64) / (total as f64);
-        
+
         // Only update if progress changed significantly
         if (progress - self.last_progress).abs() < 0.01 {
             return Ok(());
@@ -286,20 +288,26 @@ impl ProgressNotifier {
         // Format progress bar
         let width = self.context.terminal.effective_width().min(80);
         let bar_width = width.saturating_sub(20); // Leave space for percentages and info
-        
+
         if bar_width > 0 {
             let filled = ((progress * bar_width as f64) as usize).min(bar_width);
             let bar = "=".repeat(filled) + &" ".repeat(bar_width - filled);
-            
+
             print!("\r[{}] {:.1}%", bar, progress * 100.0);
-            
+
             if let Some(eta_duration) = eta {
                 if eta_duration.as_secs() < 3600 {
-                    print!(" ETA: {}:{:02}", eta_duration.as_secs() / 60, eta_duration.as_secs() % 60);
+                    print!(
+                        " ETA: {}:{:02}",
+                        eta_duration.as_secs() / 60,
+                        eta_duration.as_secs() % 60
+                    );
                 }
             }
-            
-            io::stdout().flush().map_err(|e| Error::from_str(&format!("Progress display error: {}", e)))?;
+
+            io::stdout()
+                .flush()
+                .map_err(|e| Error::from_str(&format!("Progress display error: {}", e)))?;
         }
 
         // Report to callback
@@ -320,7 +328,7 @@ impl ProgressNotifier {
 /// Format byte count for human display
 pub fn format_bytes(bytes: u64) -> String {
     const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
-    
+
     if bytes == 0 {
         return "0 B".to_string();
     }
@@ -343,7 +351,7 @@ pub fn format_bytes(bytes: u64) -> String {
 /// Format duration for human display
 pub fn format_duration(duration: std::time::Duration) -> String {
     let secs = duration.as_secs();
-    
+
     if secs < 60 {
         format!("{}s", secs)
     } else if secs < 3600 {
@@ -370,11 +378,14 @@ pub fn prompt_user(prompt: &str, echo: bool) -> Result<String, Error> {
     }
 
     print!("{}", prompt);
-    io::stdout().flush().map_err(|e| Error::from_str(&format!("Prompt error: {}", e)))?;
+    io::stdout()
+        .flush()
+        .map_err(|e| Error::from_str(&format!("Prompt error: {}", e)))?;
 
     if echo {
         let mut input = String::new();
-        io::stdin().read_line(&mut input)
+        io::stdin()
+            .read_line(&mut input)
             .map_err(|e| Error::from_str(&format!("Input error: {}", e)))?;
         Ok(input.trim().to_string())
     } else {
@@ -384,35 +395,36 @@ pub fn prompt_user(prompt: &str, echo: bool) -> Result<String, Error> {
         {
             use std::os::unix::io::AsRawFd;
             let mut input = String::new();
-            
+
             // Disable echo
             let stdin_fd = io::stdin().as_raw_fd();
             let mut termios: libc::termios = unsafe { std::mem::zeroed() };
-            
+
             unsafe {
                 libc::tcgetattr(stdin_fd, &mut termios);
                 let original_lflag = termios.c_lflag;
                 termios.c_lflag &= !(libc::ECHO | libc::ECHONL);
                 libc::tcsetattr(stdin_fd, libc::TCSAFLUSH, &termios);
-                
+
                 let result = io::stdin().read_line(&mut input);
-                
+
                 // Restore echo
                 termios.c_lflag = original_lflag;
                 libc::tcsetattr(stdin_fd, libc::TCSAFLUSH, &termios);
-                
+
                 println!(); // Add newline since echo was disabled
-                
+
                 result.map_err(|e| Error::from_str(&format!("Input error: {}", e)))?;
             }
-            
+
             Ok(input.trim().to_string())
         }
         #[cfg(not(unix))]
         {
             // Fallback for non-Unix systems - just read normally
             let mut input = String::new();
-            io::stdin().read_line(&mut input)
+            io::stdin()
+                .read_line(&mut input)
                 .map_err(|e| Error::from_str(&format!("Input error: {}", e)))?;
             println!("Warning: Password input not hidden on this platform");
             Ok(input.trim().to_string())
@@ -435,12 +447,12 @@ mod tests {
     #[test]
     fn test_terminal_effective_width() {
         let mut terminal = TerminalInfo::detect();
-        
+
         // Normal terminal
         terminal.is_redirected = false;
         terminal.width = Some(100);
         assert_eq!(terminal.effective_width(), 100);
-        
+
         // Redirected output should use unlimited width
         terminal.is_redirected = true;
         assert_eq!(terminal.effective_width(), usize::MAX);
@@ -457,17 +469,17 @@ mod tests {
     #[test]
     fn test_cmdline_context_settings() {
         let mut context = CmdlineContext::new();
-        
+
         context.set_quiet(true);
         assert!(context.quiet);
-        
+
         context.set_verbose(3);
         assert_eq!(context.verbose, 3);
-        
+
         // Progress callback
         context.set_progress_callback(Box::new(|_completed, _total| {}));
         assert!(context.progress_callback.is_some());
-        
+
         context.clear_progress_callback();
         assert!(context.progress_callback.is_none());
     }
@@ -476,7 +488,7 @@ mod tests {
     fn test_init() {
         let result = init("test-program");
         assert!(result.is_ok());
-        
+
         let result = init("");
         assert!(result.is_err());
     }
@@ -502,7 +514,10 @@ mod tests {
     fn test_format_duration() {
         assert_eq!(format_duration(std::time::Duration::from_secs(30)), "30s");
         assert_eq!(format_duration(std::time::Duration::from_secs(90)), "1m30s");
-        assert_eq!(format_duration(std::time::Duration::from_secs(3661)), "1h1m1s");
+        assert_eq!(
+            format_duration(std::time::Duration::from_secs(3661)),
+            "1h1m1s"
+        );
     }
 
     #[test]
@@ -516,11 +531,11 @@ mod tests {
     fn test_progress_notifier() {
         let context = CmdlineContext::new();
         let mut notifier = ProgressNotifier::new(context);
-        
+
         // Should not panic
         let result = notifier.update(50, 100);
         let _ = result;
-        
+
         let result = notifier.finish();
         let _ = result;
     }

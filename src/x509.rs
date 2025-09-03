@@ -16,7 +16,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 pub struct CertificateInfo {
     /// Certificate subject (DN)
     pub subject: String,
-    /// Certificate issuer (DN) 
+    /// Certificate issuer (DN)
     pub issuer: String,
     /// Certificate serial number
     pub serial_number: String,
@@ -239,7 +239,9 @@ pub fn parse_certificate_pem(pem_data: &str) -> Result<CertificateInfo, Error> {
     }
 
     if !pem_data.contains("-----BEGIN CERTIFICATE-----") {
-        return Err(Error::from_str("Invalid PEM format: missing certificate header"));
+        return Err(Error::from_str(
+            "Invalid PEM format: missing certificate header",
+        ));
     }
 
     // TODO: When subversion-sys exposes certificate parsing functions, implement:
@@ -300,7 +302,10 @@ pub fn calculate_fingerprint(cert_data: &[u8]) -> Result<String, Error> {
     // This would involve hashing the certificate DER data
 
     // For now, return a placeholder fingerprint
-    Ok("placeholder:fingerprint:00:11:22:33:44:55:66:77:88:99:aa:bb:cc:dd:ee:ff:00:11:22:33".to_string())
+    Ok(
+        "placeholder:fingerprint:00:11:22:33:44:55:66:77:88:99:aa:bb:cc:dd:ee:ff:00:11:22:33"
+            .to_string(),
+    )
 }
 
 /// Certificate store for managing multiple certificates
@@ -427,13 +432,19 @@ pub fn format_certificate_info(cert: &CertificateInfo) -> String {
     info.push_str(&format!("Valid From: {:?}\n", cert.valid_from));
     info.push_str(&format!("Valid Until: {:?}\n", cert.valid_until));
     info.push_str(&format!("Fingerprint: {}\n", cert.fingerprint));
-    info.push_str(&format!("Signature Algorithm: {}\n", cert.signature_algorithm));
+    info.push_str(&format!(
+        "Signature Algorithm: {}\n",
+        cert.signature_algorithm
+    ));
     info.push_str(&format!("Version: {}\n", cert.version));
-    
+
     if !cert.subject_alt_names.is_empty() {
-        info.push_str(&format!("Subject Alt Names: {}\n", cert.subject_alt_names.join(", ")));
+        info.push_str(&format!(
+            "Subject Alt Names: {}\n",
+            cert.subject_alt_names.join(", ")
+        ));
     }
-    
+
     info
 }
 
@@ -445,7 +456,7 @@ mod tests {
         let now = SystemTime::now();
         let one_hour_ago = now - Duration::from_secs(3600);
         let one_year_from_now = now + Duration::from_secs(365 * 24 * 3600);
-        
+
         CertificateInfo {
             subject: "CN=example.com,O=Example Corp,C=US".to_string(),
             issuer: "CN=Example CA,O=Example Corp,C=US".to_string(),
@@ -510,7 +521,7 @@ mod tests {
 
         let cert = create_test_certificate();
         let result = context.validate(&cert);
-        
+
         // Should be valid since our test cert is valid for example.com
         assert_eq!(result, ValidationResult::Valid);
     }
@@ -522,14 +533,17 @@ mod tests {
         let fingerprint = cert.fingerprint.clone();
 
         assert_eq!(store.count(), 0);
-        
+
         store.add_certificate(cert);
         assert_eq!(store.count(), 1);
-        
+
         let retrieved = store.get_certificate(&fingerprint);
         assert!(retrieved.is_some());
-        assert_eq!(retrieved.unwrap().subject, "CN=example.com,O=Example Corp,C=US");
-        
+        assert_eq!(
+            retrieved.unwrap().subject,
+            "CN=example.com,O=Example Corp,C=US"
+        );
+
         let removed = store.remove_certificate(&fingerprint);
         assert!(removed.is_some());
         assert_eq!(store.count(), 0);
@@ -589,17 +603,26 @@ mod tests {
     #[test]
     fn test_extract_subject_field() {
         let subject_dn = "CN=example.com,O=Example Corp,C=US";
-        
-        assert_eq!(extract_subject_field(subject_dn, "CN"), Some("example.com".to_string()));
-        assert_eq!(extract_subject_field(subject_dn, "O"), Some("Example Corp".to_string()));
-        assert_eq!(extract_subject_field(subject_dn, "C"), Some("US".to_string()));
+
+        assert_eq!(
+            extract_subject_field(subject_dn, "CN"),
+            Some("example.com".to_string())
+        );
+        assert_eq!(
+            extract_subject_field(subject_dn, "O"),
+            Some("Example Corp".to_string())
+        );
+        assert_eq!(
+            extract_subject_field(subject_dn, "C"),
+            Some("US".to_string())
+        );
         assert_eq!(extract_subject_field(subject_dn, "L"), None);
     }
 
     #[test]
     fn test_certificate_field_extraction() {
         let cert = create_test_certificate();
-        
+
         assert_eq!(get_common_name(&cert), Some("example.com".to_string()));
         assert_eq!(get_organization(&cert), Some("Example Corp".to_string()));
         assert_eq!(get_country(&cert), Some("US".to_string()));
@@ -609,7 +632,7 @@ mod tests {
     fn test_format_certificate_info() {
         let cert = create_test_certificate();
         let formatted = format_certificate_info(&cert);
-        
+
         assert!(formatted.contains("Subject: CN=example.com,O=Example Corp,C=US"));
         assert!(formatted.contains("Issuer: CN=Example CA,O=Example Corp,C=US"));
         assert!(formatted.contains("Version: 3"));
