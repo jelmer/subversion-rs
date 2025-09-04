@@ -5225,6 +5225,46 @@ mod tests {
     }
 
     #[test]
+    fn test_cleanup_basic() {
+        let mut ctx = Context::new().unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
+        let temp_path_str = temp_dir.path().to_str().unwrap();
+
+        // Test cleanup on a non-working-copy directory (should fail)
+        let options = CleanupOptions {
+            break_locks: false,
+            fix_recorded_timestamps: false,
+            clear_dav_cache: false,
+            vacuum_pristines: false,
+            include_externals: false,
+        };
+        let result = ctx.cleanup(temp_path_str, &options);
+
+        // Expected to fail without valid working copy
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_vacuum_basic() {
+        let mut ctx = Context::new().unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
+        let temp_path_str = temp_dir.path().to_str().unwrap();
+
+        // Test vacuum on a non-working-copy directory (should fail)
+        let options = VacuumOptions {
+            remove_unversioned_items: false,
+            remove_ignored_items: false,
+            fix_recorded_timestamps: false,
+            vacuum_pristines: true,
+            include_externals: false,
+        };
+        let result = ctx.vacuum(temp_path_str, &options);
+
+        // Expected to fail without valid working copy
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn test_merge_reintegrate_invalid_params() {
         let mut ctx = Context::new().unwrap();
 
