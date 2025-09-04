@@ -990,6 +990,111 @@ impl Context {
             Error::from_raw(err)
         }
     }
+
+    /// Crop a working copy subtree to a specified depth
+    ///
+    /// This function will remove any items that exceed the specified depth.
+    /// For example, cropping to Depth::Files will remove any subdirectories.
+    pub fn crop_tree(
+        &mut self,
+        local_abspath: &std::path::Path,
+        depth: crate::Depth,
+        cancel_func: Option<&dyn Fn() -> Result<(), Error>>,
+    ) -> Result<(), Error> {
+        let pool = apr::Pool::new();
+        let path = local_abspath.to_str().unwrap();
+        let path_cstr = std::ffi::CString::new(path).unwrap();
+
+        let cancel_baton = cancel_func
+            .map(|f| Box::into_raw(Box::new(f)) as *mut std::ffi::c_void)
+            .unwrap_or(std::ptr::null_mut());
+
+        let ret = unsafe {
+            subversion_sys::svn_wc_crop_tree2(
+                self.ptr,
+                path_cstr.as_ptr(),
+                depth.into(),
+                if cancel_func.is_some() {
+                    Some(crate::wrap_cancel_func)
+                } else {
+                    None
+                },
+                cancel_baton,
+                None,                 // notify_func - not commonly used for crop
+                std::ptr::null_mut(), // notify_baton
+                pool.as_mut_ptr(),
+            )
+        };
+
+        // Free callback baton
+        if !cancel_baton.is_null() {
+            unsafe {
+                drop(Box::from_raw(
+                    cancel_baton as *mut Box<dyn Fn() -> Result<(), Error>>,
+                ))
+            };
+        }
+
+        Error::from_raw(ret)
+    }
+
+    /// Resolve a conflict on a working copy path
+    ///
+    /// This is the most advanced conflict resolution function, allowing
+    /// specification of which conflict to resolve and how to resolve it.
+    pub fn resolved_conflict(
+        &mut self,
+        local_abspath: &std::path::Path,
+        depth: crate::Depth,
+        resolve_text: bool,
+        resolve_property: Option<&str>,
+        resolve_tree: bool,
+        conflict_choice: ConflictChoice,
+        cancel_func: Option<&dyn Fn() -> Result<(), Error>>,
+    ) -> Result<(), Error> {
+        let pool = apr::Pool::new();
+        let path = local_abspath.to_str().unwrap();
+        let path_cstr = std::ffi::CString::new(path).unwrap();
+
+        let prop_cstr = resolve_property.map(|p| std::ffi::CString::new(p).unwrap());
+        let prop_ptr = prop_cstr.as_ref().map_or(std::ptr::null(), |p| p.as_ptr());
+
+        let cancel_baton = cancel_func
+            .map(|f| Box::into_raw(Box::new(f)) as *mut std::ffi::c_void)
+            .unwrap_or(std::ptr::null_mut());
+
+        let ret = unsafe {
+            subversion_sys::svn_wc_resolved_conflict5(
+                self.ptr,
+                path_cstr.as_ptr(),
+                depth.into(),
+                resolve_text.into(),
+                prop_ptr,
+                resolve_tree.into(),
+                conflict_choice.into(),
+                if cancel_func.is_some() {
+                    Some(crate::wrap_cancel_func)
+                } else {
+                    None
+                },
+                cancel_baton,
+                None,                 // notify_func
+                std::ptr::null_mut(), // notify_baton
+                pool.as_mut_ptr(),
+            )
+        };
+
+        // Free callback baton
+        if !cancel_baton.is_null() {
+            unsafe {
+                drop(Box::from_raw(
+                    cancel_baton as *mut Box<dyn Fn() -> Result<(), Error>>,
+                ))
+            };
+        }
+
+        Error::from_raw(ret)
+    }
 }
 
 /// Represents a queue of committed items
@@ -1519,6 +1624,56 @@ mod tests {
         );
     }
 
-    // Tests for conflict resolution functions would go here when
-    // the underlying FFI bindings are properly implemented
+    #[test]
+    fn test_crop_tree_basic() {
+        // Test that crop_tree function compiles and can be called
+        // Creating a real working copy for testing would require full SVN setup
+        let mut ctx = Context::new().unwrap();
+        let tempdir = tempdir().unwrap();
+
+        // This will fail without a working copy, but tests the API
+        let result = ctx.crop_tree(tempdir.path(), crate::Depth::Files, None);
+
+        // Expected to fail without valid working copy
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_resolved_conflict_basic() {
+        // Test that resolved_conflict function compiles and can be called
+        let mut ctx = Context::new().unwrap();
+        let tempdir = tempdir().unwrap();
+
+        // This will fail without a working copy with conflicts, but tests the API
+        let result = ctx.resolved_conflict(
+            tempdir.path(),
+            crate::Depth::Infinity,
+            true,  // resolve_text
+            None,  // resolve_property
+            false, // resolve_tree
+            ConflictChoice::Mine,
+            None,
+        );
+
+        // Expected to fail without valid working copy
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_conflict_choice_conversion() {
+        // Test that ConflictChoice enum converts properly to SVN types
+        let choice = ConflictChoice::Mine;
+        let svn_choice: subversion_sys::svn_wc_conflict_choice_t = choice.into();
+        assert_eq!(
+            svn_choice,
+            subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_mine_full
+        );
+
+        let choice = ConflictChoice::Theirs;
+        let svn_choice: subversion_sys::svn_wc_conflict_choice_t = choice.into();
+        assert_eq!(
+            svn_choice,
+            subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_theirs_full
+        );
+    }
 }
