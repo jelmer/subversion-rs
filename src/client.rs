@@ -5283,4 +5283,109 @@ mod tests {
         // Should fail for invalid source and target
         assert!(result.is_err());
     }
+
+    #[test]
+    fn test_blame_invalid_path() {
+        let mut ctx = Context::new().unwrap();
+
+        let mut blame_info_received = false;
+        let mut receiver = |info: BlameInfo| -> Result<(), Error> {
+            blame_info_received = true;
+            // Verify the BlameInfo structure has expected fields
+            assert!(info.line_no >= 0);
+            // For invalid path, we might still get blame info or error
+            Ok(())
+        };
+
+        // Test blame with invalid path/URL (should fail gracefully)
+        let result = ctx.blame(
+            "file:///non/existent/file.txt",
+            Revision::Head,
+            Revision::Number(Revnum::from(1u64)),
+            Revision::Head,
+            vec![], // diff_options
+            false,  // ignore_mime_type
+            false,  // include_merged_revisions
+            &mut receiver,
+        );
+
+        // Should return error for invalid file
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_cat_invalid_path() {
+        let mut ctx = Context::new().unwrap();
+
+        let mut output = Vec::new();
+        let options = CatOptions {
+            revision: Revision::Head,
+            peg_revision: Revision::Head,
+            expand_keywords: false,
+        };
+
+        // Test cat with invalid path/URL (should fail gracefully)
+        let result = ctx.cat("file:///non/existent/file.txt", &mut output, &options);
+
+        // Should return error for invalid file
+        assert!(result.is_err());
+        // Output should remain empty
+        assert!(output.is_empty());
+    }
+
+    #[test]
+    fn test_blame_api_structure() {
+        // Test that BlameInfo can be constructed and has expected fields
+        use std::collections::HashMap;
+
+        let info = BlameInfo {
+            line_no: 42,
+            revision: Revnum::from(123u64),
+            revprops: HashMap::new(),
+            merged_revision: None,
+            merged_revprops: HashMap::new(),
+            merged_path: None,
+            line: "test line content".to_string(),
+            local_change: false,
+        };
+
+        assert_eq!(info.line_no, 42);
+        assert_eq!(info.revision, Revnum::from(123u64));
+        assert_eq!(info.line, "test line content");
+        assert!(!info.local_change);
+        assert!(info.merged_revision.is_none());
+        assert!(info.merged_path.is_none());
+    }
+
+    #[test]
+    fn test_cat_options_structure() {
+        let options = CatOptions {
+            revision: Revision::Number(Revnum::from(42u64)),
+            peg_revision: Revision::Head,
+            expand_keywords: true,
+        };
+
+        // Verify options structure
+        match options.revision {
+            Revision::Number(n) => assert_eq!(n, Revnum::from(42u64)),
+            _ => panic!("Expected Number revision"),
+        }
+        match options.peg_revision {
+            Revision::Head => {} // expected
+            _ => panic!("Expected Head revision"),
+        }
+        assert!(options.expand_keywords);
+
+        // Test default
+        let default_options = CatOptions::default();
+        match default_options.revision {
+            Revision::Unspecified => {} // expected default
+            _ => panic!("Expected Unspecified revision as default"),
+        }
+        match default_options.peg_revision {
+            Revision::Unspecified => {} // expected default
+            _ => panic!("Expected Unspecified peg revision as default"),
+        }
+        assert!(!default_options.expand_keywords);
+    }
 }
