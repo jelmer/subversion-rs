@@ -751,7 +751,7 @@ impl Transaction {
             _phantom: std::marker::PhantomData,
         }
     }
-    
+
     /// Get the transaction name
     pub fn name(&self) -> Result<String, Error> {
         with_tmp_pool(|pool| unsafe {

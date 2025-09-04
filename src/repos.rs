@@ -448,8 +448,7 @@ impl Repos {
         Error::from_raw(ret)?;
         Ok(())
     }
-    
-    
+
     /// Get the UUID of the repository
     pub fn uuid(&self) -> Result<String, Error> {
         let pool = apr::Pool::new();
@@ -462,7 +461,7 @@ impl Repos {
             )
         };
         Error::from_raw(ret)?;
-        
+
         if uuid_ptr.is_null() {
             Ok(String::new())
         } else {
@@ -470,7 +469,7 @@ impl Repos {
             Ok(uuid_cstr.to_str()?.to_string())
         }
     }
-    
+
     /// Set the UUID of the repository
     pub fn set_uuid(&self, uuid: &str) -> Result<(), Error> {
         let pool = apr::Pool::new();
@@ -485,7 +484,7 @@ impl Repos {
         Error::from_raw(ret)?;
         Ok(())
     }
-    
+
     /// Get the youngest revision in the repository
     pub fn youngest_rev(&self) -> Result<Revnum, Error> {
         let pool = apr::Pool::new();
@@ -500,7 +499,7 @@ impl Repos {
         Error::from_raw(ret)?;
         Ok(Revnum(revnum))
     }
-    
+
     /// Begin a transaction
     pub fn begin_txn_for_commit(
         &self,
@@ -510,24 +509,24 @@ impl Repos {
     ) -> Result<crate::fs::Transaction, Error> {
         let pool = apr::Pool::new();
         let mut txn_ptr = std::ptr::null_mut();
-        
+
         // Create revision properties
         let mut revprop_table = apr::hash::Hash::new(&pool);
-        
+
         // Add author
         let author_key = b"svn:author";
         let author_val = crate::svn_string_helpers::svn_string_ncreate(author.as_bytes(), &pool);
         unsafe {
             revprop_table.insert(author_key, author_val as *mut std::ffi::c_void);
         }
-        
+
         // Add log message
         let log_key = b"svn:log";
         let log_val = crate::svn_string_helpers::svn_string_ncreate(log_msg.as_bytes(), &pool);
         unsafe {
             revprop_table.insert(log_key, log_val as *mut std::ffi::c_void);
         }
-        
+
         let ret = unsafe {
             subversion_sys::svn_repos_fs_begin_txn_for_commit2(
                 &mut txn_ptr,
@@ -538,15 +537,18 @@ impl Repos {
             )
         };
         Error::from_raw(ret)?;
-        
+
         Ok(unsafe { crate::fs::Transaction::from_ptr_and_pool(txn_ptr, pool) })
     }
-    
+
     /// Get revision properties
-    pub fn rev_proplist(&self, revnum: Revnum) -> Result<std::collections::HashMap<String, Vec<u8>>, Error> {
+    pub fn rev_proplist(
+        &self,
+        revnum: Revnum,
+    ) -> Result<std::collections::HashMap<String, Vec<u8>>, Error> {
         let pool = apr::Pool::new();
         let mut props_ptr = std::ptr::null_mut();
-        
+
         // Use authz_read_func that always allows access for simplicity
         extern "C" fn authz_read_func(
             _allowed: *mut i32,
@@ -560,7 +562,7 @@ impl Repos {
             }
             std::ptr::null_mut() // No error
         }
-        
+
         let ret = unsafe {
             subversion_sys::svn_repos_fs_revision_proplist(
                 &mut props_ptr,
@@ -572,7 +574,7 @@ impl Repos {
             )
         };
         Error::from_raw(ret)?;
-        
+
         if props_ptr.is_null() {
             Ok(std::collections::HashMap::new())
         } else {
@@ -580,7 +582,7 @@ impl Repos {
             Ok(prop_hash.to_hashmap())
         }
     }
-    
+
     /// Change a revision property
     pub fn change_rev_prop(
         &self,
@@ -590,13 +592,13 @@ impl Repos {
     ) -> Result<(), Error> {
         let pool = apr::Pool::new();
         let name_cstr = std::ffi::CString::new(name)?;
-        
+
         let value_ptr = if let Some(val) = value {
             crate::svn_string_helpers::svn_string_ncreate(val, &pool)
         } else {
             std::ptr::null_mut()
         };
-        
+
         // Use authz_read_func that always allows access
         extern "C" fn authz_read_func(
             _allowed: *mut i32,
@@ -610,7 +612,7 @@ impl Repos {
             }
             std::ptr::null_mut()
         }
-        
+
         let ret = unsafe {
             subversion_sys::svn_repos_fs_change_rev_prop4(
                 self.ptr,
@@ -650,7 +652,7 @@ impl Repos {
         let cancel_baton = cancel_func
             .map(|cancel_func| Box::into_raw(Box::new(cancel_func)) as *mut std::ffi::c_void)
             .unwrap_or(std::ptr::null_mut());
-            
+
         let ret = unsafe {
             svn_repos_dump_fs4(
                 self.ptr,
@@ -667,7 +669,7 @@ impl Repos {
                     None
                 },
                 notify_baton,
-                None, // filter_func - not commonly used
+                None,                 // filter_func - not commonly used
                 std::ptr::null_mut(), // filter_baton
                 if cancel_func.is_some() {
                     Some(crate::wrap_cancel_func)
@@ -678,15 +680,19 @@ impl Repos {
                 pool.as_mut_ptr(),
             )
         };
-        
+
         // Free callback batons
         if !notify_baton.is_null() {
             unsafe { drop(Box::from_raw(notify_baton as *mut Box<dyn Fn(&Notify)>)) };
         }
         if !cancel_baton.is_null() {
-            unsafe { drop(Box::from_raw(cancel_baton as *mut Box<dyn Fn() -> Result<(), Error>>)) };
+            unsafe {
+                drop(Box::from_raw(
+                    cancel_baton as *mut Box<dyn Fn() -> Result<(), Error>>,
+                ))
+            };
         }
-        
+
         Error::from_raw(ret)?;
         Ok(())
     }
@@ -708,8 +714,7 @@ impl Repos {
         cancel_func: Option<&dyn Fn() -> Result<(), Error>>,
     ) -> Result<(), Error> {
         let pool = apr::Pool::new();
-        let parent_dir_cstr = parent_dir
-            .map(|p| std::ffi::CString::new(p).unwrap());
+        let parent_dir_cstr = parent_dir.map(|p| std::ffi::CString::new(p).unwrap());
         let parent_dir_ptr = parent_dir_cstr
             .as_ref()
             .map(|s| s.as_ptr())
@@ -750,15 +755,19 @@ impl Repos {
                 pool.as_mut_ptr(),
             )
         };
-        
+
         // Free callback batons
         if !notify_baton.is_null() {
             unsafe { drop(Box::from_raw(notify_baton as *mut Box<dyn Fn(&Notify)>)) };
         }
         if !cancel_baton.is_null() {
-            unsafe { drop(Box::from_raw(cancel_baton as *mut Box<dyn Fn() -> Result<(), Error>>)) };
+            unsafe {
+                drop(Box::from_raw(
+                    cancel_baton as *mut Box<dyn Fn() -> Result<(), Error>>,
+                ))
+            };
         }
-        
+
         Error::from_raw(ret)?;
         Ok(())
     }
@@ -789,7 +798,7 @@ impl Repos {
                 Err(e) => unsafe { e.into_raw() },
             }
         }
-        
+
         let pool = apr::Pool::new();
         let notify_baton = notify_func
             .map(|notify_func| Box::into_raw(Box::new(notify_func)) as *mut std::ffi::c_void)
@@ -800,7 +809,7 @@ impl Repos {
         let cancel_baton = cancel_func
             .map(|cancel_func| Box::into_raw(Box::new(cancel_func)) as *mut std::ffi::c_void)
             .unwrap_or(std::ptr::null_mut());
-            
+
         let ret = unsafe {
             svn_repos_verify_fs3(
                 self.ptr,
@@ -829,18 +838,26 @@ impl Repos {
                 pool.as_mut_ptr(),
             )
         };
-        
+
         // Free callback batons
         if !notify_baton.is_null() {
             unsafe { drop(Box::from_raw(notify_baton as *mut Box<dyn Fn(&Notify)>)) };
         }
         if !verify_baton.is_null() {
-            unsafe { drop(Box::from_raw(verify_baton as *mut Box<dyn Fn(Revnum, &Error) -> Result<(), Error>>)) };
+            unsafe {
+                drop(Box::from_raw(
+                    verify_baton as *mut Box<dyn Fn(Revnum, &Error) -> Result<(), Error>>,
+                ))
+            };
         }
         if !cancel_baton.is_null() {
-            unsafe { drop(Box::from_raw(cancel_baton as *mut Box<dyn Fn() -> Result<(), Error>>)) };
+            unsafe {
+                drop(Box::from_raw(
+                    cancel_baton as *mut Box<dyn Fn() -> Result<(), Error>>,
+                ))
+            };
         }
-        
+
         Error::from_raw(ret)?;
         Ok(())
     }
@@ -881,15 +898,19 @@ impl Repos {
                 pool.as_mut_ptr(),
             )
         };
-        
+
         // Free callback batons
         if !notify_baton.is_null() {
             unsafe { drop(Box::from_raw(notify_baton as *mut Box<dyn Fn(&Notify)>)) };
         }
         if !cancel_baton.is_null() {
-            unsafe { drop(Box::from_raw(cancel_baton as *mut Box<dyn Fn() -> Result<(), Error>>)) };
+            unsafe {
+                drop(Box::from_raw(
+                    cancel_baton as *mut Box<dyn Fn() -> Result<(), Error>>,
+                ))
+            };
         }
-        
+
         Error::from_raw(ret)?;
         Ok(())
     }
@@ -1166,16 +1187,16 @@ mod tests {
     fn test_dump_basic() {
         let td = tempfile::tempdir().unwrap();
         let repos = super::Repos::create(td.path()).unwrap();
-        
+
         // Create a string buffer to capture dump output
         let mut buffer = Vec::new();
         let mut stream = crate::io::wrap_write(&mut buffer).unwrap();
-        
+
         // Dump revision 0 only (empty repo)
         let result = repos.dump(
             &mut stream,
             Some(crate::Revnum(0)), // start_rev
-            Some(crate::Revnum(0)), // end_rev  
+            Some(crate::Revnum(0)), // end_rev
             false,                  // incremental
             false,                  // use_deltas
             true,                   // include_revprops
@@ -1183,24 +1204,26 @@ mod tests {
             None,                   // notify_func
             None,                   // cancel_func
         );
-        
+
         assert!(result.is_ok(), "Failed to dump repository: {:?}", result);
-        
+
         // Verify that we got some dump output
         let dump_str = String::from_utf8_lossy(&buffer);
-        assert!(dump_str.contains("SVN-fs-dump-format-version"), 
-               "Dump output should contain format version header");
+        assert!(
+            dump_str.contains("SVN-fs-dump-format-version"),
+            "Dump output should contain format version header"
+        );
     }
 
     #[test]
     fn test_dump_all_revisions() {
         let td = tempfile::tempdir().unwrap();
         let repos = super::Repos::create(td.path()).unwrap();
-        
+
         // Create a string buffer to capture dump output
         let mut buffer = Vec::new();
         let mut stream = crate::io::wrap_write(&mut buffer).unwrap();
-        
+
         // Dump all revisions (None means use SVN_INVALID_REVNUM = -1)
         let result = repos.dump(
             &mut stream,
@@ -1213,7 +1236,7 @@ mod tests {
             None,  // notify_func
             None,  // cancel_func
         );
-        
+
         assert!(result.is_ok(), "Failed to dump repository: {:?}", result);
     }
 
@@ -1221,31 +1244,31 @@ mod tests {
     fn test_verify_basic() {
         let td = tempfile::tempdir().unwrap();
         let repos = super::Repos::create(td.path()).unwrap();
-        
+
         let result = repos.verify(
             crate::Revnum(0), // start_rev
-            crate::Revnum(0), // end_rev  
+            crate::Revnum(0), // end_rev
             false,            // check_normalization
             false,            // metadata_only
-            None, // notify_func
-            None, // verify_callback
-            None, // cancel_func
+            None,             // notify_func
+            None,             // verify_callback
+            None,             // cancel_func
         );
-        
+
         assert!(result.is_ok(), "Failed to verify repository: {:?}", result);
     }
 
-    #[test] 
+    #[test]
     fn test_recover_basic() {
         let td = tempfile::tempdir().unwrap();
         let mut repos = super::Repos::create(td.path()).unwrap();
-        
+
         let result = repos.recover(
             true, // nonblocking
             None, // notify_func
             None, // cancel_func
         );
-        
+
         assert!(result.is_ok(), "Failed to recover repository: {:?}", result);
     }
 
@@ -1253,7 +1276,7 @@ mod tests {
     fn test_load_basic() {
         let td = tempfile::tempdir().unwrap();
         let repos = super::Repos::create(td.path()).unwrap();
-        
+
         // Create a minimal dump stream content
         let dump_content = b"SVN-fs-dump-format-version: 2\n\n\
                            UUID: 00000000-0000-0000-0000-000000000000\n\n\
@@ -1265,27 +1288,27 @@ mod tests {
                            V 27\n\
                            2024-01-01T00:00:00.000000Z\n\
                            PROPS-END\n\n";
-        
+
         let mut dump_vec = dump_content.to_vec();
         let mut stream = crate::io::wrap_write(&mut dump_vec).unwrap();
-        
+
         // Test loading from dump stream (may fail with invalid dump format)
         // Note: SVN requires both start_rev and end_rev to be either valid or both invalid
         let result = repos.load(
             &mut stream,
-            None,                        // start_rev (None = load all)
-            None,                        // end_rev (None = load all)
-            super::LoadUUID::Default,    // uuid_action
-            None,                        // parent_dir
-            false,                       // use_pre_commit_hook
-            false,                       // use_post_commit_hook
-            false,                       // validate_props
-            false,                       // ignore_dates
-            false,                       // normalize_props
-            None,                        // notify_func
-            None,                        // cancel_func
+            None,                     // start_rev (None = load all)
+            None,                     // end_rev (None = load all)
+            super::LoadUUID::Default, // uuid_action
+            None,                     // parent_dir
+            false,                    // use_pre_commit_hook
+            false,                    // use_post_commit_hook
+            false,                    // validate_props
+            false,                    // ignore_dates
+            false,                    // normalize_props
+            None,                     // notify_func
+            None,                     // cancel_func
         );
-        
+
         // The test may fail due to dump format issues, but should not crash
         // The important thing is that the API is correctly implemented
         match result {

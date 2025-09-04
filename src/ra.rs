@@ -2422,29 +2422,35 @@ mod tests {
         }
 
         impl crate::delta::Editor for TestEditor {
-            fn set_target_revision(&mut self, revision: Option<crate::Revnum>) -> Result<(), crate::Error> {
+            fn set_target_revision(
+                &mut self,
+                revision: Option<crate::Revnum>,
+            ) -> Result<(), crate::Error> {
                 self.operations
                     .borrow_mut()
                     .push(format!("set_target_revision({:?})", revision));
                 Ok(())
             }
-            
+
             fn open_root(
                 &mut self,
                 base_revision: Option<crate::Revnum>,
-            ) -> Result<Box<dyn crate::delta::DirectoryEditor + 'static>, crate::Error> {
-                self.operations.borrow_mut().push(format!("open_root({:?})", base_revision));
+            ) -> Result<Box<dyn crate::delta::DirectoryEditor + 'static>, crate::Error>
+            {
+                self.operations
+                    .borrow_mut()
+                    .push(format!("open_root({:?})", base_revision));
                 let dir_editor = TestDirectoryEditor {
                     operations: self.operations.clone(),
                 };
                 Ok(Box::new(dir_editor))
             }
-            
+
             fn close(&mut self) -> Result<(), crate::Error> {
                 self.operations.borrow_mut().push("close_edit".to_string());
                 Ok(())
             }
-            
+
             fn abort(&mut self) -> Result<(), crate::Error> {
                 self.operations.borrow_mut().push("abort_edit".to_string());
                 Ok(())

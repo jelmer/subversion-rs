@@ -160,7 +160,7 @@ pub struct Stream {
     ptr: *mut subversion_sys::svn_stream_t,
     pool: apr::Pool,
     backend: Option<*mut std::ffi::c_void>, // Boxed backend for manual cleanup (not used by from_backend)
-    _phantom: PhantomData<*mut ()>, // !Send + !Sync
+    _phantom: PhantomData<*mut ()>,         // !Send + !Sync
 }
 
 impl Drop for Stream {

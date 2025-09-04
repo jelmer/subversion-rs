@@ -992,7 +992,7 @@ impl Context {
     }
 
     /// Crop a working copy subtree to a specified depth
-    /// 
+    ///
     /// This function will remove any items that exceed the specified depth.
     /// For example, cropping to Depth::Files will remove any subdirectories.
     pub fn crop_tree(
@@ -1004,7 +1004,7 @@ impl Context {
         let pool = apr::Pool::new();
         let path = local_abspath.to_str().unwrap();
         let path_cstr = std::ffi::CString::new(path).unwrap();
-        
+
         let cancel_baton = cancel_func
             .map(|f| Box::into_raw(Box::new(f)) as *mut std::ffi::c_void)
             .unwrap_or(std::ptr::null_mut());
@@ -1020,7 +1020,7 @@ impl Context {
                     None
                 },
                 cancel_baton,
-                None, // notify_func - not commonly used for crop
+                None,                 // notify_func - not commonly used for crop
                 std::ptr::null_mut(), // notify_baton
                 pool.as_mut_ptr(),
             )
@@ -1028,14 +1028,18 @@ impl Context {
 
         // Free callback baton
         if !cancel_baton.is_null() {
-            unsafe { drop(Box::from_raw(cancel_baton as *mut Box<dyn Fn() -> Result<(), Error>>)) };
+            unsafe {
+                drop(Box::from_raw(
+                    cancel_baton as *mut Box<dyn Fn() -> Result<(), Error>>,
+                ))
+            };
         }
 
         Error::from_raw(ret)
     }
 
     /// Resolve a conflict on a working copy path
-    /// 
+    ///
     /// This is the most advanced conflict resolution function, allowing
     /// specification of which conflict to resolve and how to resolve it.
     pub fn resolved_conflict(
@@ -1051,10 +1055,10 @@ impl Context {
         let pool = apr::Pool::new();
         let path = local_abspath.to_str().unwrap();
         let path_cstr = std::ffi::CString::new(path).unwrap();
-        
+
         let prop_cstr = resolve_property.map(|p| std::ffi::CString::new(p).unwrap());
         let prop_ptr = prop_cstr.as_ref().map_or(std::ptr::null(), |p| p.as_ptr());
-        
+
         let cancel_baton = cancel_func
             .map(|f| Box::into_raw(Box::new(f)) as *mut std::ffi::c_void)
             .unwrap_or(std::ptr::null_mut());
@@ -1074,7 +1078,7 @@ impl Context {
                     None
                 },
                 cancel_baton,
-                None, // notify_func
+                None,                 // notify_func
                 std::ptr::null_mut(), // notify_baton
                 pool.as_mut_ptr(),
             )
@@ -1082,7 +1086,11 @@ impl Context {
 
         // Free callback baton
         if !cancel_baton.is_null() {
-            unsafe { drop(Box::from_raw(cancel_baton as *mut Box<dyn Fn() -> Result<(), Error>>)) };
+            unsafe {
+                drop(Box::from_raw(
+                    cancel_baton as *mut Box<dyn Fn() -> Result<(), Error>>,
+                ))
+            };
         }
 
         Error::from_raw(ret)
@@ -1189,14 +1197,14 @@ pub fn add(
 ) -> Result<(), Error> {
     let path_str = path.to_string_lossy();
     let path_cstr = std::ffi::CString::new(path_str.as_ref())?;
-    
+
     with_tmp_pool(|pool| unsafe {
         let err = subversion_sys::svn_wc_add_from_disk3(
             ctx.as_mut_ptr(),
             path_cstr.as_ptr(),
             std::ptr::null_mut(), // props (use auto-props if enabled)
             force as i32,
-            None, // notify_func
+            None,                 // notify_func
             std::ptr::null_mut(), // notify_baton
             pool.as_mut_ptr(),
         );
@@ -1213,16 +1221,16 @@ pub fn delete(
 ) -> Result<(), Error> {
     let path_str = path.to_string_lossy();
     let path_cstr = std::ffi::CString::new(path_str.as_ref())?;
-    
+
     with_tmp_pool(|pool| unsafe {
         let err = subversion_sys::svn_wc_delete4(
             ctx.as_mut_ptr(),
             path_cstr.as_ptr(),
             keep_local as i32,
             delete_unversioned_target as i32,
-            None, // cancel_func
+            None,                 // cancel_func
             std::ptr::null_mut(), // cancel_baton
-            None, // notify_func
+            None,                 // notify_func
             std::ptr::null_mut(), // notify_baton
             pool.as_mut_ptr(),
         );
@@ -1241,7 +1249,7 @@ pub fn revert(
 ) -> Result<(), Error> {
     let path_str = path.to_string_lossy();
     let path_cstr = std::ffi::CString::new(path_str.as_ref())?;
-    
+
     with_tmp_pool(|pool| unsafe {
         let err = subversion_sys::svn_wc_revert6(
             ctx.as_mut_ptr(),
@@ -1251,10 +1259,10 @@ pub fn revert(
             std::ptr::null(), // changelists
             clear_changelists as i32,
             metadata_only as i32,
-            1, // added_keep_local (keep added files)
-            None, // cancel_func
+            1,                    // added_keep_local (keep added files)
+            None,                 // cancel_func
             std::ptr::null_mut(), // cancel_baton
-            None, // notify_func
+            None,                 // notify_func
             std::ptr::null_mut(), // notify_baton
             pool.as_mut_ptr(),
         );
@@ -1274,7 +1282,7 @@ pub fn copy_or_move(
     let src_cstr = std::ffi::CString::new(src_str.as_ref())?;
     let dst_str = dst.to_string_lossy();
     let dst_cstr = std::ffi::CString::new(dst_str.as_ref())?;
-    
+
     with_tmp_pool(|pool| unsafe {
         if is_move {
             let err = subversion_sys::svn_wc_move(
@@ -1282,9 +1290,9 @@ pub fn copy_or_move(
                 src_cstr.as_ptr(),
                 dst_cstr.as_ptr(),
                 metadata_only as i32,
-                None, // cancel_func
+                None,                 // cancel_func
                 std::ptr::null_mut(), // cancel_baton
-                None, // notify_func
+                None,                 // notify_func
                 std::ptr::null_mut(), // notify_baton
                 pool.as_mut_ptr(),
             );
@@ -1295,9 +1303,9 @@ pub fn copy_or_move(
                 src_cstr.as_ptr(),
                 dst_cstr.as_ptr(),
                 metadata_only as i32,
-                None, // cancel_func
+                None,                 // cancel_func
                 std::ptr::null_mut(), // cancel_baton
-                None, // notify_func
+                None,                 // notify_func
                 std::ptr::null_mut(), // notify_baton
                 pool.as_mut_ptr(),
             );
@@ -1318,7 +1326,7 @@ pub fn resolve_conflict(
 ) -> Result<(), Error> {
     let path_str = path.to_string_lossy();
     let path_cstr = std::ffi::CString::new(path_str.as_ref())?;
-    
+
     with_tmp_pool(|pool| unsafe {
         let err = subversion_sys::svn_wc_resolved_conflict5(
             ctx.as_mut_ptr(),
@@ -1328,17 +1336,15 @@ pub fn resolve_conflict(
             std::ptr::null(), // resolve_prop (resolve all props if resolve_props is true)
             resolve_tree as i32,
             conflict_choice.into(),
-            None, // cancel_func
+            None,                 // cancel_func
             std::ptr::null_mut(), // cancel_baton
-            None, // notify_func
+            None,                 // notify_func
             std::ptr::null_mut(), // notify_baton
             pool.as_mut_ptr(),
         );
         Error::from_raw(err)
     })
 }
-
-
 
 pub fn revision_status(
     wc_path: &std::path::Path,
@@ -1625,14 +1631,10 @@ mod tests {
         // Creating a real working copy for testing would require full SVN setup
         let mut ctx = Context::new().unwrap();
         let tempdir = tempdir().unwrap();
-        
+
         // This will fail without a working copy, but tests the API
-        let result = ctx.crop_tree(
-            tempdir.path(),
-            crate::Depth::Files,
-            None,
-        );
-        
+        let result = ctx.crop_tree(tempdir.path(), crate::Depth::Files, None);
+
         // Expected to fail without valid working copy
         assert!(result.is_err());
     }
@@ -1642,18 +1644,18 @@ mod tests {
         // Test that resolved_conflict function compiles and can be called
         let mut ctx = Context::new().unwrap();
         let tempdir = tempdir().unwrap();
-        
+
         // This will fail without a working copy with conflicts, but tests the API
         let result = ctx.resolved_conflict(
             tempdir.path(),
             crate::Depth::Infinity,
-            true, // resolve_text
-            None, // resolve_property
+            true,  // resolve_text
+            None,  // resolve_property
             false, // resolve_tree
             ConflictChoice::Mine,
             None,
         );
-        
+
         // Expected to fail without valid working copy
         assert!(result.is_err());
     }
@@ -1663,10 +1665,16 @@ mod tests {
         // Test that ConflictChoice enum converts properly to SVN types
         let choice = ConflictChoice::Mine;
         let svn_choice: subversion_sys::svn_wc_conflict_choice_t = choice.into();
-        assert_eq!(svn_choice, subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_mine_full);
-        
+        assert_eq!(
+            svn_choice,
+            subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_mine_full
+        );
+
         let choice = ConflictChoice::Theirs;
         let svn_choice: subversion_sys::svn_wc_conflict_choice_t = choice.into();
-        assert_eq!(svn_choice, subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_theirs_full);
+        assert_eq!(
+            svn_choice,
+            subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_theirs_full
+        );
     }
 }

@@ -287,7 +287,7 @@ impl<'a> MergeinfoHash<'a> {
             inner: apr::hash::TypedHash::<apr_sys::apr_array_header_t>::from_ptr(ptr),
         }
     }
-    
+
     /// Convert the mergeinfo to a HashMap<String, Vec<RevisionRange>>
     pub fn to_hashmap(&self) -> std::collections::HashMap<String, Vec<crate::RevisionRange>> {
         self.inner
@@ -299,15 +299,19 @@ impl<'a> MergeinfoHash<'a> {
             })
             .collect()
     }
-    
+
     /// Convert a rangelist array to a Vec<RevisionRange>
-    unsafe fn rangelist_to_vec(&self, rangelist: *mut apr_sys::apr_array_header_t) -> Vec<crate::RevisionRange> {
+    unsafe fn rangelist_to_vec(
+        &self,
+        rangelist: *mut apr_sys::apr_array_header_t,
+    ) -> Vec<crate::RevisionRange> {
         if rangelist.is_null() {
             return Vec::new();
         }
-        
-        let rangelist_array = apr::tables::TypedArray::<*mut subversion_sys::svn_merge_range_t>::from_ptr(rangelist);
-        
+
+        let rangelist_array =
+            apr::tables::TypedArray::<*mut subversion_sys::svn_merge_range_t>::from_ptr(rangelist);
+
         let mut ranges = Vec::new();
         for range_ptr in rangelist_array.iter() {
             let range = &*range_ptr;
@@ -329,19 +333,19 @@ pub fn parse_mergeinfo(
     with_tmp_pool(|pool| unsafe {
         let mergeinfo_cstr = CString::new(mergeinfo_str)?;
         let mut mergeinfo_ptr = ptr::null_mut();
-        
+
         let err = subversion_sys::svn_mergeinfo_parse(
             &mut mergeinfo_ptr,
             mergeinfo_cstr.as_ptr(),
             pool.as_mut_ptr(),
         );
-        
+
         Error::from_raw(err)?;
-        
+
         if mergeinfo_ptr.is_null() {
             return Ok(std::collections::HashMap::new());
         }
-        
+
         let mergeinfo_hash = MergeinfoHash::from_ptr(mergeinfo_ptr);
         Ok(mergeinfo_hash.to_hashmap())
     })
@@ -354,27 +358,29 @@ pub fn mergeinfo_to_string(
     with_tmp_pool(|pool| unsafe {
         // Create an APR hash from the Rust HashMap
         let hash = apr_sys::apr_hash_make(pool.as_mut_ptr());
-        
+
         for (path, ranges) in mergeinfo {
             let path_cstr = apr::strings::pstrdup_raw(path, pool)?;
-            
+
             // Create rangelist array
-            let mut rangelist = apr::tables::TypedArray::<*mut subversion_sys::svn_merge_range_t>::new(
-                pool,
-                ranges.len() as i32,
-            );
-            
+            let mut rangelist =
+                apr::tables::TypedArray::<*mut subversion_sys::svn_merge_range_t>::new(
+                    pool,
+                    ranges.len() as i32,
+                );
+
             for range in ranges {
                 let range_ptr: *mut subversion_sys::svn_merge_range_t = pool.calloc();
-                if let (crate::Revision::Number(start), crate::Revision::Number(end)) = 
-                    (&range.start, &range.end) {
+                if let (crate::Revision::Number(start), crate::Revision::Number(end)) =
+                    (&range.start, &range.end)
+                {
                     (*range_ptr).start = start.0;
                     (*range_ptr).end = end.0;
                     (*range_ptr).inheritable = 1;
                     rangelist.push(range_ptr);
                 }
             }
-            
+
             apr_sys::apr_hash_set(
                 hash,
                 path_cstr as *const std::ffi::c_void,
@@ -382,17 +388,13 @@ pub fn mergeinfo_to_string(
                 rangelist.as_ptr() as *mut std::ffi::c_void,
             );
         }
-        
+
         let mut output_ptr: *mut subversion_sys::svn_string_t = ptr::null_mut();
-        
-        let err = subversion_sys::svn_mergeinfo_to_string(
-            &mut output_ptr,
-            hash,
-            pool.as_mut_ptr(),
-        );
-        
+
+        let err = subversion_sys::svn_mergeinfo_to_string(&mut output_ptr, hash, pool.as_mut_ptr());
+
         Error::from_raw(err)?;
-        
+
         if output_ptr.is_null() {
             Ok(String::new())
         } else {
@@ -408,16 +410,21 @@ pub fn mergeinfo_diff(
     mergeinfo1: &std::collections::HashMap<String, Vec<crate::RevisionRange>>,
     mergeinfo2: &std::collections::HashMap<String, Vec<crate::RevisionRange>>,
     consider_inheritance: bool,
-) -> Result<(std::collections::HashMap<String, Vec<crate::RevisionRange>>, 
-           std::collections::HashMap<String, Vec<crate::RevisionRange>>), Error> {
+) -> Result<
+    (
+        std::collections::HashMap<String, Vec<crate::RevisionRange>>,
+        std::collections::HashMap<String, Vec<crate::RevisionRange>>,
+    ),
+    Error,
+> {
     with_tmp_pool(|pool| unsafe {
         // Convert Rust HashMaps to APR hashes
         let hash1 = hashmap_to_mergeinfo_hash(mergeinfo1, pool)?;
         let hash2 = hashmap_to_mergeinfo_hash(mergeinfo2, pool)?;
-        
+
         let mut deleted_ptr = ptr::null_mut();
         let mut added_ptr = ptr::null_mut();
-        
+
         let err = subversion_sys::svn_mergeinfo_diff2(
             &mut deleted_ptr,
             &mut added_ptr,
@@ -427,12 +434,12 @@ pub fn mergeinfo_diff(
             pool.as_mut_ptr(),
             pool.as_mut_ptr(),
         );
-        
+
         Error::from_raw(err)?;
-        
+
         let deleted = MergeinfoHash::from_ptr(deleted_ptr).to_hashmap();
         let added = MergeinfoHash::from_ptr(added_ptr).to_hashmap();
-        
+
         Ok((deleted, added))
     })
 }
@@ -445,16 +452,16 @@ pub fn mergeinfo_merge(
     with_tmp_pool(|pool| unsafe {
         let hash1 = hashmap_to_mergeinfo_hash(mergeinfo1, pool)?;
         let hash2 = hashmap_to_mergeinfo_hash(mergeinfo2, pool)?;
-        
+
         let err = subversion_sys::svn_mergeinfo_merge2(
             hash1,
             hash2,
             pool.as_mut_ptr(),
             pool.as_mut_ptr(),
         );
-        
+
         Error::from_raw(err)?;
-        
+
         Ok(MergeinfoHash::from_ptr(hash1).to_hashmap())
     })
 }
@@ -468,7 +475,7 @@ pub fn mergeinfo_remove(
     with_tmp_pool(|pool| unsafe {
         let hash = hashmap_to_mergeinfo_hash(mergeinfo, pool)?;
         let eraser_hash = hashmap_to_mergeinfo_hash(eraser, pool)?;
-        
+
         let err = subversion_sys::svn_mergeinfo_remove2(
             &mut (hash as *mut _),
             eraser_hash,
@@ -477,9 +484,9 @@ pub fn mergeinfo_remove(
             pool.as_mut_ptr(),
             pool.as_mut_ptr(),
         );
-        
+
         Error::from_raw(err)?;
-        
+
         *mergeinfo = MergeinfoHash::from_ptr(hash).to_hashmap();
         Ok(())
     })
@@ -494,9 +501,9 @@ pub fn mergeinfo_intersect(
     with_tmp_pool(|pool| unsafe {
         let hash1 = hashmap_to_mergeinfo_hash(mergeinfo1, pool)?;
         let hash2 = hashmap_to_mergeinfo_hash(mergeinfo2, pool)?;
-        
+
         let mut result_ptr = ptr::null_mut();
-        
+
         let err = subversion_sys::svn_mergeinfo_intersect2(
             &mut result_ptr,
             hash1,
@@ -505,9 +512,9 @@ pub fn mergeinfo_intersect(
             pool.as_mut_ptr(),
             pool.as_mut_ptr(),
         );
-        
+
         Error::from_raw(err)?;
-        
+
         Ok(MergeinfoHash::from_ptr(result_ptr).to_hashmap())
     })
 }
@@ -518,26 +525,27 @@ unsafe fn hashmap_to_mergeinfo_hash(
     pool: &apr::Pool,
 ) -> Result<*mut apr_sys::apr_hash_t, Error> {
     let hash = apr_sys::apr_hash_make(pool.as_mut_ptr());
-    
+
     for (path, ranges) in mergeinfo {
         let path_cstr = apr::strings::pstrdup_raw(path, pool)?;
-        
+
         let mut rangelist = apr::tables::TypedArray::<*mut subversion_sys::svn_merge_range_t>::new(
             pool,
             ranges.len() as i32,
         );
-        
+
         for range in ranges {
             let range_ptr: *mut subversion_sys::svn_merge_range_t = pool.calloc();
-            if let (crate::Revision::Number(start), crate::Revision::Number(end)) = 
-                (&range.start, &range.end) {
+            if let (crate::Revision::Number(start), crate::Revision::Number(end)) =
+                (&range.start, &range.end)
+            {
                 (*range_ptr).start = start.0;
                 (*range_ptr).end = end.0;
                 (*range_ptr).inheritable = 1;
                 rangelist.push(range_ptr);
             }
         }
-        
+
         apr_sys::apr_hash_set(
             hash,
             path_cstr as *const std::ffi::c_void,
@@ -545,7 +553,7 @@ unsafe fn hashmap_to_mergeinfo_hash(
             rangelist.as_ptr() as *mut std::ffi::c_void,
         );
     }
-    
+
     Ok(hash)
 }
 
@@ -577,17 +585,17 @@ mod tests {
         assert!(opts.record_only);
         assert_eq!(opts.diff_options.len(), 2);
     }
-    
+
     #[test]
     fn test_parse_mergeinfo() {
         // Test parsing a simple mergeinfo string
         let mergeinfo_str = "/trunk:1-10";
         let result = parse_mergeinfo(mergeinfo_str);
-        
+
         // This will likely fail without a real SVN context, but tests the API
         assert!(result.is_ok() || result.is_err());
     }
-    
+
     #[test]
     fn test_mergeinfo_to_string() {
         // Test converting a mergeinfo hashmap to string
@@ -599,11 +607,11 @@ mod tests {
                 crate::Revision::Number(crate::Revnum(10)),
             )],
         );
-        
+
         let result = mergeinfo_to_string(&mergeinfo);
         assert!(result.is_ok() || result.is_err());
     }
-    
+
     #[test]
     fn test_mergeinfo_diff() {
         let mut mergeinfo1 = std::collections::HashMap::new();
@@ -614,7 +622,7 @@ mod tests {
                 crate::Revision::Number(crate::Revnum(10)),
             )],
         );
-        
+
         let mut mergeinfo2 = std::collections::HashMap::new();
         mergeinfo2.insert(
             "/trunk".to_string(),
@@ -623,11 +631,11 @@ mod tests {
                 crate::Revision::Number(crate::Revnum(15)),
             )],
         );
-        
+
         let result = mergeinfo_diff(&mergeinfo1, &mergeinfo2, false);
         assert!(result.is_ok() || result.is_err());
     }
-    
+
     #[test]
     fn test_mergeinfo_merge() {
         let mut mergeinfo1 = std::collections::HashMap::new();
@@ -638,7 +646,7 @@ mod tests {
                 crate::Revision::Number(crate::Revnum(10)),
             )],
         );
-        
+
         let mut mergeinfo2 = std::collections::HashMap::new();
         mergeinfo2.insert(
             "/trunk".to_string(),
@@ -647,11 +655,11 @@ mod tests {
                 crate::Revision::Number(crate::Revnum(20)),
             )],
         );
-        
+
         let result = mergeinfo_merge(&mergeinfo1, &mergeinfo2);
         assert!(result.is_ok() || result.is_err());
     }
-    
+
     #[test]
     fn test_mergeinfo_intersect() {
         let mut mergeinfo1 = std::collections::HashMap::new();
@@ -662,7 +670,7 @@ mod tests {
                 crate::Revision::Number(crate::Revnum(10)),
             )],
         );
-        
+
         let mut mergeinfo2 = std::collections::HashMap::new();
         mergeinfo2.insert(
             "/trunk".to_string(),
@@ -671,7 +679,7 @@ mod tests {
                 crate::Revision::Number(crate::Revnum(15)),
             )],
         );
-        
+
         let result = mergeinfo_intersect(&mergeinfo1, &mergeinfo2, false);
         assert!(result.is_ok() || result.is_err());
     }

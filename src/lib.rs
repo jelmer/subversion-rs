@@ -1482,7 +1482,7 @@ mod svn_string_helpers {
     pub fn to_vec(s: &svn_string_t) -> Vec<u8> {
         as_bytes(s).to_vec()
     }
-    
+
     /// Create a new svn_string_t from bytes
     pub fn svn_string_ncreate(data: &[u8], pool: &apr::Pool) -> *mut svn_string_t {
         unsafe {
