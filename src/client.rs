@@ -1102,6 +1102,9 @@ impl Context {
                 self.ptr,
                 std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
             );
+            // Free the boxed callbacks to prevent memory leak
+            drop(Box::from_raw(filter_callback));
+            drop(Box::from_raw(commit_callback));
             Error::from_raw(err)?;
             Ok(())
         }
@@ -1200,6 +1203,8 @@ impl Context {
                 self.ptr,
                 std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
             );
+            // Free the boxed callback to prevent memory leak
+            drop(Box::from_raw(commit_callback));
             Error::from_raw(err)?;
             Ok(())
         }

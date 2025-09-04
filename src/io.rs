@@ -159,11 +159,20 @@ impl StringBuf {
 pub struct Stream {
     ptr: *mut subversion_sys::svn_stream_t,
     pool: apr::Pool,
-    _phantom: PhantomData<*mut ()>, // !Send + !Sync
+    backend: Option<*mut std::ffi::c_void>, // Boxed backend for manual cleanup (not used by from_backend)
+    _phantom: PhantomData<*mut ()>,         // !Send + !Sync
 }
 
 impl Drop for Stream {
     fn drop(&mut self) {
+        // Free the boxed backend if it exists
+        // Note: backends from from_backend() are freed by close_trampoline and won't be stored here
+        if let Some(backend_ptr) = self.backend {
+            unsafe {
+                // This is for batons from create() and set_baton() that don't have automatic cleanup
+                drop(Box::from_raw(backend_ptr));
+            }
+        }
         // Pool drop will clean up stream
     }
 }
@@ -175,6 +184,7 @@ impl Stream {
         Self {
             ptr: stream,
             pool,
+            backend: None,
             _phantom: PhantomData,
         }
     }
@@ -186,6 +196,7 @@ impl Stream {
         Self {
             ptr: stream,
             pool,
+            backend: None,
             _phantom: PhantomData,
         }
     }
@@ -199,6 +210,7 @@ impl Stream {
         Self {
             ptr: stream,
             pool,
+            backend: None,
             _phantom: PhantomData,
         }
     }
@@ -208,6 +220,7 @@ impl Stream {
         Self {
             ptr,
             pool,
+            backend: None,
             _phantom: PhantomData,
         }
     }
@@ -220,6 +233,7 @@ impl Stream {
         Self {
             ptr: stream,
             pool,
+            backend: Some(baton_ptr),
             _phantom: PhantomData,
         }
     }
@@ -409,6 +423,7 @@ impl Stream {
         Ok(Self {
             ptr: stream,
             pool,
+            backend: None, // Backend is managed by close_trampoline, not by Drop
             _phantom: PhantomData,
         })
     }
@@ -420,6 +435,7 @@ impl Stream {
         Self {
             ptr: stream,
             pool,
+            backend: None, // Disowned streams don't own backends
             _phantom: PhantomData,
         }
     }
@@ -433,6 +449,7 @@ impl Stream {
         Self {
             ptr: stream,
             pool,
+            backend: None,
             _phantom: PhantomData,
         }
     }
@@ -452,6 +469,7 @@ impl Stream {
         Self {
             ptr,
             pool,
+            backend: None,
             _phantom: PhantomData,
         }
     }
@@ -476,6 +494,7 @@ impl Stream {
         Ok(Self {
             ptr: stream,
             pool,
+            backend: None,
             _phantom: PhantomData,
         })
     }
@@ -500,6 +519,7 @@ impl Stream {
         Ok(Self {
             ptr: stream,
             pool,
+            backend: None,
             _phantom: PhantomData,
         })
     }
@@ -539,6 +559,7 @@ impl Stream {
         Ok(Self {
             ptr: stream,
             pool,
+            backend: None,
             _phantom: PhantomData,
         })
     }
@@ -551,6 +572,7 @@ impl Stream {
         Ok(Self {
             ptr: stream,
             pool,
+            backend: None,
             _phantom: PhantomData,
         })
     }
@@ -563,6 +585,7 @@ impl Stream {
         Ok(Self {
             ptr: stream,
             pool,
+            backend: None,
             _phantom: PhantomData,
         })
     }
@@ -604,6 +627,7 @@ impl Stream {
         Self {
             ptr: stream,
             pool,
+            backend: None,
             _phantom: PhantomData,
         }
     }
@@ -1008,6 +1032,7 @@ impl Stream {
         };
 
         Self {
+            backend: None,
             ptr: stream,
             pool,
             _phantom: PhantomData,
@@ -1054,6 +1079,7 @@ pub fn tee(out1: &mut Stream, out2: &mut Stream) -> Result<Stream, Error> {
     Ok(Stream {
         ptr: stream,
         pool,
+        backend: None,
         _phantom: PhantomData,
     })
 }
@@ -1103,6 +1129,7 @@ impl From<&[u8]> for Stream {
         Self {
             ptr: stream,
             pool,
+            backend: None,
             _phantom: PhantomData,
         }
     }
@@ -1183,6 +1210,7 @@ pub fn wrap_write(write: &mut dyn std::io::Write) -> Result<Stream, Error> {
     Ok(Stream {
         ptr: stream,
         pool,
+        backend: None,
         _phantom: PhantomData,
     })
 }
