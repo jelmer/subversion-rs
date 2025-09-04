@@ -424,6 +424,10 @@ where
             baton,
             pool.as_mut_ptr(),
         );
+        // Free the boxed callback to prevent memory leak
+        drop(Box::from_raw(
+            baton as *mut Box<dyn FnMut(&str, DiffKeyStatus) -> Result<(), Error>>,
+        ));
         Error::from_raw(err)?;
     }
 
