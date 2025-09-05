@@ -39,6 +39,106 @@ impl From<LoadUUID> for subversion_sys::svn_repos_load_uuid {
     }
 }
 
+/// Authorization access levels
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthzAccess {
+    /// No access
+    None,
+    /// Path can be read
+    Read,
+    /// Path can be altered
+    Write,
+    /// Both read and write access
+    ReadWrite,
+}
+
+impl From<AuthzAccess> for subversion_sys::svn_repos_authz_access_t {
+    fn from(access: AuthzAccess) -> Self {
+        match access {
+            AuthzAccess::None => subversion_sys::svn_repos_authz_access_t_svn_authz_none,
+            AuthzAccess::Read => subversion_sys::svn_repos_authz_access_t_svn_authz_read,
+            AuthzAccess::Write => subversion_sys::svn_repos_authz_access_t_svn_authz_write,
+            AuthzAccess::ReadWrite => {
+                subversion_sys::svn_repos_authz_access_t_svn_authz_read
+                    | subversion_sys::svn_repos_authz_access_t_svn_authz_write
+            }
+        }
+    }
+}
+
+/// Authorization data structure
+pub struct Authz {
+    ptr: *mut subversion_sys::svn_authz_t,
+    pool: apr::Pool,
+}
+
+impl Authz {
+    /// Read authz configuration from a file
+    pub fn read(path: &std::path::Path, groups_path: Option<&std::path::Path>, must_exist: bool) -> Result<Self, Error> {
+        let pool = apr::Pool::new();
+        let path_cstr = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
+        let groups_path_cstr = groups_path
+            .map(|p| std::ffi::CString::new(p.to_str().unwrap()).unwrap());
+        
+        let mut authz_ptr: *mut subversion_sys::svn_authz_t = std::ptr::null_mut();
+        
+        let ret = unsafe {
+            subversion_sys::svn_repos_authz_read4(
+                &mut authz_ptr,
+                path_cstr.as_ptr(),
+                groups_path_cstr.as_ref().map(|p| p.as_ptr()).unwrap_or(std::ptr::null()),
+                must_exist.into(),
+                std::ptr::null_mut(),
+                None,
+                std::ptr::null_mut(),
+                pool.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            )
+        };
+        
+        svn_result(ret)?;
+        
+        Ok(Authz {
+            ptr: authz_ptr,
+            pool,
+        })
+    }
+    
+    /// Check if a user has the required access to a path
+    pub fn check_access(
+        &self,
+        repos_name: Option<&str>,
+        path: &str,
+        user: Option<&str>,
+        required_access: AuthzAccess,
+    ) -> Result<bool, Error> {
+        let repos_name_cstr = repos_name
+            .map(|r| std::ffi::CString::new(r).unwrap());
+        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let user_cstr = user
+            .map(|u| std::ffi::CString::new(u).unwrap());
+        
+        let mut access_granted: subversion_sys::svn_boolean_t = 0;
+        
+        with_tmp_pool(|pool| {
+            let ret = unsafe {
+                subversion_sys::svn_repos_authz_check_access(
+                    self.ptr,
+                    repos_name_cstr.as_ref().map(|r| r.as_ptr()).unwrap_or(std::ptr::null()),
+                    path_cstr.as_ptr(),
+                    user_cstr.as_ref().map(|u| u.as_ptr()).unwrap_or(std::ptr::null()),
+                    required_access.into(),
+                    &mut access_granted,
+                    pool.as_mut_ptr(),
+                )
+            };
+            
+            svn_result(ret)?;
+            Ok(access_granted != 0)
+        })
+    }
+}
+
 pub fn find_root_path(path: &std::path::Path) -> Option<std::path::PathBuf> {
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     with_tmp_pool(|pool| {
@@ -1530,6 +1630,148 @@ impl Repos {
         };
         Ok(Box::new(editor))
     }
+
+    /// Begin a repository report (for update/switch operations)
+    pub fn begin_report(
+        &self,
+        revnum: Revnum,
+        fs_base: &str,
+        target: Option<&str>,
+        tgt_path: Option<&str>,
+        text_deltas: bool,
+        depth: crate::Depth,
+        ignore_ancestry: bool,
+        send_copyfrom_args: bool,
+        editor: *const subversion_sys::svn_delta_editor_t,
+        editor_baton: *mut std::ffi::c_void,
+    ) -> Result<Report, Error> {
+        let fs_base_cstr = std::ffi::CString::new(fs_base).unwrap();
+        let target_cstr = target.map(|t| std::ffi::CString::new(t).unwrap());
+        let tgt_path_cstr = tgt_path.map(|t| std::ffi::CString::new(t).unwrap());
+        
+        let pool = apr::Pool::new();
+        let mut report_baton: *mut std::ffi::c_void = std::ptr::null_mut();
+        
+        let ret = unsafe {
+            subversion_sys::svn_repos_begin_report3(
+                &mut report_baton,
+                revnum.into(),
+                self.ptr,
+                fs_base_cstr.as_ptr(),
+                target_cstr.as_ref().map(|t| t.as_ptr()).unwrap_or(std::ptr::null()),
+                tgt_path_cstr.as_ref().map(|t| t.as_ptr()).unwrap_or(std::ptr::null()),
+                text_deltas.into(),
+                depth.into(),
+                ignore_ancestry.into(),
+                send_copyfrom_args.into(),
+                editor,
+                editor_baton,
+                None,
+                std::ptr::null_mut(),
+                0,
+                pool.as_mut_ptr(),
+            )
+        };
+        
+        svn_result(ret)?;
+        
+        Ok(Report {
+            baton: report_baton,
+            pool,
+        })
+    }
+}
+
+/// Repository report handle for update/switch operations
+pub struct Report {
+    baton: *mut std::ffi::c_void,
+    pool: apr::Pool,
+}
+
+impl Report {
+    /// Record the presence of a path in the current tree
+    pub fn set_path(&self, path: &str, revision: Revnum, depth: crate::Depth, start_empty: bool, lock_token: Option<&str>) -> Result<(), Error> {
+        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let lock_token_cstr = lock_token.map(|t| std::ffi::CString::new(t).unwrap());
+        
+        with_tmp_pool(|pool| {
+            let ret = unsafe {
+                subversion_sys::svn_repos_set_path3(
+                    self.baton,
+                    path_cstr.as_ptr(),
+                    revision.into(),
+                    depth.into(),
+                    start_empty.into(),
+                    lock_token_cstr.as_ref().map(|t| t.as_ptr()).unwrap_or(std::ptr::null()),
+                    pool.as_mut_ptr(),
+                )
+            };
+            svn_result(ret)
+        })
+    }
+    
+    /// Record the presence of a path as a link to another path
+    pub fn link_path(&self, path: &str, link_path: &str, revision: Revnum, depth: crate::Depth, start_empty: bool, lock_token: Option<&str>) -> Result<(), Error> {
+        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let link_path_cstr = std::ffi::CString::new(link_path).unwrap();
+        let lock_token_cstr = lock_token.map(|t| std::ffi::CString::new(t).unwrap());
+        
+        with_tmp_pool(|pool| {
+            let ret = unsafe {
+                subversion_sys::svn_repos_link_path3(
+                    self.baton,
+                    path_cstr.as_ptr(),
+                    link_path_cstr.as_ptr(),
+                    revision.into(),
+                    depth.into(),
+                    start_empty.into(),
+                    lock_token_cstr.as_ref().map(|t| t.as_ptr()).unwrap_or(std::ptr::null()),
+                    pool.as_mut_ptr(),
+                )
+            };
+            svn_result(ret)
+        })
+    }
+    
+    /// Record the non-existence of a path in the current tree
+    pub fn delete_path(&self, path: &str) -> Result<(), Error> {
+        let path_cstr = std::ffi::CString::new(path).unwrap();
+        
+        with_tmp_pool(|pool| {
+            let ret = unsafe {
+                subversion_sys::svn_repos_delete_path(
+                    self.baton,
+                    path_cstr.as_ptr(),
+                    pool.as_mut_ptr(),
+                )
+            };
+            svn_result(ret)
+        })
+    }
+    
+    /// Finish the report and drive the editor
+    pub fn finish(self) -> Result<(), Error> {
+        with_tmp_pool(|pool| {
+            let ret = unsafe {
+                subversion_sys::svn_repos_finish_report(
+                    self.baton,
+                    pool.as_mut_ptr(),
+                )
+            };
+            svn_result(ret)
+        })
+    }
+    
+    /// Abort the report
+    pub fn abort(self) -> Result<(), Error> {
+        let ret = unsafe {
+            subversion_sys::svn_repos_abort_report(
+                self.baton,
+                self.pool.as_mut_ptr(),
+            )
+        };
+        svn_result(ret)
+    }
 }
 
 #[cfg(test)]
@@ -1572,5 +1814,171 @@ mod additional_tests {
         
         // Should succeed in getting a commit editor
         assert!(result.is_ok(), "Failed to get commit editor: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_authz_basic() {
+        // Test creating an authz file
+        let temp_dir = tempfile::tempdir().unwrap();
+        let authz_path = temp_dir.path().join("authz");
+        
+        // Write a simple authz file
+        std::fs::write(&authz_path, "[/]\n* = rw\n").unwrap();
+        
+        // Test reading the authz file
+        let authz = Authz::read(&authz_path, None, true);
+        assert!(authz.is_ok(), "Failed to read authz file: {:?}", authz.err());
+        
+        let authz = authz.unwrap();
+        
+        // Test check_access - should have read access
+        let result = authz.check_access(Some("testrepo"), "/", Some("testuser"), AuthzAccess::Read);
+        assert!(result.is_ok(), "check_access failed: {:?}", result.err());
+        
+        // The result should be true for read access with wildcard permission
+        let has_access = result.unwrap();
+        assert!(has_access, "Should have read access with wildcard permission");
+    }
+
+    #[test]
+    fn test_authz_no_access() {
+        // Test with empty authz (no access)
+        let temp_dir = tempfile::tempdir().unwrap();
+        let authz_path = temp_dir.path().join("authz");
+        
+        // Write an empty authz file
+        std::fs::write(&authz_path, "").unwrap();
+        
+        let authz = Authz::read(&authz_path, None, true).unwrap();
+        
+        // Test check_access - should have no access
+        let result = authz.check_access(Some("testrepo"), "/", Some("testuser"), AuthzAccess::Read);
+        assert!(result.is_ok(), "check_access failed: {:?}", result.err());
+        
+        let has_access = result.unwrap();
+        assert!(!has_access, "Should have no access with empty authz");
+    }
+
+    #[test]
+    fn test_report_with_commit_editor() {
+        // Create a temporary repository for testing
+        let temp_dir = tempfile::tempdir().unwrap();
+        let repo_path = temp_dir.path().join("test_repo");
+
+        // Create repository
+        let repo = Repos::create(&repo_path).unwrap();
+        
+        // Build the repository URL from the path
+        let repo_url = format!("file://{}", repo_path.to_string_lossy());
+        
+        // Get a commit editor which we can use for testing reports
+        let editor_result = repo.get_commit_editor(
+            &repo_url,
+            "/",
+            "Test commit for report testing",
+            Some("test_author"),
+            None,
+            None,
+        );
+        
+        assert!(editor_result.is_ok(), "Failed to get commit editor: {:?}", editor_result.err());
+        
+        if let Ok(editor_box) = editor_result {
+            // Use the Editor trait's as_raw_parts method to access raw pointers
+            let (editor_ptr, baton_ptr) = editor_box.as_raw_parts();
+            
+            // Test begin_report with the commit editor
+            let report_result = repo.begin_report(
+                crate::Revnum::from_raw(0).unwrap(),
+                "",
+                None,
+                None,
+                false,
+                crate::Depth::Infinity,
+                false,
+                false,
+                editor_ptr,
+                baton_ptr,
+            );
+            
+            // begin_report should succeed
+            assert!(report_result.is_ok(), "Failed to begin report: {:?}", report_result.err());
+            
+            if let Ok(report) = report_result {
+                // Test abort (this should work and not crash)
+                let abort_result = report.abort();
+                assert!(abort_result.is_ok(), "Failed to abort report: {:?}", abort_result.err());
+            }
+        }
+    }
+
+    #[test]
+    fn test_report_operations() {
+        // Create a temporary repository for testing
+        let temp_dir = tempfile::tempdir().unwrap();
+        let repo_path = temp_dir.path().join("test_repo");
+
+        // Create repository
+        let repo = Repos::create(&repo_path).unwrap();
+        
+        // Build the repository URL
+        let repo_url = format!("file://{}", repo_path.to_string_lossy());
+        
+        // Get a commit editor using the public API
+        let editor_box = repo.get_commit_editor(
+            &repo_url,
+            "/",
+            "Test commit for report operations",
+            Some("test_author"),
+            None,
+            None,
+        ).unwrap();
+        
+        // Create a report using the editor's raw pointers  
+        let (editor_ptr, baton_ptr) = editor_box.as_raw_parts();
+        let report = repo.begin_report(
+            crate::Revnum::from_raw(0).unwrap(),
+            "",
+            None,
+            None,
+            false,
+            crate::Depth::Infinity,
+            false,
+            false,
+            editor_ptr,
+            baton_ptr,
+        ).unwrap();
+        
+        // Test individual report operations
+        // set_path with root path
+        let set_result = report.set_path(
+            "",
+            crate::Revnum::from_raw(0).unwrap(),
+            crate::Depth::Infinity,
+            false,
+            None,
+        );
+        // This operation might succeed or fail depending on repository state,
+        // but it should not crash
+        let _ = set_result;
+        
+        // Test delete_path (should not crash even if path doesn't exist)
+        let delete_result = report.delete_path("nonexistent_path");
+        let _ = delete_result;
+        
+        // Test link_path (should not crash)
+        let link_result = report.link_path(
+            "link_target",
+            "link_source", 
+            crate::Revnum::from_raw(0).unwrap(),
+            crate::Depth::Files,
+            false,
+            None,
+        );
+        let _ = link_result;
+        
+        // Finally, abort the report (this should succeed)
+        let abort_result = report.abort();
+        assert!(abort_result.is_ok(), "Failed to abort report: {:?}", abort_result.err());
     }
 }
