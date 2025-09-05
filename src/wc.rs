@@ -1097,6 +1097,204 @@ impl Context {
 
         Error::from_raw(ret)
     }
+
+    /// Add a path from disk to version control
+    ///
+    /// This is the modern version that adds an existing on-disk item to version control.
+    pub fn add_from_disk(
+        &mut self,
+        local_abspath: &std::path::Path,
+        notify_func: Option<&dyn Fn(&Notify)>,
+    ) -> Result<(), Error> {
+        let path = local_abspath.to_str().unwrap();
+        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let pool = apr::Pool::new();
+
+        let notify_baton = notify_func
+            .map(|f| Box::into_raw(Box::new(f)) as *mut std::ffi::c_void)
+            .unwrap_or(std::ptr::null_mut());
+
+        let ret = unsafe {
+            subversion_sys::svn_wc_add_from_disk3(
+                self.ptr,
+                path_cstr.as_ptr(),
+                std::ptr::null_mut(), // props (NULL = use auto-props)
+                0,                    // skip checks
+                if notify_func.is_some() {
+                    Some(wrap_notify_func)
+                } else {
+                    None
+                },
+                notify_baton,
+                pool.as_mut_ptr(),
+            )
+        };
+
+        if !notify_baton.is_null() {
+            unsafe { drop(Box::from_raw(notify_baton as *mut Box<dyn Fn(&Notify)>)) };
+        }
+
+        Error::from_raw(ret)
+    }
+
+    /// Move a file or directory within the working copy
+    pub fn move_path(
+        &mut self,
+        src_abspath: &std::path::Path,
+        dst_abspath: &std::path::Path,
+        metadata_only: bool,
+        allow_mixed_revisions: bool,
+        cancel_func: Option<&dyn Fn() -> Result<(), Error>>,
+        notify_func: Option<&dyn Fn(&Notify)>,
+    ) -> Result<(), Error> {
+        let src = src_abspath.to_str().unwrap();
+        let src_cstr = std::ffi::CString::new(src).unwrap();
+        let dst = dst_abspath.to_str().unwrap();
+        let dst_cstr = std::ffi::CString::new(dst).unwrap();
+        let pool = apr::Pool::new();
+
+        let cancel_baton = cancel_func
+            .map(|f| Box::into_raw(Box::new(f)) as *mut std::ffi::c_void)
+            .unwrap_or(std::ptr::null_mut());
+
+        let notify_baton = notify_func
+            .map(|f| Box::into_raw(Box::new(f)) as *mut std::ffi::c_void)
+            .unwrap_or(std::ptr::null_mut());
+
+        let ret = unsafe {
+            subversion_sys::svn_wc_move(
+                self.ptr,
+                src_cstr.as_ptr(),
+                dst_cstr.as_ptr(),
+                metadata_only.into(),
+                if cancel_func.is_some() {
+                    Some(crate::wrap_cancel_func)
+                } else {
+                    None
+                },
+                cancel_baton,
+                if notify_func.is_some() {
+                    Some(wrap_notify_func)
+                } else {
+                    None
+                },
+                notify_baton,
+                pool.as_mut_ptr(),
+            )
+        };
+
+        if !cancel_baton.is_null() {
+            unsafe {
+                drop(Box::from_raw(
+                    cancel_baton as *mut Box<dyn Fn() -> Result<(), Error>>,
+                ))
+            };
+        }
+        if !notify_baton.is_null() {
+            unsafe { drop(Box::from_raw(notify_baton as *mut Box<dyn Fn(&Notify)>)) };
+        }
+
+        Error::from_raw(ret)
+    }
+
+    /// Delete a path from version control
+    pub fn delete(
+        &mut self,
+        local_abspath: &std::path::Path,
+        keep_local: bool,
+        delete_unversioned_target: bool,
+        cancel_func: Option<&dyn Fn() -> Result<(), Error>>,
+        notify_func: Option<&dyn Fn(&Notify)>,
+    ) -> Result<(), Error> {
+        let path = local_abspath.to_str().unwrap();
+        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let pool = apr::Pool::new();
+
+        let cancel_baton = cancel_func
+            .map(|f| Box::into_raw(Box::new(f)) as *mut std::ffi::c_void)
+            .unwrap_or(std::ptr::null_mut());
+
+        let notify_baton = notify_func
+            .map(|f| Box::into_raw(Box::new(f)) as *mut std::ffi::c_void)
+            .unwrap_or(std::ptr::null_mut());
+
+        let ret = unsafe {
+            subversion_sys::svn_wc_delete4(
+                self.ptr,
+                path_cstr.as_ptr(),
+                keep_local.into(),
+                delete_unversioned_target.into(),
+                if cancel_func.is_some() {
+                    Some(crate::wrap_cancel_func)
+                } else {
+                    None
+                },
+                cancel_baton,
+                if notify_func.is_some() {
+                    Some(wrap_notify_func)
+                } else {
+                    None
+                },
+                notify_baton,
+                pool.as_mut_ptr(),
+            )
+        };
+
+        if !cancel_baton.is_null() {
+            unsafe {
+                drop(Box::from_raw(
+                    cancel_baton as *mut Box<dyn Fn() -> Result<(), Error>>,
+                ))
+            };
+        }
+        if !notify_baton.is_null() {
+            unsafe { drop(Box::from_raw(notify_baton as *mut Box<dyn Fn(&Notify)>)) };
+        }
+
+        Error::from_raw(ret)
+    }
+}
+
+/// Notify structure for callbacks
+pub struct Notify {
+    ptr: *const subversion_sys::svn_wc_notify_t,
+}
+
+impl Notify {
+    unsafe fn from_ptr(ptr: *const subversion_sys::svn_wc_notify_t) -> Self {
+        Self { ptr }
+    }
+
+    /// Get the action type
+    pub fn action(&self) -> u32 {
+        unsafe { (*self.ptr).action }
+    }
+
+    /// Get the path
+    pub fn path(&self) -> Option<&str> {
+        unsafe {
+            if (*self.ptr).path.is_null() {
+                None
+            } else {
+                Some(std::ffi::CStr::from_ptr((*self.ptr).path).to_str().unwrap())
+            }
+        }
+    }
+}
+
+/// Wrapper for notify callbacks
+extern "C" fn wrap_notify_func(
+    baton: *mut std::ffi::c_void,
+    notify: *const subversion_sys::svn_wc_notify_t,
+    _pool: *mut apr_sys::apr_pool_t,
+) {
+    if baton.is_null() || notify.is_null() {
+        return;
+    }
+
+    let callback = unsafe { &*(baton as *const Box<dyn Fn(&Notify)>) };
+    let notify_struct = unsafe { Notify::from_ptr(notify) };
+    callback(&notify_struct);
 }
 
 /// Represents a queue of committed items
@@ -1698,5 +1896,76 @@ mod tests {
 
         // Test empty patterns
         assert!(!match_ignore_list("foo", &[]).unwrap());
+    }
+
+    #[test]
+    fn test_add_from_disk() {
+        // This test requires a working copy, so we just test that the API compiles
+        // and returns an error when used on a non-WC directory
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut ctx = Context::new().unwrap();
+
+        let file_path = temp_dir.path().join("test.txt");
+        std::fs::write(&file_path, "test content").unwrap();
+
+        // Should fail without a working copy
+        let result = ctx.add_from_disk(&file_path, None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_move_path() {
+        // Test that the API compiles and fails gracefully without a WC
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut ctx = Context::new().unwrap();
+
+        let src = temp_dir.path().join("src.txt");
+        let dst = temp_dir.path().join("dst.txt");
+        std::fs::write(&src, "content").unwrap();
+
+        // Should fail without a working copy
+        let result = ctx.move_path(&src, &dst, false, false, None, None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_delete() {
+        // Test that the API compiles and fails gracefully without a WC
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut ctx = Context::new().unwrap();
+
+        let file_path = temp_dir.path().join("test.txt");
+        std::fs::write(&file_path, "test content").unwrap();
+
+        // Should fail without a working copy
+        let result = ctx.delete(&file_path, false, false, None, None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_committed_queue() {
+        // Test CommittedQueue creation
+        let queue = CommittedQueue::new();
+        assert!(!queue.ptr.is_null());
+
+        // Test queue_committed and process_committed_queue APIs
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut ctx = Context::new().unwrap();
+        let mut queue = CommittedQueue::new();
+
+        let file_path = temp_dir.path().join("test.txt");
+        std::fs::write(&file_path, "test content").unwrap();
+
+        // Should fail without a working copy
+        let result = ctx.queue_committed(&file_path, false, &mut queue);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_notify_struct() {
+        // Test that Notify struct methods work
+        // We can't easily create a real notify, but we can test the structure exists
+        use std::mem::size_of;
+        assert!(size_of::<Notify>() > 0);
     }
 }
