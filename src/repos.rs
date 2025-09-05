@@ -1317,3 +1317,260 @@ mod tests {
         }
     }
 }
+
+/// Pack the filesystem of a repository to improve performance
+/// This is useful for FSFS repositories to consolidate revision files
+pub fn fs_pack(
+    path: &std::path::Path,
+    notify_func: Option<&dyn Fn(&Notify)>,
+    cancel_func: Option<&dyn Fn() -> Result<(), Error>>,
+) -> Result<(), Error> {
+    let path_cstr = std::ffi::CString::new(path.to_string_lossy().as_ref())?;
+    let pool = apr::Pool::new();
+
+    let notify_baton = notify_func
+        .map(|notify_func| Box::into_raw(Box::new(notify_func)) as *mut std::ffi::c_void)
+        .unwrap_or(std::ptr::null_mut());
+
+    let cancel_baton = cancel_func
+        .map(|cancel_func| Box::into_raw(Box::new(cancel_func)) as *mut std::ffi::c_void)
+        .unwrap_or(std::ptr::null_mut());
+
+    // First open the repository to get the repos handle
+    let repos = Repos::open(path)?;
+
+    let ret = unsafe {
+        subversion_sys::svn_repos_fs_pack2(
+            repos.ptr,
+            if notify_func.is_some() {
+                Some(wrap_notify_func)
+            } else {
+                None
+            },
+            notify_baton,
+            if cancel_func.is_some() {
+                Some(crate::wrap_cancel_func)
+            } else {
+                None
+            },
+            cancel_baton,
+            pool.as_mut_ptr(),
+        )
+    };
+
+    // Free callback batons
+    if !notify_baton.is_null() {
+        unsafe { drop(Box::from_raw(notify_baton as *mut Box<dyn Fn(&Notify)>)) };
+    }
+    if !cancel_baton.is_null() {
+        unsafe {
+            drop(Box::from_raw(
+                cancel_baton as *mut Box<dyn Fn() -> Result<(), Error>>,
+            ))
+        };
+    }
+
+    Error::from_raw(ret)
+}
+
+impl Repos {
+    /// Get a commit editor for making commits directly to the repository
+    /// This provides low-level access for creating commits without a working copy
+    /// 
+    /// # Arguments
+    /// * `repos_url` - The repository URL (required)
+    /// * `base_path` - The base path within the repository (e.g., "/trunk")
+    /// * `log_msg` - The commit log message
+    /// * `author` - Optional author name
+    /// * `revprops` - Optional additional revision properties (svn:log and svn:author are set automatically)
+    /// * `commit_callback` - Optional callback to be called on successful commit
+    pub fn get_commit_editor(
+        &self,
+        repos_url: &str,
+        base_path: &str,
+        log_msg: &str,
+        author: Option<&str>,
+        revprops: Option<&std::collections::HashMap<String, Vec<u8>>>,
+        commit_callback: Option<&dyn Fn(crate::Revnum, &str, &std::ffi::CStr)>,
+    ) -> Result<Box<dyn crate::delta::Editor>, Error> {
+        let repos_url_cstr = std::ffi::CString::new(repos_url)?;
+        let base_path_cstr = std::ffi::CString::new(base_path)?;
+        let log_msg_cstr = std::ffi::CString::new(log_msg)?;
+        let author_cstr = author.map(std::ffi::CString::new).transpose()?;
+        // Use a boxed pool to keep it alive with the editor
+        let pool = Box::new(apr::Pool::new());
+        let pool_ptr = pool.as_ref().as_mut_ptr();
+
+        // Build revprop table with log message and author
+        let revprops_hash = unsafe { 
+            let hash = apr_sys::apr_hash_make(pool_ptr);
+            
+            // Add log message
+            let log_key = std::ffi::CString::new("svn:log")?;
+            let log_value = subversion_sys::svn_string_ncreate(
+                log_msg_cstr.as_ptr() as *const std::os::raw::c_char,
+                log_msg.len(),
+                pool_ptr,
+            );
+            apr_sys::apr_hash_set(
+                hash,
+                log_key.as_ptr() as *const std::ffi::c_void,
+                apr_sys::APR_HASH_KEY_STRING as isize,
+                log_value as *mut std::ffi::c_void,
+            );
+            
+            // Add author if provided
+            if let Some(ref author_c) = author_cstr {
+                let author_key = std::ffi::CString::new("svn:author")?;
+                let author_value = subversion_sys::svn_string_create(
+                    author_c.as_ptr(),
+                    pool_ptr,
+                );
+                apr_sys::apr_hash_set(
+                    hash,
+                    author_key.as_ptr() as *const std::ffi::c_void,
+                    apr_sys::APR_HASH_KEY_STRING as isize,
+                    author_value as *mut std::ffi::c_void,
+                );
+            }
+            
+            // Add any additional revprops
+            if let Some(revprops) = revprops {
+                for (key, value) in revprops {
+                    let key_cstr = std::ffi::CString::new(key.as_str())?;
+                    let svn_string = subversion_sys::svn_string_ncreate(
+                        value.as_ptr() as *const std::os::raw::c_char,
+                        value.len(),
+                        pool_ptr,
+                    );
+                    apr_sys::apr_hash_set(
+                        hash,
+                        key_cstr.as_ptr() as *const std::ffi::c_void,
+                        apr_sys::APR_HASH_KEY_STRING as isize,
+                        svn_string as *mut std::ffi::c_void,
+                    );
+                }
+            }
+            
+            hash
+        };
+
+        let commit_baton = commit_callback
+            .map(|callback| Box::into_raw(Box::new(callback)) as *mut std::ffi::c_void)
+            .unwrap_or(std::ptr::null_mut());
+
+        let mut editor_ptr = std::ptr::null();
+        let mut edit_baton = std::ptr::null_mut();
+
+        // Commit callback wrapper that matches expected signature
+        extern "C" fn wrap_commit_callback(
+            commit_info: *const subversion_sys::svn_commit_info_t,
+            baton: *mut std::ffi::c_void,
+            _pool: *mut apr_sys::apr_pool_t,
+        ) -> *mut subversion_sys::svn_error_t {
+            if baton.is_null() || commit_info.is_null() {
+                return std::ptr::null_mut();
+            }
+
+            let callback =
+                unsafe { &*(baton as *const Box<dyn Fn(crate::Revnum, &str, &std::ffi::CStr)>) };
+
+            let info = unsafe { &*commit_info };
+            let date_str = if !info.date.is_null() {
+                unsafe { std::ffi::CStr::from_ptr(info.date).to_string_lossy() }
+            } else {
+                std::borrow::Cow::Borrowed("")
+            };
+
+            let author_cstr = if !info.author.is_null() {
+                unsafe { std::ffi::CStr::from_ptr(info.author) }
+            } else {
+                std::ffi::CStr::from_bytes_with_nul(b"\0").unwrap()
+            };
+
+            callback(
+                crate::Revnum::from(info.revision as u64),
+                &date_str,
+                author_cstr,
+            );
+            std::ptr::null_mut()
+        }
+
+        let ret = unsafe {
+            subversion_sys::svn_repos_get_commit_editor5(
+                &mut editor_ptr,
+                &mut edit_baton,
+                self.ptr,
+                std::ptr::null_mut(), // txn (NULL = create new transaction)
+                repos_url_cstr.as_ptr(),
+                base_path_cstr.as_ptr(),
+                revprops_hash,
+                if commit_callback.is_some() {
+                    Some(wrap_commit_callback)
+                } else {
+                    None
+                },
+                commit_baton,
+                None,                 // authz_callback (NULL = allow all)
+                std::ptr::null_mut(), // authz_baton
+                pool_ptr,
+            )
+        };
+
+        Error::from_raw(ret)?;
+
+        // Leak the pool to keep it alive for the lifetime of the editor
+        // This is safe because the editor will be dropped eventually
+        let pool = Box::leak(pool);
+        
+        let editor = crate::delta::WrapEditor {
+            editor: editor_ptr,
+            baton: edit_baton,
+            _pool: std::marker::PhantomData,
+        };
+        Ok(Box::new(editor))
+    }
+}
+
+#[cfg(test)]
+mod additional_tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn test_fs_pack_invalid_path() {
+        let invalid_path = Path::new("/non/existent/repo");
+
+        // Test fs_pack with invalid repository path (should fail gracefully)
+        let result = fs_pack(invalid_path, None, None);
+
+        // Should return error for invalid repository
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_get_commit_editor_basic() {
+        // Create a temporary repository for testing
+        let temp_dir = tempfile::tempdir().unwrap();
+        let repo_path = temp_dir.path().join("test_repo");
+
+        // Create repository using the correct function
+        let repo = Repos::create(&repo_path).unwrap();
+
+        // Build the repository URL from the path
+        let repo_url = format!("file://{}", repo_path.to_string_lossy());
+        
+        // Test get_commit_editor with basic parameters
+        let result = repo.get_commit_editor(
+            &repo_url,
+            "/", // base path (repository root)
+            "Test commit message",
+            Some("test_author"),
+            None, // no revprops
+            None, // no commit callback
+        );
+        
+        // Should succeed in getting a commit editor
+        assert!(result.is_ok(), "Failed to get commit editor: {:?}", result.err());
+    }
+}
