@@ -577,16 +577,20 @@ pub fn match_ignore_list(path: &str, patterns: &[&str]) -> Result<bool, crate::E
     let path_cstr = std::ffi::CString::new(path).unwrap();
 
     with_tmp_pool(|pool| {
+        // We need to keep the CStrings alive for the duration of the call
+        let pattern_cstrs: Vec<std::ffi::CString> = patterns
+            .iter()
+            .map(|p| std::ffi::CString::new(*p))
+            .collect::<Result<Vec<_>, _>>()?;
+
         // Create APR array of patterns
         let mut patterns_array =
             apr::tables::TypedArray::<*const i8>::new(pool, patterns.len() as i32);
-        for pattern in patterns {
-            let pattern_cstr = std::ffi::CString::new(*pattern)?;
+        for pattern_cstr in &pattern_cstrs {
             patterns_array.push(pattern_cstr.as_ptr());
         }
 
-        let mut matched = 0;
-        let err = unsafe {
+        let matched = unsafe {
             subversion_sys::svn_wc_match_ignore_list(
                 path_cstr.as_ptr(),
                 patterns_array.as_ptr(),
@@ -594,9 +598,7 @@ pub fn match_ignore_list(path: &str, patterns: &[&str]) -> Result<bool, crate::E
             )
         };
 
-        // svn_wc_match_ignore_list returns a boolean, not an error
-        // The return value indicates whether there was a match
-        matched = err as i32;
+        // svn_wc_match_ignore_list returns svn_boolean_t (0 = false, non-zero = true)
         Ok(matched != 0)
     })
 }
@@ -1675,5 +1677,26 @@ mod tests {
             svn_choice,
             subversion_sys::svn_wc_conflict_choice_t_svn_wc_conflict_choose_theirs_full
         );
+    }
+
+    #[test]
+    fn test_match_ignore_list() {
+        // Test exact matches
+        assert!(match_ignore_list("foo", &["foo", "bar"]).unwrap());
+        assert!(match_ignore_list("bar", &["foo", "bar"]).unwrap());
+        assert!(!match_ignore_list("baz", &["foo", "bar"]).unwrap());
+
+        // Test wildcard patterns
+        assert!(match_ignore_list("foo", &["f*"]).unwrap());
+        assert!(match_ignore_list("foobar", &["f*"]).unwrap());
+        assert!(!match_ignore_list("bar", &["f*"]).unwrap());
+
+        // Test file extension patterns
+        assert!(match_ignore_list("test.txt", &["*.txt"]).unwrap());
+        assert!(match_ignore_list("file.txt", &["*.txt", "*.log"]).unwrap());
+        assert!(!match_ignore_list("test.rs", &["*.txt"]).unwrap());
+
+        // Test empty patterns
+        assert!(!match_ignore_list("foo", &[]).unwrap());
     }
 }
