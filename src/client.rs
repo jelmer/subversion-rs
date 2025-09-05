@@ -3512,6 +3512,69 @@ impl Context {
         }
     }
 
+    /// Get the UUID of a repository from a URL
+    /// Returns the UUID string identifying the repository
+    pub fn uuid_from_url(&mut self, url: &str) -> Result<String, Error> {
+        let url_cstr = std::ffi::CString::new(url)?;
+        let pool = apr::Pool::new();
+        let mut uuid_ptr = std::ptr::null();
+
+        let ret = unsafe {
+            subversion_sys::svn_client_uuid_from_url(
+                &mut uuid_ptr,
+                url_cstr.as_ptr(),
+                self.ptr,
+                pool.as_mut_ptr(),
+            )
+        };
+
+        Error::from_raw(ret)?;
+
+        if uuid_ptr.is_null() {
+            return Err(Error::from_str("Failed to get repository UUID"));
+        }
+
+        let uuid_str = unsafe {
+            std::ffi::CStr::from_ptr(uuid_ptr)
+                .to_string_lossy()
+                .into_owned()
+        };
+
+        Ok(uuid_str)
+    }
+
+    /// Get the UUID of a repository from a working copy path
+    /// Returns the UUID string of the repository the working copy is connected to
+    pub fn uuid_from_path(&mut self, path: &std::path::Path) -> Result<String, Error> {
+        let path_cstr = std::ffi::CString::new(path.to_string_lossy().as_ref())?;
+        let pool = apr::Pool::new();
+        let mut uuid_ptr = std::ptr::null();
+
+        let ret = unsafe {
+            subversion_sys::svn_client_uuid_from_path2(
+                &mut uuid_ptr,
+                path_cstr.as_ptr(),
+                self.ptr,
+                pool.as_mut_ptr(),
+                pool.as_mut_ptr(), // scratch pool
+            )
+        };
+
+        Error::from_raw(ret)?;
+
+        if uuid_ptr.is_null() {
+            return Err(Error::from_str("Failed to get repository UUID"));
+        }
+
+        let uuid_str = unsafe {
+            std::ffi::CStr::from_ptr(uuid_ptr)
+                .to_string_lossy()
+                .into_owned()
+        };
+
+        Ok(uuid_str)
+    }
+
     /// Relocate a working copy to a new repository URL
     ///
     /// Updates all references from `from_prefix` to `to_prefix` in the working copy.
@@ -5387,5 +5450,30 @@ mod tests {
             _ => panic!("Expected Unspecified peg revision as default"),
         }
         assert!(!default_options.expand_keywords);
+    }
+
+    #[test]
+    fn test_uuid_from_invalid_url() {
+        let mut ctx = Context::new().unwrap();
+
+        // Test UUID from invalid URL (should fail gracefully)
+        let result = ctx.uuid_from_url("file:///non/existent/repo");
+
+        // Should return error for invalid repository
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_uuid_from_invalid_path() {
+        let mut ctx = Context::new().unwrap();
+
+        let temp_dir = std::env::temp_dir();
+        let invalid_path = temp_dir.join("non_existent_wc");
+
+        // Test UUID from invalid working copy path (should fail gracefully)
+        let result = ctx.uuid_from_path(&invalid_path);
+
+        // Should return error for invalid working copy path
+        assert!(result.is_err());
     }
 }
