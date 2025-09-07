@@ -71,8 +71,13 @@ impl<'pool> Editor for WrapEditor<'pool> {
         crate::Error::from_raw(err)?;
         Ok(())
     }
-    
-    fn as_raw_parts(&self) -> (*const subversion_sys::svn_delta_editor_t, *mut std::ffi::c_void) {
+
+    fn as_raw_parts(
+        &self,
+    ) -> (
+        *const subversion_sys::svn_delta_editor_t,
+        *mut std::ffi::c_void,
+    ) {
         (self.editor, self.baton)
     }
 }
@@ -369,9 +374,14 @@ pub trait Editor {
     fn close(&mut self) -> Result<(), crate::Error>;
 
     fn abort(&mut self) -> Result<(), crate::Error>;
-    
+
     /// Get raw pointers for FFI operations that need access to the underlying C structures
-    fn as_raw_parts(&self) -> (*const subversion_sys::svn_delta_editor_t, *mut std::ffi::c_void);
+    fn as_raw_parts(
+        &self,
+    ) -> (
+        *const subversion_sys::svn_delta_editor_t,
+        *mut std::ffi::c_void,
+    );
 }
 
 pub trait DirectoryEditor {
@@ -1036,8 +1046,13 @@ mod tests {
             self.operations.borrow_mut().push("abort".to_string());
             Ok(())
         }
-        
-        fn as_raw_parts(&self) -> (*const subversion_sys::svn_delta_editor_t, *mut std::ffi::c_void) {
+
+        fn as_raw_parts(
+            &self,
+        ) -> (
+            *const subversion_sys::svn_delta_editor_t,
+            *mut std::ffi::c_void,
+        ) {
             // For test editors, return null pointers as they don't have underlying C structures
             (std::ptr::null(), std::ptr::null_mut())
         }

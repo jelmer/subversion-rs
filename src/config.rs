@@ -1,5 +1,5 @@
 use crate::{svn_result, Error};
-use std::ffi::CString;
+use std::ffi::{c_void, CString};
 use std::path::Path;
 use std::ptr;
 
@@ -86,6 +86,30 @@ pub struct Config {
 pub struct ConfigHash {
     ptr: *mut apr_sys::apr_hash_t,
     pool: apr::Pool,
+}
+
+/// Internal helper for accessing hash with C string keys
+struct StringKeyHash {
+    ptr: *mut apr_sys::apr_hash_t,
+}
+
+impl StringKeyHash {
+    unsafe fn from_ptr(ptr: *mut apr_sys::apr_hash_t) -> Self {
+        Self { ptr }
+    }
+
+    /// Get a value using a null-terminated C string key
+    fn get(&self, key: &str) -> Result<*mut c_void, Error> {
+        let c_key = CString::new(key)?;
+        unsafe {
+            let value = apr_sys::apr_hash_get(
+                self.ptr,
+                c_key.as_ptr() as *const c_void,
+                apr_sys::APR_HASH_KEY_STRING as apr_sys::apr_ssize_t,
+            );
+            Ok(value)
+        }
+    }
 }
 
 impl Config {
@@ -528,21 +552,13 @@ pub fn get_config(config_dir: Option<&Path>) -> Result<(Config, Config), Error> 
             subversion_sys::svn_config_get_config(&mut cfg_hash, config_dir_ptr, pool.as_mut_ptr());
         svn_result(err)?;
 
-        // Get the config and servers from the hash
-        let config_key = CString::new("config")?;
-        let servers_key = CString::new("servers")?;
+        // Use our StringKeyHash wrapper to access the config hash
+        let hash = StringKeyHash::from_ptr(cfg_hash);
 
-        let config_ptr = apr_sys::apr_hash_get(
-            cfg_hash,
-            config_key.as_ptr() as *const std::ffi::c_void,
-            apr_sys::APR_HASH_KEY_STRING as isize,
-        ) as *mut subversion_sys::svn_config_t;
-
-        let servers_ptr = apr_sys::apr_hash_get(
-            cfg_hash,
-            servers_key.as_ptr() as *const std::ffi::c_void,
-            apr_sys::APR_HASH_KEY_STRING as isize,
-        ) as *mut subversion_sys::svn_config_t;
+        let config_ptr =
+            hash.get("config").unwrap_or(ptr::null_mut()) as *mut subversion_sys::svn_config_t;
+        let servers_ptr =
+            hash.get("servers").unwrap_or(ptr::null_mut()) as *mut subversion_sys::svn_config_t;
 
         Ok((
             Config::from_ptr_and_pool(config_ptr, apr::Pool::new()),

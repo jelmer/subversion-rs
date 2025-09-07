@@ -700,24 +700,16 @@ impl<'pool> LogEntry<'pool> {
                 return None;
             }
 
-            let prop_key = std::ffi::CString::new(prop_name).ok()?;
-            let value_ptr = apr_sys::apr_hash_get(
-                revprops,
-                prop_key.as_ptr() as *const std::ffi::c_void,
-                apr_sys::APR_HASH_KEY_STRING as apr_sys::apr_ssize_t,
-            );
+            // Use TypedHash directly to get a reference with the correct lifetime
+            let hash = apr::hash::TypedHash::<subversion_sys::svn_string_t>::from_ptr(revprops);
+            let svn_string = hash.get_ref(prop_name)?;
 
-            if value_ptr.is_null() {
-                return None;
-            }
-
-            let svn_string = value_ptr as *const subversion_sys::svn_string_t;
-            if svn_string.is_null() || (*svn_string).data.is_null() {
+            if svn_string.data.is_null() {
                 return None;
             }
 
             let data_slice =
-                std::slice::from_raw_parts((*svn_string).data as *const u8, (*svn_string).len);
+                std::slice::from_raw_parts(svn_string.data as *const u8, svn_string.len);
             std::str::from_utf8(data_slice).ok()
         }
     }

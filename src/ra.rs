@@ -2455,8 +2455,13 @@ mod tests {
                 self.operations.borrow_mut().push("abort_edit".to_string());
                 Ok(())
             }
-            
-            fn as_raw_parts(&self) -> (*const subversion_sys::svn_delta_editor_t, *mut std::ffi::c_void) {
+
+            fn as_raw_parts(
+                &self,
+            ) -> (
+                *const subversion_sys::svn_delta_editor_t,
+                *mut std::ffi::c_void,
+            ) {
                 // For test editors, return null pointers as they don't have underlying C structures
                 (std::ptr::null(), std::ptr::null_mut())
             }
