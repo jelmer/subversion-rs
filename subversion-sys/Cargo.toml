@@ -13,7 +13,7 @@ documentation = "https://docs.rs/subversion-sys"
 doctest = false
 
 [dependencies]
-apr = { version = ">=0.1.14,<0.2" }
+apr = { version = ">=0.1.14, <0.4" }
 
 [build-dependencies]
 bindgen = "0.72"
