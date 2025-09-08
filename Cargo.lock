@@ -23,22 +23,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "apr"
-version = "0.2.0"
-dependencies = [
- "apr-sys",
- "ctor 0.5.0",
-]
-
-[[package]]
-name = "apr-sys"
-version = "0.2.0"
-dependencies = [
- "bindgen",
- "system-deps",
-]
-
-[[package]]
 name = "autocfg"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -46,9 +30,9 @@ checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
 name = "bindgen"
-version = "0.72.0"
+version = "0.72.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f72209734318d0b619a5e0f5129918b848c416e122a3c4ce054e03cb87b726f"
+checksum = "993776b509cfb49c750f11b8f07a46fa23e0a1386ffc01fb1e7d343efc387895"
 dependencies = [
  "bitflags",
  "cexpr",
@@ -656,7 +640,7 @@ checksum = "a8f112729512f8e442d81f95a8a7ddf2b7c6b8a1a6f509a95864142b30cab2d3"
 name = "subversion"
 version = "0.0.8"
 dependencies = [
- "apr 0.2.0",
+ "apr",
  "bitflags",
  "ctor 0.5.0",
  "lazy_static",
@@ -670,7 +654,7 @@ dependencies = [
 name = "subversion-sys"
 version = "0.0.8"
 dependencies = [
- "apr 0.1.16",
+ "apr",
  "bindgen",
  "system-deps",
 ]
