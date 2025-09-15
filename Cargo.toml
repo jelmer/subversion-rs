@@ -35,7 +35,7 @@ wc = ["delta", "subversion-sys/wc"]
 delta = ["subversion-sys/delta"]
 
 [dev-dependencies]
-tempfile = "3.21.0"
+tempfile = "3.22.0"
 
 [[example]]
 name = "checkout"
