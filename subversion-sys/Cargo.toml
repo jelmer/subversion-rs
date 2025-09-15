@@ -13,8 +13,8 @@ documentation = "https://docs.rs/subversion-sys"
 doctest = false
 
 [dependencies]
-apr = { path = "../../apr-rs" }
-apr-sys = { path = "../../apr-rs/apr-sys" }
+apr = "0.3.2"
+apr-sys = "0.2.1"
 
 [build-dependencies]
 bindgen = "0.72"

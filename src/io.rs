@@ -264,7 +264,7 @@ impl Stream {
             extern "C" fn read_trampoline<B: StreamBackend>(
                 baton: *mut std::ffi::c_void,
                 buffer: *mut std::os::raw::c_char,
-                len: *mut apr_sys::apr_size_t,
+                len: *mut subversion_sys::apr_size_t,
             ) -> *mut subversion_sys::svn_error_t {
                 unsafe {
                     let backend = &mut *(baton as *mut B);
@@ -284,7 +284,7 @@ impl Stream {
             extern "C" fn write_trampoline<B: StreamBackend>(
                 baton: *mut std::ffi::c_void,
                 data: *const std::os::raw::c_char,
-                len: *mut apr_sys::apr_size_t,
+                len: *mut subversion_sys::apr_size_t,
             ) -> *mut subversion_sys::svn_error_t {
                 unsafe {
                     let backend = &mut *(baton as *mut B);
@@ -324,7 +324,7 @@ impl Stream {
             // Skip callback
             extern "C" fn skip_trampoline<B: StreamBackend>(
                 baton: *mut std::ffi::c_void,
-                len: apr_sys::apr_size_t,
+                len: subversion_sys::apr_size_t,
             ) -> *mut subversion_sys::svn_error_t {
                 unsafe {
                     let backend = &mut *(baton as *mut B);
@@ -356,7 +356,7 @@ impl Stream {
             extern "C" fn mark_trampoline<B: StreamBackend>(
                 baton: *mut std::ffi::c_void,
                 mark: *mut *mut subversion_sys::svn_stream_mark_t,
-                pool: *mut apr_sys::apr_pool_t,
+                pool: *mut subversion_sys::apr_pool_t,
             ) -> *mut subversion_sys::svn_error_t {
                 unsafe {
                     let backend = &mut *(baton as *mut B);
@@ -441,7 +441,7 @@ impl Stream {
     }
 
     /// Create a stream from an APR file
-    pub fn from_apr_file(file: *mut apr_sys::apr_file_t, disown: bool) -> Self {
+    pub fn from_apr_file(file: *mut subversion_sys::apr_file_t, disown: bool) -> Self {
         let pool = apr::Pool::new();
         let stream = unsafe {
             subversion_sys::svn_stream_from_aprfile2(file, disown as i32, pool.as_mut_ptr())
@@ -829,7 +829,7 @@ impl Stream {
         extern "C" fn read_trampoline(
             baton: *mut std::ffi::c_void,
             buffer: *mut std::os::raw::c_char,
-            len: *mut apr_sys::apr_size_t,
+            len: *mut subversion_sys::apr_size_t,
         ) -> *mut subversion_sys::svn_error_t {
             let read_func =
                 unsafe { &*(baton as *const Box<dyn Fn(&mut [u8]) -> Result<usize, Error>>) };
@@ -861,7 +861,7 @@ impl Stream {
         extern "C" fn write_trampoline(
             baton: *mut std::ffi::c_void,
             data: *const std::os::raw::c_char,
-            len: *mut apr_sys::apr_size_t,
+            len: *mut subversion_sys::apr_size_t,
         ) -> *mut subversion_sys::svn_error_t {
             let write_func =
                 unsafe { &*(baton as *const Box<dyn Fn(&[u8]) -> Result<usize, Error>>) };
@@ -917,7 +917,7 @@ impl Stream {
 
         extern "C" fn skip_trampoline(
             baton: *mut std::ffi::c_void,
-            len: apr_sys::apr_size_t,
+            len: subversion_sys::apr_size_t,
         ) -> *mut subversion_sys::svn_error_t {
             let skip_func = unsafe { &*(baton as *const Box<dyn Fn(usize) -> Result<(), Error>>) };
             match skip_func(len) {
@@ -944,7 +944,7 @@ impl Stream {
         extern "C" fn mark_trampoline(
             baton: *mut std::ffi::c_void,
             mark: *mut *mut subversion_sys::svn_stream_mark_t,
-            pool: *mut apr_sys::apr_pool_t,
+            pool: *mut subversion_sys::apr_pool_t,
         ) -> *mut subversion_sys::svn_error_t {
             let mark_func = unsafe {
                 &*(baton
@@ -1008,8 +1008,8 @@ impl Stream {
         extern "C" fn open_trampoline(
             lazyopen_stream: *mut *mut subversion_sys::svn_stream_t,
             open_baton: *mut std::ffi::c_void,
-            result_pool: *mut apr_sys::apr_pool_t,
-            _scratch_pool: *mut apr_sys::apr_pool_t,
+            result_pool: *mut subversion_sys::apr_pool_t,
+            _scratch_pool: *mut subversion_sys::apr_pool_t,
         ) -> *mut subversion_sys::svn_error_t {
             let open_func =
                 unsafe { &*(open_baton as *const Box<dyn Fn() -> Result<Stream, Error>>) };

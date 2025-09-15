@@ -93,7 +93,7 @@ pub(crate) extern "C" fn wrap_dirent_receiver(
     rel_path: *const std::os::raw::c_char,
     dirent: *mut subversion_sys::svn_dirent_t,
     baton: *mut std::os::raw::c_void,
-    pool: *mut apr_sys::apr_pool_t,
+    pool: *mut subversion_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     let rel_path = unsafe { std::ffi::CStr::from_ptr(rel_path) };
     let baton = unsafe {
@@ -109,7 +109,7 @@ pub(crate) extern "C" fn wrap_dirent_receiver(
 extern "C" fn wrap_location_segment_receiver(
     svn_location_segment: *mut subversion_sys::svn_location_segment_t,
     baton: *mut std::os::raw::c_void,
-    pool: *mut apr_sys::apr_pool_t,
+    pool: *mut subversion_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     let baton = unsafe {
         &*(baton as *const _ as *const &dyn Fn(&crate::LocationSegment) -> Result<(), crate::Error>)
@@ -130,7 +130,7 @@ extern "C" fn wrap_lock_func(
     do_lock: i32,
     lock: *const subversion_sys::svn_lock_t,
     error: *mut subversion_sys::svn_error_t,
-    pool: *mut apr_sys::apr_pool_t,
+    pool: *mut subversion_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     let lock_baton = unsafe {
         // Unbox the reference like get_log does
@@ -634,7 +634,7 @@ impl<'a> Session<'a> {
                 // The value is already apr_hash_t* (svn_mergeinfo_t)
                 (String::from_utf8_lossy(k).into_owned(), unsafe {
                     crate::mergeinfo::Mergeinfo::from_ptr_and_pool(
-                        v as *mut *mut apr_sys::apr_hash_t,
+                        v as *mut *mut subversion_sys::apr_hash_t,
                         apr::Pool::new(),
                     )
                 })
@@ -1272,7 +1272,7 @@ impl<'a> Session<'a> {
             editor: *mut *const subversion_sys::svn_delta_editor_t,
             edit_baton: *mut *mut std::ffi::c_void,
             rev_props: *mut apr::hash::apr_hash_t,
-            _pool: *mut apr_sys::apr_pool_t,
+            _pool: *mut subversion_sys::apr_pool_t,
         ) -> *mut subversion_sys::svn_error_t {
             let baton = unsafe {
                 (replay_baton
@@ -1310,7 +1310,7 @@ impl<'a> Session<'a> {
             editor: *const subversion_sys::svn_delta_editor_t,
             edit_baton: *mut std::ffi::c_void,
             rev_props: *mut apr::hash::apr_hash_t,
-            _pool: *mut apr_sys::apr_pool_t,
+            _pool: *mut subversion_sys::apr_pool_t,
         ) -> *mut subversion_sys::svn_error_t {
             let baton = unsafe {
                 (replay_baton
@@ -1411,12 +1411,12 @@ impl<'a> Session<'a> {
             baton: *mut std::ffi::c_void,
             path: *const std::os::raw::c_char,
             rev: subversion_sys::svn_revnum_t,
-            rev_props: *mut apr_sys::apr_hash_t,
+            rev_props: *mut subversion_sys::apr_hash_t,
             result_of_merge: subversion_sys::svn_boolean_t,
             txdelta_handler: *mut *const subversion_sys::svn_txdelta_window_handler_t,
             txdelta_baton: *mut *mut std::ffi::c_void,
-            prop_diffs: *mut apr_sys::apr_array_header_t,
-            pool: *mut apr_sys::apr_pool_t,
+            prop_diffs: *mut subversion_sys::apr_array_header_t,
+            pool: *mut subversion_sys::apr_pool_t,
         ) -> *mut subversion_sys::svn_error_t {
             let handler = unsafe {
                 &mut *(baton
@@ -1524,7 +1524,8 @@ impl<'a> Session<'a> {
     ) -> Result<Vec<(String, HashMap<String, Vec<u8>>)>, Error> {
         let path_cstr = std::ffi::CString::new(path)?;
         let pool = Pool::new();
-        let mut inherited_props_array: *mut apr_sys::apr_array_header_t = std::ptr::null_mut();
+        let mut inherited_props_array: *mut subversion_sys::apr_array_header_t =
+            std::ptr::null_mut();
 
         let scratch_pool = Pool::new();
         let err = unsafe {

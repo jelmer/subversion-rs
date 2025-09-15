@@ -464,10 +464,10 @@ pub fn get_ssl_server_trust_prompt_provider(
         cred: *mut *mut subversion_sys::svn_auth_cred_ssl_server_trust_t,
         baton: *mut std::ffi::c_void,
         realmstring: *const std::ffi::c_char,
-        failures: apr_sys::apr_uint32_t,
+        failures: subversion_sys::apr_uint32_t,
         cert_info: *const subversion_sys::svn_auth_ssl_server_cert_info_t,
         may_save: subversion_sys::svn_boolean_t,
-        pool: *mut apr_sys::apr_pool_t,
+        pool: *mut subversion_sys::apr_pool_t,
     ) -> *mut subversion_sys::svn_error_t {
         let f = unsafe {
             &*(baton
@@ -578,7 +578,7 @@ extern "C" fn wrap_client_cert_prompt_fn(
     baton: *mut std::ffi::c_void,
     realmstring: *const std::ffi::c_char,
     may_save: subversion_sys::svn_boolean_t,
-    _pool: *mut apr_sys::apr_pool_t,
+    _pool: *mut subversion_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     let f = unsafe {
         &*(baton as *const &dyn Fn(&str, bool) -> Result<SslClientCertCredentials, crate::Error>)
@@ -660,7 +660,7 @@ pub fn get_simple_prompt_provider<'pool>(
         realmstring: *const std::ffi::c_char,
         username: *const std::ffi::c_char,
         may_save: subversion_sys::svn_boolean_t,
-        _pool: *mut apr_sys::apr_pool_t,
+        _pool: *mut subversion_sys::apr_pool_t,
     ) -> *mut subversion_sys::svn_error_t {
         let f = unsafe {
             &*(baton
@@ -713,7 +713,7 @@ pub fn get_username_prompt_provider(
         baton: *mut std::ffi::c_void,
         realmstring: *const std::ffi::c_char,
         may_save: subversion_sys::svn_boolean_t,
-        _pool: *mut apr_sys::apr_pool_t,
+        _pool: *mut subversion_sys::apr_pool_t,
     ) -> *mut subversion_sys::svn_error_t {
         let f = unsafe { &*(baton as *const &dyn Fn(&str, bool) -> Result<String, crate::Error>) };
         let realm = unsafe { std::ffi::CStr::from_ptr(realmstring).to_str().unwrap() };
@@ -751,7 +751,7 @@ extern "C" fn wrap_plaintext_passphrase_prompt(
     may_save_plaintext: *mut subversion_sys::svn_boolean_t,
     realmstring: *const std::ffi::c_char,
     baton: *mut std::ffi::c_void,
-    _pool: *mut apr_sys::apr_pool_t,
+    _pool: *mut subversion_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     let f = unsafe { &*(baton as *const &dyn Fn(&str) -> Result<bool, crate::Error>) };
     let realm = unsafe { std::ffi::CStr::from_ptr(realmstring).to_str().unwrap() };

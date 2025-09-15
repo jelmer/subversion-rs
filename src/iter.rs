@@ -29,7 +29,7 @@ impl std::error::Error for IterBreak {}
 /// Return `IterResult::Ok(())` to continue iteration or `Err(IterBreak)` to stop.
 ///
 /// Returns `Ok(true)` if iteration completed normally, `Ok(false)` if broken early.
-pub fn iter_hash<F>(hash: *mut apr_sys::apr_hash_t, mut callback: F) -> Result<bool, Error>
+pub fn iter_hash<F>(hash: *mut subversion_sys::apr_hash_t, mut callback: F) -> Result<bool, Error>
 where
     F: FnMut(&[u8], *mut std::ffi::c_void) -> IterResult<()>,
 {
@@ -42,9 +42,9 @@ where
         extern "C" fn c_callback(
             baton: *mut std::ffi::c_void,
             key: *const std::ffi::c_void,
-            klen: apr_sys::apr_ssize_t,
+            klen: subversion_sys::apr_ssize_t,
             val: *mut std::ffi::c_void,
-            _pool: *mut apr_sys::apr_pool_t,
+            _pool: *mut subversion_sys::apr_pool_t,
         ) -> *mut subversion_sys::svn_error_t {
             let callback = unsafe {
                 &mut *(baton as *mut &mut dyn FnMut(&[u8], *mut std::ffi::c_void) -> IterResult<()>)
@@ -92,7 +92,7 @@ where
 ///
 /// Returns `Ok(true)` if iteration completed normally, `Ok(false)` if broken early.
 pub fn iter_array<F>(
-    array: *const apr_sys::apr_array_header_t,
+    array: *const subversion_sys::apr_array_header_t,
     mut callback: F,
 ) -> Result<bool, Error>
 where
@@ -107,7 +107,7 @@ where
         extern "C" fn c_callback(
             baton: *mut std::ffi::c_void,
             item: *mut std::ffi::c_void,
-            _pool: *mut apr_sys::apr_pool_t,
+            _pool: *mut subversion_sys::apr_pool_t,
         ) -> *mut subversion_sys::svn_error_t {
             let callback = unsafe {
                 &mut *(baton as *mut &mut dyn FnMut(*mut std::ffi::c_void) -> IterResult<()>)

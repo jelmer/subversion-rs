@@ -400,8 +400,8 @@ pub(crate) unsafe extern "C" fn conflict_resolver_callback(
     result: *mut *mut subversion_sys::svn_wc_conflict_result_t,
     description: *const subversion_sys::svn_wc_conflict_description2_t,
     baton: *mut c_void,
-    result_pool: *mut apr_sys::apr_pool_t,
-    _scratch_pool: *mut apr_sys::apr_pool_t,
+    result_pool: *mut subversion_sys::apr_pool_t,
+    _scratch_pool: *mut subversion_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     if baton.is_null() {
         return std::ptr::null_mut();

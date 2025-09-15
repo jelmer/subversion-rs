@@ -804,7 +804,7 @@ impl Context {
         path: &str,
     ) -> Result<Option<std::collections::HashMap<String, Vec<u8>>>, crate::Error> {
         let path_cstr = std::ffi::CString::new(path).unwrap();
-        let mut props: *mut apr_sys::apr_hash_t = std::ptr::null_mut();
+        let mut props: *mut subversion_sys::apr_hash_t = std::ptr::null_mut();
 
         let pool = apr::Pool::new();
         let err = unsafe {
@@ -850,7 +850,7 @@ impl Context {
             baton: *mut std::ffi::c_void,
             local_abspath: *const std::os::raw::c_char,
             status: *const subversion_sys::svn_wc_status3_t,
-            _pool: *mut apr_sys::apr_pool_t,
+            _pool: *mut subversion_sys::apr_pool_t,
         ) -> *mut subversion_sys::svn_error_t {
             let callback =
                 unsafe { &mut *(baton as *mut Box<dyn FnMut(&str, &Status) -> Result<(), Error>>) };
@@ -1286,7 +1286,7 @@ impl Notify {
 extern "C" fn wrap_notify_func(
     baton: *mut std::ffi::c_void,
     notify: *const subversion_sys::svn_wc_notify_t,
-    _pool: *mut apr_sys::apr_pool_t,
+    _pool: *mut subversion_sys::apr_pool_t,
 ) {
     if baton.is_null() || notify.is_null() {
         return;

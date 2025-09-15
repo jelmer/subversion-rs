@@ -84,17 +84,17 @@ pub struct Config {
 
 /// Configuration hash wrapping apr_hash_t (as expected by repository access APIs)
 pub struct ConfigHash {
-    ptr: *mut apr_sys::apr_hash_t,
+    ptr: *mut subversion_sys::apr_hash_t,
     pool: apr::Pool,
 }
 
 /// Internal helper for accessing hash with C string keys
 struct StringKeyHash {
-    ptr: *mut apr_sys::apr_hash_t,
+    ptr: *mut subversion_sys::apr_hash_t,
 }
 
 impl StringKeyHash {
-    unsafe fn from_ptr(ptr: *mut apr_sys::apr_hash_t) -> Self {
+    unsafe fn from_ptr(ptr: *mut subversion_sys::apr_hash_t) -> Self {
         Self { ptr }
     }
 
@@ -105,7 +105,7 @@ impl StringKeyHash {
             let value = apr_sys::apr_hash_get(
                 self.ptr,
                 c_key.as_ptr() as *const c_void,
-                apr_sys::APR_HASH_KEY_STRING as apr_sys::apr_ssize_t,
+                apr_sys::APR_HASH_KEY_STRING as subversion_sys::apr_ssize_t,
             );
             Ok(value)
         }
@@ -458,15 +458,18 @@ impl Config {
 
 impl ConfigHash {
     /// Create from raw pointer and pool
-    pub(crate) unsafe fn from_ptr_and_pool(ptr: *mut apr_sys::apr_hash_t, pool: apr::Pool) -> Self {
+    pub(crate) unsafe fn from_ptr_and_pool(
+        ptr: *mut subversion_sys::apr_hash_t,
+        pool: apr::Pool,
+    ) -> Self {
         Self { ptr, pool }
     }
 
-    pub(crate) fn as_ptr(&self) -> *const apr_sys::apr_hash_t {
+    pub(crate) fn as_ptr(&self) -> *const subversion_sys::apr_hash_t {
         self.ptr
     }
 
-    pub(crate) fn as_mut_ptr(&mut self) -> *mut apr_sys::apr_hash_t {
+    pub(crate) fn as_mut_ptr(&mut self) -> *mut subversion_sys::apr_hash_t {
         self.ptr
     }
 }

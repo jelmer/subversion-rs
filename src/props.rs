@@ -77,7 +77,7 @@ impl<'a> PropHash<'a> {
     /// The caller must ensure that:
     /// - `ptr` is a valid APR hash containing svn_string_t values
     /// - The hash and its contents remain valid for the lifetime of this wrapper
-    pub unsafe fn from_ptr(ptr: *mut apr_sys::apr_hash_t) -> Self {
+    pub unsafe fn from_ptr(ptr: *mut subversion_sys::apr_hash_t) -> Self {
         Self {
             inner: apr::hash::TypedHash::<subversion_sys::svn_string_t>::from_ptr(ptr),
         }

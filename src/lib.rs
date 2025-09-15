@@ -1074,7 +1074,7 @@ impl<'pool> LocationSegment<'pool> {
 pub(crate) extern "C" fn wrap_commit_callback2(
     commit_info: *const subversion_sys::svn_commit_info_t,
     baton: *mut std::ffi::c_void,
-    _pool: *mut apr_sys::apr_pool_t,
+    _pool: *mut subversion_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     unsafe {
         let callback =
@@ -1091,7 +1091,7 @@ pub(crate) extern "C" fn wrap_commit_callback2(
 pub(crate) extern "C" fn wrap_log_entry_receiver(
     baton: *mut std::ffi::c_void,
     log_entry: *mut subversion_sys::svn_log_entry_t,
-    _pool: *mut apr_sys::apr_pool_t,
+    _pool: *mut subversion_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     eprintln!(
         "wrap_log_entry_receiver called with baton={:p}, log_entry={:p}",

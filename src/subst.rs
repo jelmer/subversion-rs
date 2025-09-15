@@ -150,7 +150,7 @@ pub fn build_keywords(
         let author_cstr = author.map(|s| std::ffi::CString::new(s).unwrap());
         let repos_root_cstr = repos_root_url.map(|s| std::ffi::CString::new(s).unwrap());
 
-        let mut keywords_hash: *mut apr_sys::apr_hash_t = std::ptr::null_mut();
+        let mut keywords_hash: *mut subversion_sys::apr_hash_t = std::ptr::null_mut();
 
         unsafe {
             let err = subversion_sys::svn_subst_build_keywords3(

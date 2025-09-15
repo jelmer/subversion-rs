@@ -262,7 +262,7 @@ impl Repos {
     pub fn capabilities(&mut self) -> Result<std::collections::HashSet<String>, Error> {
         let pool = apr::Pool::new();
         let scratch_pool = apr::Pool::new();
-        let mut capabilities: *mut apr_sys::apr_hash_t = std::ptr::null_mut();
+        let mut capabilities: *mut subversion_sys::apr_hash_t = std::ptr::null_mut();
         let ret = unsafe {
             subversion_sys::svn_repos_capabilities(
                 &mut capabilities,
@@ -476,7 +476,7 @@ impl Repos {
             baton: *mut std::ffi::c_void,
             revision: subversion_sys::svn_revnum_t,
             verify_err: *mut subversion_sys::svn_error_t,
-            _pool: *mut apr_sys::apr_pool_t,
+            _pool: *mut subversion_sys::apr_pool_t,
         ) -> *mut subversion_sys::svn_error_t {
             let baton = unsafe {
                 &mut *(baton as *mut Box<dyn FnMut(Revnum, &Error) -> Result<(), Error>>)
@@ -666,7 +666,7 @@ impl Repos {
             _root: *mut subversion_sys::svn_fs_root_t,
             _path: *const std::ffi::c_char,
             _baton: *mut std::ffi::c_void,
-            _pool: *mut apr_sys::apr_pool_t,
+            _pool: *mut subversion_sys::apr_pool_t,
         ) -> *mut subversion_sys::svn_error_t {
             unsafe {
                 *_allowed = 1; // Always allow
@@ -716,7 +716,7 @@ impl Repos {
             _root: *mut subversion_sys::svn_fs_root_t,
             _path: *const std::ffi::c_char,
             _baton: *mut std::ffi::c_void,
-            _pool: *mut apr_sys::apr_pool_t,
+            _pool: *mut subversion_sys::apr_pool_t,
         ) -> *mut subversion_sys::svn_error_t {
             unsafe {
                 *_allowed = 1; // Always allow
@@ -898,7 +898,7 @@ impl Repos {
             baton: *mut std::ffi::c_void,
             revision: subversion_sys::svn_revnum_t,
             verify_err: *mut subversion_sys::svn_error_t,
-            _pool: *mut apr_sys::apr_pool_t,
+            _pool: *mut subversion_sys::apr_pool_t,
         ) -> *mut subversion_sys::svn_error_t {
             let baton = unsafe {
                 &mut *(baton as *mut Box<dyn FnMut(Revnum, &Error) -> Result<(), Error>>)
@@ -1064,7 +1064,7 @@ pub fn recover(
 
 extern "C" fn wrap_freeze_func(
     baton: *mut std::ffi::c_void,
-    _pool: *mut apr_sys::apr_pool_t,
+    _pool: *mut subversion_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     let freeze_func = unsafe { &*(baton as *const Box<dyn Fn() -> Result<(), Error>>) };
     match freeze_func() {
@@ -1123,7 +1123,7 @@ impl<'a> Notify<'a> {
 extern "C" fn wrap_notify_func(
     baton: *mut std::ffi::c_void,
     notify: *const subversion_sys::svn_repos_notify_t,
-    _pool: *mut apr_sys::apr_pool_t,
+    _pool: *mut subversion_sys::apr_pool_t,
 ) {
     let baton = unsafe { &mut *(baton as *mut Box<dyn FnMut(&Notify)>) };
     unsafe {
@@ -1579,7 +1579,7 @@ impl Repos {
         extern "C" fn wrap_commit_callback(
             commit_info: *const subversion_sys::svn_commit_info_t,
             baton: *mut std::ffi::c_void,
-            _pool: *mut apr_sys::apr_pool_t,
+            _pool: *mut subversion_sys::apr_pool_t,
         ) -> *mut subversion_sys::svn_error_t {
             if baton.is_null() || commit_info.is_null() {
                 return std::ptr::null_mut();
