@@ -10,6 +10,7 @@ use std::marker::PhantomData;
 use subversion_sys::svn_io_dirent2_t;
 
 #[allow(dead_code)]
+/// Directory entry information.
 pub struct Dirent(*const svn_io_dirent2_t);
 
 impl From<*const svn_io_dirent2_t> for Dirent {
@@ -19,9 +20,13 @@ impl From<*const svn_io_dirent2_t> for Dirent {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// File deletion behavior.
 pub enum FileDel {
+    /// Do not delete the file.
     None,
+    /// Delete the file when closed.
     OnClose,
+    /// Delete the file when the pool is cleaned up.
     OnPoolCleanup,
 }
 
@@ -64,10 +69,12 @@ impl Drop for Mark {
 }
 
 impl Mark {
+    /// Returns a mutable pointer to the stream mark.
     pub fn as_mut_ptr(&mut self) -> *mut subversion_sys::svn_stream_mark_t {
         self.ptr
     }
 
+    /// Returns a pointer to the stream mark.
     pub fn as_ptr(&self) -> *const subversion_sys::svn_stream_mark_t {
         self.ptr
     }
@@ -178,6 +185,7 @@ impl Drop for Stream {
 }
 
 impl Stream {
+    /// Creates an empty stream.
     pub fn empty() -> Self {
         let pool = apr::Pool::new();
         let stream = unsafe { subversion_sys::svn_stream_empty(pool.as_mut_ptr()) };
@@ -454,14 +462,17 @@ impl Stream {
         }
     }
 
+    /// Returns a mutable pointer to the stream.
     pub fn as_mut_ptr(&mut self) -> *mut subversion_sys::svn_stream_t {
         self.ptr
     }
 
+    /// Returns a pointer to the stream.
     pub fn as_ptr(&self) -> *const subversion_sys::svn_stream_t {
         self.ptr
     }
 
+    /// Creates a Stream from a raw pointer and pool.
     pub(crate) unsafe fn from_ptr_and_pool(
         ptr: *mut subversion_sys::svn_stream_t,
         pool: apr::Pool,
@@ -474,6 +485,7 @@ impl Stream {
         }
     }
 
+    /// Opens a stream for reading from a file.
     pub fn open_readonly(path: &std::path::Path) -> Result<Self, Error> {
         let pool = apr::Pool::new();
         let mut stream = std::ptr::null_mut();
@@ -499,6 +511,7 @@ impl Stream {
         })
     }
 
+    /// Opens a stream for writing to a file.
     pub fn open_writable(path: &std::path::Path) -> Result<Self, Error> {
         let pool = apr::Pool::new();
         let mut stream = std::ptr::null_mut();
@@ -524,6 +537,7 @@ impl Stream {
         })
     }
 
+    /// Opens a unique temporary file stream.
     pub fn open_unique(
         dirpath: &std::path::Path,
         when: FileDel,
@@ -549,6 +563,7 @@ impl Stream {
         ))
     }
 
+    /// Creates a stream for standard input.
     pub fn stdin(buffered: bool) -> Result<Self, Error> {
         let pool = apr::Pool::new();
         let mut stream = std::ptr::null_mut();
@@ -564,6 +579,7 @@ impl Stream {
         })
     }
 
+    /// Creates a stream for standard error.
     pub fn stderr() -> Result<Self, Error> {
         let pool = apr::Pool::new();
         let mut stream = std::ptr::null_mut();
@@ -577,6 +593,7 @@ impl Stream {
         })
     }
 
+    /// Creates a stream for standard output.
     pub fn stdout() -> Result<Self, Error> {
         let pool = apr::Pool::new();
         let mut stream = std::ptr::null_mut();
@@ -590,6 +607,7 @@ impl Stream {
         })
     }
 
+    /// Creates a checksummed stream wrapper.
     pub fn checksummed(
         &mut self,
         checksum_kind: crate::ChecksumKind,
@@ -607,7 +625,7 @@ impl Stream {
                 apr::pool::Pool::new().as_mut_ptr(),
             )
         };
-        let pool = std::rc::Rc::new(apr::pool::Pool::new());
+        let _pool = std::rc::Rc::new(apr::pool::Pool::new());
         (
             unsafe { crate::io::Stream::from_ptr_and_pool(stream, apr::Pool::new()) },
             crate::Checksum {
@@ -621,6 +639,7 @@ impl Stream {
         )
     }
 
+    /// Creates a compressed stream wrapper.
     pub fn compressed(&mut self) -> Self {
         let pool = apr::Pool::new();
         let stream = unsafe { subversion_sys::svn_stream_compressed(self.ptr, pool.as_mut_ptr()) };
@@ -632,6 +651,7 @@ impl Stream {
         }
     }
 
+    /// Gets the checksum of the stream contents.
     pub fn contents_checksum(
         &mut self,
         checksum_kind: crate::ChecksumKind,
@@ -654,6 +674,7 @@ impl Stream {
         })
     }
 
+    /// Reads data from the stream into a buffer.
     pub fn read_full(&mut self, buf: &mut [u8]) -> Result<usize, Error> {
         let mut len = buf.len();
         let err = unsafe {
@@ -663,16 +684,19 @@ impl Stream {
         Ok(len)
     }
 
+    /// Checks if the stream supports partial reads.
     pub fn supports_partial_read(&mut self) -> bool {
         unsafe { subversion_sys::svn_stream_supports_partial_read(self.ptr) != 0 }
     }
 
+    /// Skips a number of bytes in the stream.
     pub fn skip(&mut self, len: usize) -> Result<(), Error> {
         let err = unsafe { subversion_sys::svn_stream_skip(self.ptr, len) };
         Error::from_raw(err)?;
         Ok(())
     }
 
+    /// Reads data from the stream into a buffer.
     pub fn read(&mut self, buf: &mut [u8]) -> Result<usize, Error> {
         let mut len = buf.len();
         let err = unsafe {
@@ -682,6 +706,7 @@ impl Stream {
         Ok(len)
     }
 
+    /// Writes data from a buffer to the stream.
     pub fn write(&mut self, buf: &[u8]) -> Result<(), Error> {
         let mut len = buf.len();
         let err = unsafe {
@@ -691,16 +716,19 @@ impl Stream {
         Ok(())
     }
 
+    /// Closes the stream.
     pub fn close(&mut self) -> Result<(), Error> {
         let err = unsafe { subversion_sys::svn_stream_close(self.ptr) };
         Error::from_raw(err)?;
         Ok(())
     }
 
+    /// Checks if the stream supports marking.
     pub fn supports_mark(&mut self) -> bool {
         unsafe { subversion_sys::svn_stream_supports_mark(self.ptr) != 0 }
     }
 
+    /// Creates a mark at the current position in the stream.
     pub fn mark(&mut self) -> Result<Mark, Error> {
         let mut mark = std::ptr::null_mut();
         let pool = apr::pool::Pool::new();
@@ -710,6 +738,7 @@ impl Stream {
         Ok(unsafe { Mark::from_ptr_and_pool(mark, pool) })
     }
 
+    /// Seeks to a previously created mark in the stream.
     pub fn seek(&mut self, mark: &Mark) -> Result<(), Error> {
         let err = unsafe { subversion_sys::svn_stream_seek(self.ptr, mark.as_ptr()) };
         Error::from_raw(err)?;
@@ -768,6 +797,7 @@ impl Stream {
         }
     }
 
+    /// Writes a string to the stream.
     pub fn puts(&mut self, s: &str) -> Result<(), Error> {
         let s = std::ffi::CString::new(s).unwrap();
         let err = unsafe { subversion_sys::svn_stream_puts(self.ptr, s.as_ptr()) };
@@ -944,7 +974,7 @@ impl Stream {
         extern "C" fn mark_trampoline(
             baton: *mut std::ffi::c_void,
             mark: *mut *mut subversion_sys::svn_stream_mark_t,
-            pool: *mut subversion_sys::apr_pool_t,
+            _pool: *mut subversion_sys::apr_pool_t,
         ) -> *mut subversion_sys::svn_error_t {
             let mark_func = unsafe {
                 &*(baton
@@ -1008,7 +1038,7 @@ impl Stream {
         extern "C" fn open_trampoline(
             lazyopen_stream: *mut *mut subversion_sys::svn_stream_t,
             open_baton: *mut std::ffi::c_void,
-            result_pool: *mut subversion_sys::apr_pool_t,
+            _result_pool: *mut subversion_sys::apr_pool_t,
             _scratch_pool: *mut subversion_sys::apr_pool_t,
         ) -> *mut subversion_sys::svn_error_t {
             let open_func =
@@ -1073,6 +1103,7 @@ impl std::io::Read for Stream {
     }
 }
 
+/// Creates a tee stream that writes to two output streams.
 pub fn tee(out1: &mut Stream, out2: &mut Stream) -> Result<Stream, Error> {
     let pool = apr::Pool::new();
     let stream = unsafe { subversion_sys::svn_stream_tee(out1.ptr, out2.ptr, pool.as_mut_ptr()) };
@@ -1153,6 +1184,7 @@ impl From<Vec<u8>> for Stream {
     }
 }
 
+/// Removes a file from the filesystem.
 pub fn remove_file(path: &std::path::Path, ignore_enoent: bool) -> Result<(), Error> {
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     let err = unsafe {
@@ -1215,6 +1247,7 @@ pub fn wrap_write(write: &mut dyn std::io::Write) -> Result<Stream, Error> {
     })
 }
 
+/// Creates a unique symbolic link.
 pub fn create_uniqe_link(
     path: &std::path::Path,
     dest: &std::path::Path,
@@ -1240,6 +1273,7 @@ pub fn create_uniqe_link(
     }))
 }
 
+/// Reads the target of a symbolic link.
 pub fn read_link(path: &std::path::Path) -> Result<std::path::PathBuf, Error> {
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     let mut target = std::ptr::null_mut();
@@ -1261,6 +1295,7 @@ pub fn read_link(path: &std::path::Path) -> Result<std::path::PathBuf, Error> {
     ))
 }
 
+/// Gets the system temporary directory path.
 pub fn temp_dir() -> Result<std::path::PathBuf, Error> {
     let pool = apr::pool::Pool::new();
     let mut path = std::ptr::null();
@@ -1271,6 +1306,7 @@ pub fn temp_dir() -> Result<std::path::PathBuf, Error> {
     }))
 }
 
+/// Copies a file from source to destination.
 pub fn copy_file(
     src: &std::path::Path,
     dest: &std::path::Path,
@@ -1290,6 +1326,7 @@ pub fn copy_file(
     Ok(())
 }
 
+/// Copies file permissions from source to destination.
 pub fn copy_perms(src: &std::path::Path, dest: &std::path::Path) -> Result<(), Error> {
     let src = std::ffi::CString::new(src.to_str().unwrap()).unwrap();
     let dest = std::ffi::CString::new(dest.to_str().unwrap()).unwrap();
@@ -1304,6 +1341,7 @@ pub fn copy_perms(src: &std::path::Path, dest: &std::path::Path) -> Result<(), E
     Ok(())
 }
 
+/// Copies a symbolic link from source to destination.
 pub fn copy_link(src: &std::path::Path, dest: &std::path::Path) -> Result<(), Error> {
     let src = std::ffi::CString::new(src.to_str().unwrap()).unwrap();
     let dest = std::ffi::CString::new(dest.to_str().unwrap()).unwrap();
@@ -1318,6 +1356,7 @@ pub fn copy_link(src: &std::path::Path, dest: &std::path::Path) -> Result<(), Er
     Ok(())
 }
 
+/// Recursively copies a directory and its contents.
 pub fn copy_dir_recursively(
     src: &std::path::Path,
     dst_path: &std::path::Path,
@@ -1352,6 +1391,7 @@ pub fn copy_dir_recursively(
     Ok(())
 }
 
+/// Creates a directory and all necessary parent directories.
 pub fn make_dir_recursively(path: &std::path::Path) -> Result<(), Error> {
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     let err = unsafe {
@@ -1364,6 +1404,7 @@ pub fn make_dir_recursively(path: &std::path::Path) -> Result<(), Error> {
     Ok(())
 }
 
+/// Checks if a directory is empty.
 pub fn dir_empty(path: &std::path::Path) -> Result<bool, Error> {
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     let mut empty = 0;
@@ -1378,6 +1419,7 @@ pub fn dir_empty(path: &std::path::Path) -> Result<bool, Error> {
     Ok(empty != 0)
 }
 
+/// Appends the contents of one file to another.
 pub fn append_file(src: &std::path::Path, dest: &std::path::Path) -> Result<(), Error> {
     let src = std::ffi::CString::new(src.to_str().unwrap()).unwrap();
     let dest = std::ffi::CString::new(dest.to_str().unwrap()).unwrap();
@@ -1392,6 +1434,7 @@ pub fn append_file(src: &std::path::Path, dest: &std::path::Path) -> Result<(), 
     Ok(())
 }
 
+/// Sets a file to read-only mode.
 pub fn set_file_read_only(path: &std::path::Path, ignore_enoent: bool) -> Result<(), Error> {
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
 
@@ -1406,6 +1449,7 @@ pub fn set_file_read_only(path: &std::path::Path, ignore_enoent: bool) -> Result
     Ok(())
 }
 
+/// Sets a file to read-write mode.
 pub fn set_file_read_write(path: &std::path::Path, ignore_enoent: bool) -> Result<(), Error> {
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
 
@@ -1420,6 +1464,7 @@ pub fn set_file_read_write(path: &std::path::Path, ignore_enoent: bool) -> Resul
     Ok(())
 }
 
+/// Checks if a file is executable.
 pub fn is_file_executable(path: &std::path::Path) -> Result<bool, Error> {
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     let mut executable = 0;
@@ -1434,6 +1479,7 @@ pub fn is_file_executable(path: &std::path::Path) -> Result<bool, Error> {
     Ok(executable != 0)
 }
 
+/// Gets the last affected time of a file.
 pub fn file_affected_time(path: &std::path::Path) -> Result<apr::time::Time, Error> {
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     let mut affected_time = 0;
@@ -1448,6 +1494,7 @@ pub fn file_affected_time(path: &std::path::Path) -> Result<apr::time::Time, Err
     Ok(apr::time::Time::from(affected_time))
 }
 
+/// Sets the last affected time of a file.
 pub fn set_file_affected_time(
     path: &std::path::Path,
     affected_time: apr::time::Time,
@@ -1465,6 +1512,7 @@ pub fn set_file_affected_time(
     Ok(())
 }
 
+/// Sleeps until the next timestamp change for the given path.
 pub fn sleep_for_timestamps(path: &std::path::Path) {
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     unsafe {
@@ -1475,6 +1523,7 @@ pub fn sleep_for_timestamps(path: &std::path::Path) {
     }
 }
 
+/// Checks if two files have different sizes.
 pub fn filesizes_different_p(
     file1: &std::path::Path,
     file2: &std::path::Path,
@@ -1494,6 +1543,7 @@ pub fn filesizes_different_p(
     Ok(different != 0)
 }
 
+/// Checks if three files have different sizes from each other.
 pub fn filesizes_three_different_p(
     file1: &std::path::Path,
     file2: &std::path::Path,
@@ -1520,6 +1570,7 @@ pub fn filesizes_three_different_p(
     Ok((different1 != 0, different2 != 0, different3 != 0))
 }
 
+/// Computes a checksum for a file.
 pub fn file_checksum(
     file: &std::path::Path,
     checksum_kind: crate::ChecksumKind,
@@ -1542,6 +1593,7 @@ pub fn file_checksum(
     })
 }
 
+/// Checks if two files have the same contents.
 pub fn files_contents_same_p(
     file1: &std::path::Path,
     file2: &std::path::Path,
@@ -1561,6 +1613,7 @@ pub fn files_contents_same_p(
     Ok(same != 0)
 }
 
+/// Checks if three files have the same contents.
 pub fn files_contents_three_same_p(
     file1: &std::path::Path,
     file2: &std::path::Path,
@@ -1587,6 +1640,7 @@ pub fn files_contents_three_same_p(
     Ok((same1 != 0, same2 != 0, same3 != 0))
 }
 
+/// Creates a file with the specified string contents.
 pub fn file_create(path: &std::path::Path, contents: &str) -> Result<(), Error> {
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     let contents = std::ffi::CString::new(contents).unwrap();
@@ -1601,6 +1655,7 @@ pub fn file_create(path: &std::path::Path, contents: &str) -> Result<(), Error> 
     Ok(())
 }
 
+/// Creates a file with the specified byte contents.
 pub fn file_create_bytes(path: &std::path::Path, contents: &[u8]) -> Result<(), Error> {
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     let err = unsafe {
@@ -1615,6 +1670,7 @@ pub fn file_create_bytes(path: &std::path::Path, contents: &[u8]) -> Result<(), 
     Ok(())
 }
 
+/// Creates an empty file.
 pub fn file_create_empty(path: &std::path::Path) -> Result<(), Error> {
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     let err = unsafe {
@@ -1624,6 +1680,7 @@ pub fn file_create_empty(path: &std::path::Path) -> Result<(), Error> {
     Ok(())
 }
 
+/// Locks a file.
 pub fn file_lock(path: &std::path::Path, exclusive: bool, nonblocking: bool) -> Result<(), Error> {
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     let err = unsafe {
@@ -1638,6 +1695,7 @@ pub fn file_lock(path: &std::path::Path, exclusive: bool, nonblocking: bool) -> 
     Ok(())
 }
 
+/// Copies a file from one directory to another.
 pub fn dir_file_copy(
     src_path: &std::path::Path,
     dest_path: &std::path::Path,
@@ -1659,6 +1717,7 @@ pub fn dir_file_copy(
     Ok(())
 }
 
+/// Copies data from one stream to another.
 pub fn stream_copy(
     from: &mut Stream,
     to: &mut Stream,
@@ -1685,6 +1744,7 @@ pub fn stream_copy(
     Ok(())
 }
 
+/// Checks if two streams have the same contents.
 pub fn stream_contents_same(stream1: &mut Stream, stream2: &mut Stream) -> Result<bool, Error> {
     let mut same = 0;
     let err = unsafe {
@@ -1699,6 +1759,7 @@ pub fn stream_contents_same(stream1: &mut Stream, stream2: &mut Stream) -> Resul
     Ok(same != 0)
 }
 
+/// Reads a string from a stream.
 pub fn string_from_stream(stream: &mut Stream) -> Result<String, Error> {
     let mut str = std::ptr::null_mut();
     let pool = apr::pool::Pool::new();
@@ -1720,6 +1781,7 @@ pub fn string_from_stream(stream: &mut Stream) -> Result<String, Error> {
     })
 }
 
+/// Removes a directory and its contents.
 pub fn remove_dir(
     path: &std::path::Path,
     ignore_enoent: bool,

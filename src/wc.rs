@@ -2,33 +2,52 @@ use crate::{svn_result, with_tmp_pool, Error};
 use std::marker::PhantomData;
 use subversion_sys::{svn_wc_context_t, svn_wc_version};
 
+/// Returns the version information for the working copy library.
 pub fn version() -> crate::Version {
     unsafe { crate::Version(svn_wc_version()) }
 }
 
 // Status constants for Python compatibility
+/// Status constant indicating no status.
 pub const STATUS_NONE: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_none;
+/// Status constant for unversioned items.
 pub const STATUS_UNVERSIONED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_unversioned;
+/// Status constant for normal versioned items.
 pub const STATUS_NORMAL: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_normal;
+/// Status constant for added items.
 pub const STATUS_ADDED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_added;
+/// Status constant for missing items.
 pub const STATUS_MISSING: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_missing;
+/// Status constant for deleted items.
 pub const STATUS_DELETED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_deleted;
+/// Status constant for replaced items.
 pub const STATUS_REPLACED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_replaced;
+/// Status constant for modified items.
 pub const STATUS_MODIFIED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_modified;
+/// Status constant for merged items.
 pub const STATUS_MERGED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_merged;
+/// Status constant for conflicted items.
 pub const STATUS_CONFLICTED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_conflicted;
+/// Status constant for ignored items.
 pub const STATUS_IGNORED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_ignored;
+/// Status constant for obstructed items.
 pub const STATUS_OBSTRUCTED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_obstructed;
+/// Status constant for external items.
 pub const STATUS_EXTERNAL: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_external;
+/// Status constant for incomplete items.
 pub const STATUS_INCOMPLETE: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_incomplete;
 
 // Schedule constants for Python compatibility
+/// Schedule constant for normal items.
 pub const SCHEDULE_NORMAL: u32 = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_normal;
+/// Schedule constant for items to be added.
 pub const SCHEDULE_ADD: u32 = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_add;
+/// Schedule constant for items to be deleted.
 pub const SCHEDULE_DELETE: u32 = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_delete;
+/// Schedule constant for items to be replaced.
 pub const SCHEDULE_REPLACE: u32 = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_replace;
 
-/// Working copy status types
+/// Working copy status types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
 pub enum StatusKind {
@@ -201,6 +220,7 @@ impl Context {
         self.ptr
     }
 
+    /// Creates a new working copy context.
     pub fn new() -> Result<Self, crate::Error> {
         let pool = apr::Pool::new();
 
@@ -248,6 +268,7 @@ impl Context {
         }
     }
 
+    /// Checks the working copy format version.
     pub fn check_wc(&mut self, path: &str) -> Result<i32, crate::Error> {
         let path = std::ffi::CString::new(path).unwrap();
         let mut wc_format = 0;
@@ -263,6 +284,7 @@ impl Context {
         Ok(wc_format)
     }
 
+    /// Checks if a file's text content has been modified.
     pub fn text_modified(&mut self, path: &str) -> Result<bool, crate::Error> {
         let path = std::ffi::CString::new(path).unwrap();
         let mut modified = 0;
@@ -279,6 +301,7 @@ impl Context {
         Ok(modified != 0)
     }
 
+    /// Checks if a file's properties have been modified.
     pub fn props_modified(&mut self, path: &str) -> Result<bool, crate::Error> {
         let path = std::ffi::CString::new(path).unwrap();
         let mut modified = 0;
@@ -294,6 +317,7 @@ impl Context {
         Ok(modified != 0)
     }
 
+    /// Checks if a path has conflicts (text, property, tree).
     pub fn conflicted(&mut self, path: &str) -> Result<(bool, bool, bool), crate::Error> {
         let path = std::ffi::CString::new(path).unwrap();
         let mut text_conflicted = 0;
@@ -317,6 +341,7 @@ impl Context {
         ))
     }
 
+    /// Ensures an administrative area exists for the given path.
     pub fn ensure_adm(
         &mut self,
         local_abspath: &str,
@@ -346,6 +371,8 @@ impl Context {
         Ok(())
     }
 
+    /// Checks if a path is locked in the working copy.
+    /// Returns (locked_here, locked) where locked_here means locked in this working copy.
     pub fn locked(&mut self, path: &str) -> Result<(bool, bool), crate::Error> {
         let path = std::ffi::CString::new(path).unwrap();
         let mut locked = 0;
@@ -372,6 +399,7 @@ impl Context {
     }
 }
 
+/// Sets the name of the administrative directory (typically ".svn").
 pub fn set_adm_dir(name: &str) -> Result<(), crate::Error> {
     let name = std::ffi::CString::new(name).unwrap();
     let err = unsafe {
@@ -381,6 +409,7 @@ pub fn set_adm_dir(name: &str) -> Result<(), crate::Error> {
     Ok(())
 }
 
+/// Returns the name of the administrative directory.
 pub fn get_adm_dir() -> String {
     let pool = apr::pool::Pool::new();
     let name = unsafe { subversion_sys::svn_wc_get_adm_dir(pool.as_mut_ptr()) };
@@ -1143,7 +1172,6 @@ impl Context {
         src_abspath: &std::path::Path,
         dst_abspath: &std::path::Path,
         metadata_only: bool,
-        allow_mixed_revisions: bool,
         cancel_func: Option<&dyn Fn() -> Result<(), Error>>,
         notify_func: Option<&dyn Fn(&Notify)>,
     ) -> Result<(), Error> {
@@ -1345,7 +1373,6 @@ pub fn cleanup(
     fix_recorded_timestamps: bool,
     clear_dav_cache: bool,
     vacuum_pristines: bool,
-    include_externals: bool,
 ) -> Result<(), Error> {
     let path_str = wc_path.to_string_lossy();
     let path_cstr = std::ffi::CString::new(path_str.as_ref()).unwrap();
@@ -1389,11 +1416,7 @@ pub fn cleanup(
 pub fn add(
     ctx: &mut Context,
     path: &std::path::Path,
-    depth: crate::Depth,
     force: bool,
-    no_ignore: bool,
-    no_autoprops: bool,
-    add_parents: bool,
 ) -> Result<(), Error> {
     let path_str = path.to_string_lossy();
     let path_cstr = std::ffi::CString::new(path_str.as_ref())?;
@@ -1520,12 +1543,13 @@ pub fn resolve_conflict(
     path: &std::path::Path,
     depth: crate::Depth,
     resolve_text: bool,
-    resolve_props: bool,
+    resolve_prop: Option<&str>,
     resolve_tree: bool,
     conflict_choice: ConflictChoice,
 ) -> Result<(), Error> {
     let path_str = path.to_string_lossy();
     let path_cstr = std::ffi::CString::new(path_str.as_ref())?;
+    let prop_cstr = resolve_prop.map(|p| std::ffi::CString::new(p).unwrap());
 
     with_tmp_pool(|pool| unsafe {
         let err = subversion_sys::svn_wc_resolved_conflict5(
@@ -1533,7 +1557,7 @@ pub fn resolve_conflict(
             path_cstr.as_ptr(),
             depth.into(),
             resolve_text as i32,
-            std::ptr::null(), // resolve_prop (resolve all props if resolve_props is true)
+            prop_cstr.as_ref().map_or(std::ptr::null(), |p| p.as_ptr()),
             resolve_tree as i32,
             conflict_choice.into(),
             None,                 // cancel_func
@@ -1546,6 +1570,9 @@ pub fn resolve_conflict(
     })
 }
 
+/// Gets the revision status of a working copy.
+///
+/// Returns (min_revision, max_revision, is_switched, is_modified).
 pub fn revision_status(
     wc_path: &std::path::Path,
     trail_url: Option<&str>,
@@ -1925,7 +1952,7 @@ mod tests {
         std::fs::write(&src, "content").unwrap();
 
         // Should fail without a working copy
-        let result = ctx.move_path(&src, &dst, false, false, None, None);
+        let result = ctx.move_path(&src, &dst, false, None, None);
         assert!(result.is_err());
     }
 

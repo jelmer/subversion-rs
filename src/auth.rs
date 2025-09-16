@@ -1,17 +1,27 @@
 use crate::Error;
 use std::marker::PhantomData;
 
+/// Authentication settings that can be configured.
 pub enum AuthSetting<'a> {
+    /// Username for authentication.
     Username(&'a str),
+    /// Default username to use when not specified.
     DefaultUsername(&'a str),
+    /// SSL server trust file path.
     SslServerTrustFile(&'a str),
+    /// SSL client certificate file path.
     SslClientCertFile(&'a str),
+    /// Password for SSL client certificate.
     SslClientCertPassword(&'a str),
+    /// Configuration directory path.
     ConfigDir(&'a str),
+    /// Server group name.
     ServerGroup(&'a str),
+    /// Configuration category for servers.
     ConfigCategoryServers(&'a str),
 }
 
+/// Authentication baton for managing authentication providers and credentials.
 pub struct AuthBaton {
     ptr: *mut subversion_sys::svn_auth_baton_t,
     pool: apr::Pool,
@@ -22,22 +32,28 @@ pub struct AuthBaton {
 }
 unsafe impl Send for AuthBaton {}
 
+/// Trait for authentication credentials.
 pub trait Credentials {
+    /// Returns the kind of credential.
     fn kind() -> &'static str;
 
+    /// Returns a mutable pointer to the credentials.
     fn as_mut_ptr(&mut self) -> *mut std::ffi::c_void;
 
+    /// Creates credentials from a raw pointer.
     fn from_raw(cred: *mut std::ffi::c_void) -> Self
     where
         Self: Sized;
 }
 
+/// Simple username/password credentials.
 pub struct SimpleCredentials<'pool> {
     ptr: *mut subversion_sys::svn_auth_cred_simple_t,
     _pool: std::marker::PhantomData<&'pool apr::Pool>,
 }
 
 impl<'pool> SimpleCredentials<'pool> {
+    /// Returns the username.
     pub fn username(&self) -> &str {
         unsafe {
             std::ffi::CStr::from_ptr((*self.ptr).username)
@@ -46,6 +62,7 @@ impl<'pool> SimpleCredentials<'pool> {
         }
     }
 
+    /// Returns the password.
     pub fn password(&self) -> &str {
         unsafe {
             std::ffi::CStr::from_ptr((*self.ptr).password)
@@ -54,16 +71,19 @@ impl<'pool> SimpleCredentials<'pool> {
         }
     }
 
+    /// Sets the username.
     pub fn set_username(&mut self, username: &str, pool: &apr::Pool) {
         unsafe {
             (*self.ptr).username = apr::strings::pstrdup_raw(username, pool).unwrap() as *mut _;
         }
     }
 
+    /// Returns whether the credentials may be saved.
     pub fn may_save(&self) -> bool {
         unsafe { (*self.ptr).may_save != 0 }
     }
 
+    /// Creates new simple credentials.
     pub fn new(username: String, password: String, may_save: bool, pool: &'pool apr::Pool) -> Self {
         let cred: *mut subversion_sys::svn_auth_cred_simple_t = pool.calloc();
         unsafe {
@@ -96,10 +116,12 @@ impl<'pool> Credentials for SimpleCredentials<'pool> {
 }
 
 impl AuthBaton {
+    /// Returns a mutable pointer to the auth baton.
     pub fn as_mut_ptr(&mut self) -> *mut subversion_sys::svn_auth_baton_t {
         self.ptr
     }
 
+    /// Sets an authentication setting.
     pub fn set(&mut self, setting: AuthSetting) -> Result<(), Error> {
         match setting {
             AuthSetting::Username(value) => self.set_string_parameter("username", value),
@@ -138,6 +160,7 @@ impl AuthBaton {
         Ok(())
     }
 
+    /// Gets credentials for the specified realm.
     pub fn credentials<C: Credentials>(&mut self, realm: &str) -> Result<IterState<C>, Error> {
         let cred_kind = std::ffi::CString::new(C::kind()).unwrap();
         let realm = std::ffi::CString::new(realm).unwrap();
@@ -164,6 +187,7 @@ impl AuthBaton {
         }
     }
 
+    /// Forgets stored credentials.
     pub fn forget_credentials<C: Credentials>(
         &mut self,
         cred_kind: Option<&str>,
@@ -216,6 +240,7 @@ impl AuthBaton {
         subversion_sys::svn_auth_set_parameter(self.ptr, name_ptr, value);
     }
 
+    /// Opens an authentication baton with the given providers.
     pub fn open(providers: Vec<AuthProvider>) -> Result<Self, Error> {
         let pool = apr::pool::Pool::new();
         let mut baton = std::ptr::null_mut();
@@ -237,6 +262,7 @@ impl AuthBaton {
     }
 }
 
+/// Iterator state for credentials.
 pub struct IterState<C: Credentials> {
     ptr: *mut subversion_sys::svn_auth_iterstate_t,
     pool: apr::Pool,
@@ -260,6 +286,7 @@ impl<C: Credentials> IterState<C> {
         self.ptr
     }
 
+    /// Saves the credentials.
     pub fn save_credentials(&mut self) -> Result<(), Error> {
         let pool = apr::pool::Pool::new();
         let err = unsafe { subversion_sys::svn_auth_save_credentials(self.ptr, pool.as_mut_ptr()) };
@@ -297,7 +324,9 @@ impl<C: Credentials> Iterator for IterState<C> {
     }
 }
 
+/// Trait for types that can be converted to authentication providers.
 pub trait AsAuthProvider {
+    /// Returns a pointer to the authentication provider.
     fn as_auth_provider(
         &self,
         pool: &apr::pool::Pool,
@@ -332,6 +361,7 @@ impl AsAuthProvider for &AuthProvider {
 }
 
 #[allow(dead_code)]
+/// Authentication provider.
 pub struct AuthProvider {
     ptr: *const subversion_sys::svn_auth_provider_object_t,
     pool: apr::Pool,
@@ -340,11 +370,13 @@ pub struct AuthProvider {
 unsafe impl Send for AuthProvider {}
 
 impl AuthProvider {
+    /// Returns the credential kind for this provider.
     pub fn cred_kind(&self) -> &str {
         let cred_kind = unsafe { (*(*self.ptr).vtable).cred_kind };
         unsafe { std::ffi::CStr::from_ptr(cred_kind).to_str().unwrap() }
     }
 
+    /// Saves credentials using this provider.
     pub fn save_credentials(
         &self,
         credentials: &mut impl Credentials,
@@ -369,6 +401,7 @@ impl AuthProvider {
     }
 }
 
+/// Gets the username authentication provider.
 pub fn get_username_provider() -> AuthProvider {
     let mut auth_provider = std::ptr::null_mut();
     let pool = apr::Pool::new();
@@ -382,6 +415,7 @@ pub fn get_username_provider() -> AuthProvider {
     }
 }
 
+/// Gets the SSL server trust file authentication provider.
 pub fn get_ssl_server_trust_file_provider() -> AuthProvider {
     let mut auth_provider = std::ptr::null_mut();
     let pool = apr::Pool::new();
@@ -399,6 +433,7 @@ pub fn get_ssl_server_trust_file_provider() -> AuthProvider {
 }
 
 #[allow(dead_code)]
+/// SSL server certificate information.
 pub struct SslServerCertInfo {
     ptr: *const subversion_sys::svn_auth_ssl_server_cert_info_t,
     pool: apr::Pool,
@@ -407,6 +442,7 @@ pub struct SslServerCertInfo {
 unsafe impl Send for SslServerCertInfo {}
 
 impl SslServerCertInfo {
+    /// Creates a duplicate of the SSL server certificate info.
     pub fn dup(&self) -> Self {
         let pool = apr::Pool::new();
         let ptr = unsafe {
@@ -420,6 +456,7 @@ impl SslServerCertInfo {
     }
 }
 
+/// SSL server trust credentials.
 pub struct SslServerTrust {
     ptr: *mut subversion_sys::svn_auth_cred_ssl_server_trust_t,
     pool: apr::Pool,
@@ -443,6 +480,7 @@ impl SslServerTrust {
         self.ptr
     }
 
+    /// Creates a duplicate of the SSL server trust credentials.
     pub fn dup(&self) -> Self {
         let pool = apr::Pool::new();
         let cred = pool.calloc();
@@ -455,6 +493,7 @@ impl SslServerTrust {
     }
 }
 
+/// Gets an SSL server trust prompt authentication provider.
 pub fn get_ssl_server_trust_prompt_provider(
     prompt_func: &impl Fn(&'_ str, usize, &'_ SslServerCertInfo, bool) -> Result<SslServerTrust, Error>,
 ) -> AuthProvider {
@@ -513,6 +552,7 @@ pub fn get_ssl_server_trust_prompt_provider(
     }
 }
 
+/// Gets an SSL client certificate file authentication provider.
 pub fn get_ssl_client_cert_file_provider() -> AuthProvider {
     let mut auth_provider = std::ptr::null_mut();
     let pool = apr::Pool::new();
@@ -529,6 +569,7 @@ pub fn get_ssl_client_cert_file_provider() -> AuthProvider {
     }
 }
 
+/// SSL client certificate credentials.
 pub struct SslClientCertCredentials {
     ptr: *mut subversion_sys::svn_auth_cred_ssl_client_cert_t,
     pool: apr::Pool,
@@ -552,6 +593,7 @@ impl SslClientCertCredentials {
         self.ptr
     }
 
+    /// Creates a duplicate of the SSL client certificate credentials.
     pub fn dup(&self) -> Self {
         let pool = apr::Pool::new();
         let cred: *mut subversion_sys::svn_auth_cred_ssl_client_cert_t = pool.calloc();
@@ -592,6 +634,7 @@ extern "C" fn wrap_client_cert_prompt_fn(
         .unwrap_or_else(|e| unsafe { e.into_raw() })
 }
 
+/// Gets an SSL client certificate prompt authentication provider.
 pub fn get_ssl_client_cert_prompt_provider(
     prompt_fn: &impl Fn(&str, bool) -> Result<SslClientCertCredentials, crate::Error>,
     retry_limit: usize,
@@ -615,6 +658,7 @@ pub fn get_ssl_client_cert_prompt_provider(
     }
 }
 
+/// Gets an SSL client certificate password file authentication provider.
 pub fn get_ssl_client_cert_pw_file_provider(
     prompt_fn: Option<&impl Fn(&str) -> Result<bool, crate::Error>>,
 ) -> AuthProvider {
@@ -644,6 +688,7 @@ pub fn get_ssl_client_cert_pw_file_provider(
     }
 }
 
+/// Gets a simple prompt authentication provider.
 pub fn get_simple_prompt_provider<'pool>(
     prompt_fn: &impl Fn(
         &'_ str,
@@ -702,6 +747,7 @@ pub fn get_simple_prompt_provider<'pool>(
     }
 }
 
+/// Gets a username prompt authentication provider.
 pub fn get_username_prompt_provider(
     prompt_fn: &impl Fn(&str, bool) -> Result<String, crate::Error>,
     retry_limit: usize,
@@ -763,6 +809,7 @@ extern "C" fn wrap_plaintext_passphrase_prompt(
         .unwrap_or_else(|e| unsafe { e.into_raw() })
 }
 
+/// Gets a simple authentication provider.
 pub fn get_simple_provider(
     plaintext_prompt_func: Option<&impl Fn(&str) -> Result<bool, crate::Error>>,
 ) -> AuthProvider {
@@ -792,6 +839,7 @@ pub fn get_simple_provider(
     }
 }
 
+/// Gets a platform-specific authentication provider.
 pub fn get_platform_specific_provider(
     provider_name: &str,
     provider_type: &str,
@@ -816,6 +864,7 @@ pub fn get_platform_specific_provider(
     })
 }
 
+/// Gets all platform-specific client authentication providers.
 pub fn get_platform_specific_client_providers() -> Result<Vec<AuthProvider>, Error> {
     let pool = apr::pool::Pool::new();
     let mut providers = std::ptr::null_mut();

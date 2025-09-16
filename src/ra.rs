@@ -8,15 +8,19 @@ use subversion_sys::svn_ra_session_t;
 /// Repository information struct
 #[derive(Debug, Clone)]
 pub struct RepositoryInfo {
+    /// Repository UUID.
     pub uuid: String,
+    /// Repository root URL.
     pub root_url: String,
+    /// Latest revision in the repository.
     pub latest_revision: Revnum,
+    /// Current session URL.
     pub session_url: String,
 }
 
 // Removed global vtable storage - using simpler approach
 
-/// Dirent information from RA
+/// Directory entry information from the repository access layer.
 #[allow(dead_code)]
 pub struct Dirent {
     ptr: *mut subversion_sys::svn_dirent_t,
@@ -24,6 +28,7 @@ pub struct Dirent {
 }
 
 impl Dirent {
+    /// Creates a Dirent from a raw pointer.
     pub fn from_raw(ptr: *mut subversion_sys::svn_dirent_t) -> Self {
         Self {
             ptr,
@@ -74,7 +79,7 @@ impl Dirent {
 
 unsafe impl Send for Dirent {}
 
-/// RA session handle with RAII cleanup
+/// Repository access session handle with automatic cleanup.
 pub struct Session<'a> {
     ptr: *mut svn_ra_session_t,
     pool: apr::Pool,
@@ -93,13 +98,12 @@ pub(crate) extern "C" fn wrap_dirent_receiver(
     rel_path: *const std::os::raw::c_char,
     dirent: *mut subversion_sys::svn_dirent_t,
     baton: *mut std::os::raw::c_void,
-    pool: *mut subversion_sys::apr_pool_t,
+    _pool: *mut subversion_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     let rel_path = unsafe { std::ffi::CStr::from_ptr(rel_path) };
     let baton = unsafe {
         &*(baton as *const _ as *const &dyn Fn(&str, &Dirent) -> Result<(), crate::Error>)
     };
-    let pool = Pool::from_raw(pool);
     match baton(rel_path.to_str().unwrap(), &Dirent::from_raw(dirent)) {
         Ok(()) => std::ptr::null_mut(),
         Err(mut e) => e.as_mut_ptr(),
@@ -109,12 +113,11 @@ pub(crate) extern "C" fn wrap_dirent_receiver(
 extern "C" fn wrap_location_segment_receiver(
     svn_location_segment: *mut subversion_sys::svn_location_segment_t,
     baton: *mut std::os::raw::c_void,
-    pool: *mut subversion_sys::apr_pool_t,
+    _pool: *mut subversion_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     let baton = unsafe {
         &*(baton as *const _ as *const &dyn Fn(&crate::LocationSegment) -> Result<(), crate::Error>)
     };
-    let _pool = Pool::from_raw(pool);
     match baton(&crate::LocationSegment {
         ptr: svn_location_segment,
         _pool: std::marker::PhantomData,
@@ -130,7 +133,7 @@ extern "C" fn wrap_lock_func(
     do_lock: i32,
     lock: *const subversion_sys::svn_lock_t,
     error: *mut subversion_sys::svn_error_t,
-    pool: *mut subversion_sys::apr_pool_t,
+    _pool: *mut subversion_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     let lock_baton = unsafe {
         // Unbox the reference like get_log does
@@ -157,14 +160,20 @@ extern "C" fn wrap_lock_func(
 
 /// Options for the do_diff operation
 pub struct DoDiffOptions<'a> {
+    /// Depth of the diff operation.
     pub depth: crate::Depth,
+    /// Whether to ignore ancestry.
     pub ignore_ancestry: bool,
+    /// Whether to include text deltas.
     pub text_deltas: bool,
+    /// URL to compare against.
     pub versus_url: &'a str,
+    /// Editor to receive diff callbacks.
     pub diff_editor: &'a mut dyn crate::delta::Editor,
 }
 
 impl<'a> DoDiffOptions<'a> {
+    /// Creates new diff options with default settings.
     pub fn new(versus_url: &'a str, diff_editor: &'a mut dyn crate::delta::Editor) -> Self {
         Self {
             depth: crate::Depth::Infinity,
@@ -175,16 +184,19 @@ impl<'a> DoDiffOptions<'a> {
         }
     }
 
+    /// Sets the depth for the diff operation.
     pub fn with_depth(mut self, depth: crate::Depth) -> Self {
         self.depth = depth;
         self
     }
 
+    /// Sets whether to ignore ancestry when diffing.
     pub fn with_ignore_ancestry(mut self, ignore_ancestry: bool) -> Self {
         self.ignore_ancestry = ignore_ancestry;
         self
     }
 
+    /// Sets whether to include text deltas.
     pub fn with_text_deltas(mut self, text_deltas: bool) -> Self {
         self.text_deltas = text_deltas;
         self
@@ -192,6 +204,7 @@ impl<'a> DoDiffOptions<'a> {
 }
 
 impl<'a> Session<'a> {
+    /// Creates a Session from a raw pointer and pool.
     pub(crate) unsafe fn from_ptr_and_pool(ptr: *mut svn_ra_session_t, pool: apr::Pool) -> Self {
         Self {
             ptr,
@@ -201,13 +214,16 @@ impl<'a> Session<'a> {
         }
     }
 
+    /// Returns a raw pointer to the session.
     pub fn as_ptr(&self) -> *const svn_ra_session_t {
         self.ptr
     }
 
+    /// Returns a mutable raw pointer to the session.
     pub fn as_mut_ptr(&mut self) -> *mut svn_ra_session_t {
         self.ptr
     }
+    /// Opens a repository access session to a URL.
     pub fn open(
         url: &str,
         uuid: Option<&str>,
@@ -282,6 +298,7 @@ impl<'a> Session<'a> {
         ))
     }
 
+    /// Changes the session to point to a different URL.
     pub fn reparent(&mut self, url: &str) -> Result<(), Error> {
         let url = std::ffi::CString::new(url).unwrap();
         with_tmp_pool(|pool| {
@@ -292,6 +309,7 @@ impl<'a> Session<'a> {
         })
     }
 
+    /// Gets the current session URL.
     pub fn get_session_url(&mut self) -> Result<String, Error> {
         with_tmp_pool(|pool| {
             let mut url = std::ptr::null();
@@ -304,6 +322,7 @@ impl<'a> Session<'a> {
         })
     }
 
+    /// Gets the path relative to the session URL.
     pub fn get_path_relative_to_session(&mut self, url: &str) -> Result<String, Error> {
         let url = std::ffi::CString::new(url).unwrap();
         let pool = Pool::new();
@@ -321,6 +340,7 @@ impl<'a> Session<'a> {
         Ok(path.to_string_lossy().into_owned())
     }
 
+    /// Gets the path relative to the repository root.
     pub fn get_path_relative_to_root(&mut self, url: &str) -> String {
         let url = std::ffi::CString::new(url).unwrap();
         let pool = Pool::new();
@@ -337,6 +357,7 @@ impl<'a> Session<'a> {
         path.to_string_lossy().into_owned()
     }
 
+    /// Gets the latest revision number.
     pub fn get_latest_revnum(&mut self) -> Result<Revnum, Error> {
         with_tmp_pool(|pool| {
             let mut revnum = 0;
@@ -348,6 +369,7 @@ impl<'a> Session<'a> {
         })
     }
 
+    /// Gets the revision at a specific time.
     pub fn get_dated_revision(&mut self, tm: impl apr::time::IntoTime) -> Result<Revnum, Error> {
         with_tmp_pool(|pool| {
             let mut revnum = 0;
@@ -364,6 +386,7 @@ impl<'a> Session<'a> {
         })
     }
 
+    /// Changes a revision property.
     pub fn change_revprop(
         &mut self,
         rev: Revnum,
@@ -395,6 +418,7 @@ impl<'a> Session<'a> {
         Ok(())
     }
 
+    /// Gets the property list for a revision.
     pub fn rev_proplist(&mut self, rev: Revnum) -> Result<HashMap<String, Vec<u8>>, Error> {
         let pool = Pool::new();
         let mut props = std::ptr::null_mut();
@@ -406,6 +430,7 @@ impl<'a> Session<'a> {
         Ok(prop_hash.to_hashmap())
     }
 
+    /// Gets a specific property for a revision.
     pub fn rev_prop(&mut self, rev: Revnum, name: &str) -> Result<Option<Vec<u8>>, Error> {
         let name = std::ffi::CString::new(name).unwrap();
         let pool = Pool::new();
@@ -429,6 +454,7 @@ impl<'a> Session<'a> {
         }
     }
 
+    /// Gets a commit editor for making changes to the repository.
     pub fn get_commit_editor(
         &mut self,
         revprop_table: HashMap<String, Vec<u8>>,
@@ -492,6 +518,7 @@ impl<'a> Session<'a> {
         }))
     }
 
+    /// Gets a file from the repository.
     pub fn get_file(
         &mut self,
         path: &str,
@@ -521,6 +548,7 @@ impl<'a> Session<'a> {
         ))
     }
 
+    /// Gets a directory listing from the repository.
     pub fn get_dir(
         &mut self,
         path: &str,
@@ -545,7 +573,7 @@ impl<'a> Session<'a> {
                 pool.as_mut_ptr(),
             )
         };
-        let rc_pool = std::rc::Rc::new(pool);
+        let _rc_pool = std::rc::Rc::new(pool);
         crate::Error::from_raw(err)?;
         let prop_hash = unsafe { crate::props::PropHash::from_ptr(props) };
         let dirents_hash = unsafe { crate::hash::DirentHash::from_ptr(dirents) };
@@ -554,6 +582,7 @@ impl<'a> Session<'a> {
         Ok((Revnum::from_raw(fetched_rev).unwrap(), dirents, props))
     }
 
+    /// Lists entries in a directory.
     pub fn list(
         &mut self,
         path: &str,
@@ -598,6 +627,7 @@ impl<'a> Session<'a> {
         Ok(())
     }
 
+    /// Gets merge information for paths.
     pub fn get_mergeinfo(
         &mut self,
         paths: &[&str],
@@ -625,9 +655,9 @@ impl<'a> Session<'a> {
             )
         };
         Error::from_raw(err)?;
-        let pool = std::rc::Rc::new(pool);
+        let _pool = std::rc::Rc::new(pool);
         let mergeinfo = unsafe { apr::hash::Hash::from_ptr(mergeinfo) };
-        let iter_pool = apr::pool::Pool::new();
+        let _iter_pool = apr::pool::Pool::new();
         Ok(mergeinfo
             .iter()
             .map(|(k, v)| {
@@ -642,6 +672,7 @@ impl<'a> Session<'a> {
             .collect())
     }
 
+    /// Performs an update operation.
     pub fn do_update(
         &mut self,
         revision_to_update_to: Revnum,
@@ -680,6 +711,7 @@ impl<'a> Session<'a> {
         }) as Box<dyn Reporter + Send>)
     }
 
+    /// Performs a switch operation.
     pub fn do_switch(
         &mut self,
         revision_to_switch_to: Revnum,
@@ -721,6 +753,7 @@ impl<'a> Session<'a> {
         }) as Box<dyn Reporter + Send>)
     }
 
+    /// Checks the node kind of a path at a specific revision.
     pub fn check_path(&mut self, path: &str, rev: Revnum) -> Result<crate::NodeKind, Error> {
         let path = std::ffi::CString::new(path).unwrap();
         let mut kind = 0;
@@ -747,6 +780,7 @@ impl<'a> Session<'a> {
         Ok(!matches!(kind, crate::NodeKind::None))
     }
 
+    /// Performs a status operation.
     pub fn do_status(
         &mut self,
         status_target: &str,
@@ -775,6 +809,7 @@ impl<'a> Session<'a> {
         Ok(())
     }
 
+    /// Gets information about a path at a specific revision.
     pub fn stat(&mut self, path: &str, rev: Revnum) -> Result<Dirent, Error> {
         let path = std::ffi::CString::new(path).unwrap();
         let mut dirent = std::ptr::null_mut();
@@ -792,6 +827,7 @@ impl<'a> Session<'a> {
         Ok(Dirent::from_raw(dirent))
     }
 
+    /// Gets the repository UUID.
     pub fn get_uuid(&mut self) -> Result<String, Error> {
         let pool = Pool::new();
         let mut uuid = std::ptr::null();
@@ -802,6 +838,7 @@ impl<'a> Session<'a> {
         Ok(uuid.to_string_lossy().into_owned())
     }
 
+    /// Gets the repository root URL.
     pub fn get_repos_root(&mut self) -> Result<String, Error> {
         with_tmp_pool(|pool| {
             let mut url = std::ptr::null();
@@ -830,6 +867,7 @@ impl<'a> Session<'a> {
         })
     }
 
+    /// Gets the revision when a path was deleted.
     pub fn get_deleted_rev(
         &mut self,
         path: &str,
@@ -853,6 +891,7 @@ impl<'a> Session<'a> {
         Ok(Revnum::from_raw(rev).unwrap())
     }
 
+    /// Checks if the repository has a specific capability.
     pub fn has_capability(&mut self, capability: &str) -> Result<bool, Error> {
         let capability = std::ffi::CString::new(capability).unwrap();
         let mut has = 0;
@@ -896,6 +935,7 @@ impl<'a> Session<'a> {
         Ok(results)
     }
 
+    /// Performs a diff operation.
     pub fn diff(
         &mut self,
         revision: Revnum,
@@ -936,6 +976,7 @@ impl<'a> Session<'a> {
         }) as Box<dyn Reporter + Send>)
     }
 
+    /// Gets log entries for paths.
     pub fn get_log(
         &mut self,
         paths: &[&str],
@@ -1004,6 +1045,7 @@ impl<'a> Session<'a> {
         Ok(())
     }
 
+    /// Gets the locations of a path at multiple revisions.
     pub fn get_locations(
         &mut self,
         path: &str,
@@ -1037,7 +1079,7 @@ impl<'a> Session<'a> {
         let iter = unsafe { apr::hash::Hash::from_ptr(locations) };
 
         let mut locations = HashMap::new();
-        let pool = apr::pool::Pool::new();
+        let _pool = apr::pool::Pool::new();
         for (k, v) in iter.iter() {
             // The key is a pointer to svn_revnum_t (i64)
             let revnum = unsafe { *(k.as_ptr() as *const subversion_sys::svn_revnum_t) };
@@ -1052,6 +1094,7 @@ impl<'a> Session<'a> {
         Ok(locations)
     }
 
+    /// Gets location segments for a path.
     pub fn get_location_segments(
         &mut self,
         path: &str,
@@ -1078,6 +1121,7 @@ impl<'a> Session<'a> {
         Ok(())
     }
 
+    /// Locks paths in the repository.
     pub fn lock(
         &mut self,
         path_revs: &HashMap<String, Revnum>,
@@ -1139,6 +1183,7 @@ impl<'a> Session<'a> {
         Ok(())
     }
 
+    /// Unlocks paths in the repository.
     pub fn unlock(
         &mut self,
         path_tokens: &HashMap<String, String>,
@@ -1200,6 +1245,7 @@ impl<'a> Session<'a> {
         Ok(())
     }
 
+    /// Gets lock information for a path.
     pub fn get_lock(&mut self, path: &str) -> Result<crate::Lock, Error> {
         let path = std::ffi::CString::new(path).unwrap();
         let mut lock = std::ptr::null_mut();
@@ -1214,6 +1260,7 @@ impl<'a> Session<'a> {
         })
     }
 
+    /// Gets all locks under a path.
     pub fn get_locks(
         &mut self,
         path: &str,
@@ -1234,7 +1281,7 @@ impl<'a> Session<'a> {
         Error::from_raw(err)?;
         let _pool = std::rc::Rc::new(pool);
         let hash = unsafe { apr::hash::Hash::from_ptr(locks) };
-        let iter_pool = apr::pool::Pool::new();
+        let _iter_pool = apr::pool::Pool::new();
         Ok(hash
             .iter()
             .map(|(k, v)| {
@@ -1249,6 +1296,7 @@ impl<'a> Session<'a> {
             .collect())
     }
 
+    /// Replays a range of revisions.
     pub fn replay_range(
         &mut self,
         start_revision: Revnum,
@@ -1363,6 +1411,7 @@ impl<'a> Session<'a> {
         Ok(())
     }
 
+    /// Replays a single revision.
     pub fn replay(
         &mut self,
         revision: Revnum,
@@ -1416,7 +1465,7 @@ impl<'a> Session<'a> {
             txdelta_handler: *mut *const subversion_sys::svn_txdelta_window_handler_t,
             txdelta_baton: *mut *mut std::ffi::c_void,
             prop_diffs: *mut subversion_sys::apr_array_header_t,
-            pool: *mut subversion_sys::apr_pool_t,
+            _pool: *mut subversion_sys::apr_pool_t,
         ) -> *mut subversion_sys::svn_error_t {
             let handler = unsafe {
                 &mut *(baton
@@ -1517,6 +1566,7 @@ impl<'a> Session<'a> {
         Ok(())
     }
 
+    /// Gets inherited properties for a path.
     pub fn get_inherited_props(
         &mut self,
         path: &str,
@@ -1732,6 +1782,7 @@ impl<'a> Session<'a> {
     }
 }
 
+/// Returns a string listing all available repository access modules.
 pub fn modules() -> Result<String, Error> {
     let pool = Pool::new();
     let buf = unsafe {
@@ -1849,11 +1900,14 @@ impl Reporter for WrapReporter {
     }
 }
 
+/// Returns the version information for the repository access library.
 pub fn version() -> crate::Version {
     unsafe { crate::Version(subversion_sys::svn_ra_version()) }
 }
 
+/// Trait for reporting working copy state to the repository.
 pub trait Reporter {
+    /// Reports the state of a path in the working copy.
     fn set_path(
         &mut self,
         path: &str,
@@ -1863,8 +1917,11 @@ pub trait Reporter {
         lock_token: &str,
     ) -> Result<(), Error>;
 
+    /// Reports that a path has been deleted from the working copy.
+    /// Reports that a path has been deleted from the working copy.
     fn delete_path(&mut self, path: &str) -> Result<(), Error>;
 
+    /// Links a path to a URL in the repository.
     fn link_path(
         &mut self,
         path: &str,
@@ -1875,8 +1932,11 @@ pub trait Reporter {
         lock_token: &str,
     ) -> Result<(), Error>;
 
+    /// Finishes the report and triggers the update/diff.
+    /// Finishes the report and triggers the update/diff.
     fn finish_report(&mut self) -> Result<(), Error>;
 
+    /// Aborts the report without triggering the update/diff.
     fn abort_report(&mut self) -> Result<(), Error>;
 }
 
@@ -1902,6 +1962,7 @@ impl Default for Callbacks {
 }
 
 impl Callbacks {
+    /// Creates new repository access callbacks.
     pub fn new() -> Result<Callbacks, crate::Error> {
         let pool = apr::Pool::new();
         let mut callbacks = std::ptr::null_mut();
@@ -1917,6 +1978,7 @@ impl Callbacks {
         })
     }
 
+    /// Sets the authentication baton for the callbacks.
     pub fn set_auth_baton(&mut self, auth_baton: crate::auth::AuthBaton) {
         // Pin the auth_baton in a Box to get a stable address
         let mut pinned_baton = Box::pin(auth_baton);
@@ -2076,7 +2138,7 @@ mod tests {
 
     #[test]
     fn test_simple_get_log() {
-        let (_temp_dir, repo, mut session, _callbacks) = create_test_repo_with_session();
+        let (_temp_dir, _repo, mut session, _callbacks) = create_test_repo_with_session();
 
         // Try a very simple get_log call without any complex setup
         let mut call_count = 0;
@@ -2677,8 +2739,8 @@ mod tests {
         lock_paths.insert("lockable.txt".to_string(), rev);
 
         // Use a simpler test without RefCell to avoid potential recursion
-        let mut lock_called = false;
-        let mut received_token = String::new();
+        let _lock_called = false;
+        let _received_token = String::new();
         session
             .lock(
                 &lock_paths,

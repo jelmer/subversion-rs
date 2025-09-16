@@ -5,6 +5,7 @@ use subversion_sys::{
     svn_repos_recover4, svn_repos_t, svn_repos_verify_fs3,
 };
 
+/// Specifies how to handle UUID during repository load operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LoadUUID {
     #[default]
@@ -150,6 +151,7 @@ impl Authz {
     }
 }
 
+/// Finds the root path of a repository containing the given path.
 pub fn find_root_path(path: &std::path::Path) -> Option<std::path::PathBuf> {
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     with_tmp_pool(|pool| {
@@ -177,10 +179,12 @@ impl Drop for Repos {
 }
 
 impl Repos {
+    /// Creates a new repository at the specified path.
     pub fn create(path: &std::path::Path) -> Result<Repos, Error> {
         Self::create_with_config(path, None, None)
     }
 
+    /// Creates a new repository with configuration options.
     pub fn create_with_config(
         path: &std::path::Path,
         config: Option<&std::collections::HashMap<String, String>>,
@@ -243,6 +247,7 @@ impl Repos {
         }
     }
 
+    /// Opens an existing repository.
     pub fn open(path: &std::path::Path) -> Result<Repos, Error> {
         let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
         let pool = apr::Pool::new();
@@ -259,6 +264,7 @@ impl Repos {
         }
     }
 
+    /// Gets the capabilities of the repository.
     pub fn capabilities(&mut self) -> Result<std::collections::HashSet<String>, Error> {
         let pool = apr::Pool::new();
         let scratch_pool = apr::Pool::new();
@@ -279,6 +285,7 @@ impl Repos {
             .collect::<std::collections::HashSet<String>>())
     }
 
+    /// Checks if the repository has a specific capability.
     pub fn has_capability(&mut self, capability: &str) -> Result<bool, Error> {
         let capability = std::ffi::CString::new(capability).unwrap();
         let pool = apr::Pool::new();
@@ -295,6 +302,7 @@ impl Repos {
         }
     }
 
+    /// Remembers client capabilities for this session.
     pub fn remember_client_capabilities(&mut self, capabilities: &[&str]) -> Result<(), Error> {
         let pool = apr::Pool::new();
         let capabilities = capabilities
@@ -316,6 +324,7 @@ impl Repos {
         Ok(())
     }
 
+    /// Gets the filesystem object for this repository.
     pub fn fs(&self) -> Option<crate::fs::Fs> {
         let fs_ptr = unsafe { subversion_sys::svn_repos_fs(self.ptr) };
 
@@ -328,6 +337,7 @@ impl Repos {
         }
     }
 
+    /// Gets the filesystem type of this repository.
     pub fn fs_type(&self) -> String {
         with_tmp_pool(|pool| {
             let ret = unsafe { subversion_sys::svn_repos_fs_type(self.ptr, pool.as_mut_ptr()) };
@@ -336,6 +346,7 @@ impl Repos {
         })
     }
 
+    /// Gets the path to the repository.
     pub fn path(&mut self) -> std::path::PathBuf {
         with_tmp_pool(|pool| {
             let ret = unsafe { subversion_sys::svn_repos_path(self.ptr, pool.as_mut_ptr()) };
@@ -344,6 +355,7 @@ impl Repos {
         })
     }
 
+    /// Gets the path to the database environment.
     pub fn db_env(&mut self) -> std::path::PathBuf {
         let pool = apr::Pool::new();
         let ret = unsafe { subversion_sys::svn_repos_db_env(self.ptr, pool.as_mut_ptr()) };
@@ -351,6 +363,7 @@ impl Repos {
         std::path::PathBuf::from(db_env.to_str().unwrap())
     }
 
+    /// Gets the path to the configuration directory.
     pub fn conf_dir(&mut self) -> std::path::PathBuf {
         let pool = apr::Pool::new();
         let ret = unsafe { subversion_sys::svn_repos_conf_dir(self.ptr, pool.as_mut_ptr()) };
@@ -358,6 +371,7 @@ impl Repos {
         std::path::PathBuf::from(conf_dir.to_str().unwrap())
     }
 
+    /// Gets the path to the svnserve configuration file.
     pub fn svnserve_conf(&mut self) -> std::path::PathBuf {
         let pool = apr::Pool::new();
         let ret = unsafe { subversion_sys::svn_repos_svnserve_conf(self.ptr, pool.as_mut_ptr()) };
@@ -365,6 +379,7 @@ impl Repos {
         std::path::PathBuf::from(svnserve_conf.to_str().unwrap())
     }
 
+    /// Gets the path to the lock directory.
     pub fn lock_dir(&mut self) -> std::path::PathBuf {
         let pool = apr::Pool::new();
         let ret = unsafe { subversion_sys::svn_repos_lock_dir(self.ptr, pool.as_mut_ptr()) };
@@ -372,6 +387,7 @@ impl Repos {
         std::path::PathBuf::from(lock_dir.to_str().unwrap())
     }
 
+    /// Gets the path to the database lock file.
     pub fn db_lockfile(&mut self) -> std::path::PathBuf {
         let pool = apr::Pool::new();
         let ret = unsafe { subversion_sys::svn_repos_db_lockfile(self.ptr, pool.as_mut_ptr()) };
@@ -379,6 +395,7 @@ impl Repos {
         std::path::PathBuf::from(db_lockfile.to_str().unwrap())
     }
 
+    /// Gets the path to the database logs lock file.
     pub fn db_logs_lockfile(&mut self) -> std::path::PathBuf {
         let pool = apr::Pool::new();
         let ret =
@@ -387,6 +404,7 @@ impl Repos {
         std::path::PathBuf::from(logs_lockfile.to_str().unwrap())
     }
 
+    /// Gets the path to the repository's hooks directory.
     pub fn hook_dir(&mut self) -> std::path::PathBuf {
         let pool = apr::Pool::new();
         let ret = unsafe { subversion_sys::svn_repos_hook_dir(self.ptr, pool.as_mut_ptr()) };
@@ -394,6 +412,7 @@ impl Repos {
         std::path::PathBuf::from(hook_dir.to_str().unwrap())
     }
 
+    /// Loads a repository from a dump stream.
     pub fn load_fs(
         &self,
         dumpstream: &mut crate::io::Stream,
@@ -462,6 +481,7 @@ impl Repos {
         Ok(())
     }
 
+    /// Verifies the repository filesystem.
     pub fn verify_fs(
         &self,
         start_rev: Revnum,
@@ -524,6 +544,7 @@ impl Repos {
         Ok(())
     }
 
+    /// Packs the repository filesystem.
     pub fn pack_fs(
         &self,
         notify_func: Option<&impl Fn(&Notify)>,
@@ -566,7 +587,7 @@ impl Repos {
         let mut uuid_ptr = std::ptr::null();
         let ret = unsafe {
             subversion_sys::svn_fs_get_uuid(
-                unsafe { subversion_sys::svn_repos_fs(self.ptr) },
+                subversion_sys::svn_repos_fs(self.ptr),
                 &mut uuid_ptr,
                 pool.as_mut_ptr(),
             )
@@ -587,7 +608,7 @@ impl Repos {
         let uuid_cstr = std::ffi::CString::new(uuid)?;
         let ret = unsafe {
             subversion_sys::svn_fs_set_uuid(
-                unsafe { subversion_sys::svn_repos_fs(self.ptr) },
+                subversion_sys::svn_repos_fs(self.ptr),
                 uuid_cstr.as_ptr(),
                 pool.as_mut_ptr(),
             )
@@ -603,7 +624,7 @@ impl Repos {
         let ret = unsafe {
             subversion_sys::svn_fs_youngest_rev(
                 &mut revnum,
-                unsafe { subversion_sys::svn_repos_fs(self.ptr) },
+                subversion_sys::svn_repos_fs(self.ptr),
                 pool.as_mut_ptr(),
             )
         };
@@ -1027,6 +1048,7 @@ impl Repos {
     }
 }
 
+/// Recovers a repository after an interrupted operation.
 pub fn recover(
     path: &str,
     nonblocking: bool,
@@ -1073,6 +1095,7 @@ extern "C" fn wrap_freeze_func(
     }
 }
 
+/// Freezes a repository to allow safe backup or administrative operations.
 pub fn freeze(
     paths: &[&str],
     freeze_func: Option<&impl Fn(&str) -> Result<(), Error>>,
@@ -1131,6 +1154,7 @@ extern "C" fn wrap_notify_func(
     }
 }
 
+/// Upgrades a repository to the latest filesystem format.
 pub fn upgrade(
     path: &std::path::Path,
     nonblocking: bool,
@@ -1153,6 +1177,7 @@ pub fn upgrade(
     Ok(())
 }
 
+/// Deletes a repository.
 pub fn delete(path: &std::path::Path) -> Result<(), Error> {
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     let pool = apr::Pool::new();
@@ -1161,10 +1186,12 @@ pub fn delete(path: &std::path::Path) -> Result<(), Error> {
     Ok(())
 }
 
+/// Gets the version of the repository library.
 pub fn version() -> crate::Version {
     unsafe { crate::Version(subversion_sys::svn_repos_version()) }
 }
 
+/// Creates a hot copy of a repository.
 pub fn hotcopy(
     src_path: &std::path::Path,
     dst_path: &std::path::Path,
@@ -1436,7 +1463,7 @@ pub fn fs_pack(
     notify_func: Option<&dyn Fn(&Notify)>,
     cancel_func: Option<&dyn Fn() -> Result<(), Error>>,
 ) -> Result<(), Error> {
-    let path_cstr = std::ffi::CString::new(path.to_string_lossy().as_ref())?;
+    let _path_cstr = std::ffi::CString::new(path.to_string_lossy().as_ref())?;
     let pool = apr::Pool::new();
 
     let notify_baton = notify_func

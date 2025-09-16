@@ -18,10 +18,12 @@ impl Mergeinfo {
         }
     }
 
+    /// Gets the raw pointer to the mergeinfo.
     pub fn as_ptr(&self) -> *const svn_mergeinfo_t {
         self.ptr
     }
 
+    /// Gets the mutable raw pointer to the mergeinfo.
     pub fn as_mut_ptr(&mut self) -> *mut svn_mergeinfo_t {
         self.ptr
     }
@@ -33,10 +35,14 @@ impl Drop for Mergeinfo {
     }
 }
 
+/// Specifies how merge information is inherited.
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum MergeinfoInheritance {
+    /// Merge information is explicit.
     Explicit,
+    /// Merge information is inherited.
     Inherited,
+    /// Merge information comes from the nearest ancestor.
     NearestAncestor,
 }
 

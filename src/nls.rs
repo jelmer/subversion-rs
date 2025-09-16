@@ -307,7 +307,7 @@ impl PluralRule {
 
 /// Translate a message with plural forms
 pub fn translate_plural(
-    message_id: &str,
+    _message_id: &str,
     plural_forms: &[&str],
     count: u32,
 ) -> Result<String, Error> {

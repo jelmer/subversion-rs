@@ -17,6 +17,7 @@ use subversion_sys::{
     svn_client_vacuum, svn_client_version,
 };
 
+/// Returns the version information for the Subversion client library.
 pub fn version() -> Version {
     unsafe { Version(svn_client_version()) }
 }
@@ -92,7 +93,7 @@ extern "C" fn wrap_proplist_receiver2(
     scratch_pool: *mut subversion_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     unsafe {
-        let scratch_pool = std::rc::Rc::new(apr::pool::Pool::from_raw(scratch_pool));
+        let _scratch_pool = std::rc::Rc::new(apr::pool::Pool::from_raw(scratch_pool));
         let callback = baton
             as *mut &mut dyn FnMut(
                 &str,
@@ -101,7 +102,7 @@ extern "C" fn wrap_proplist_receiver2(
             ) -> Result<(), Error>;
         let callback = &mut *(callback);
         let path: &str = std::ffi::CStr::from_ptr(path).to_str().unwrap();
-        let prop_hash = unsafe { crate::props::PropHash::from_ptr(props) };
+        let prop_hash = crate::props::PropHash::from_ptr(props);
         let props = prop_hash.to_hashmap();
         let inherited_props = if inherited_props.is_null() {
             None
@@ -125,21 +126,31 @@ extern "C" fn wrap_proplist_receiver2(
     }
 }
 
+/// Information about a versioned item in the repository.
 pub struct Info(*const subversion_sys::svn_client_info2_t);
 
 /// Information about a line in a blamed file
 pub struct BlameInfo {
+    /// Line number in the file.
     pub line_no: i64,
+    /// Revision that last modified this line.
     pub revision: Revnum,
+    /// Revision properties.
     pub revprops: HashMap<String, Vec<u8>>,
+    /// Merged revision if this line came from a merge.
     pub merged_revision: Option<Revnum>,
+    /// Properties of the merged revision.
     pub merged_revprops: HashMap<String, Vec<u8>>,
+    /// Path of the merged file.
     pub merged_path: Option<String>,
+    /// The actual line content.
     pub line: String,
+    /// Whether this line has local changes.
     pub local_change: bool,
 }
 
 impl Info {
+    /// Returns the URL of the item.
     pub fn url(&self) -> &str {
         unsafe {
             let url = (*self.0).URL;
@@ -147,14 +158,17 @@ impl Info {
         }
     }
 
+    /// Returns the revision number of the item.
     pub fn revision(&self) -> Revnum {
         unsafe { Revnum::from_raw((*self.0).rev).unwrap() }
     }
 
+    /// Returns the node kind (file, directory, etc.) of the item.
     pub fn kind(&self) -> subversion_sys::svn_node_kind_t {
         unsafe { (*self.0).kind }
     }
 
+    /// Returns the repository root URL.
     pub fn repos_root_url(&self) -> &str {
         unsafe {
             let url = (*self.0).repos_root_URL;
@@ -162,6 +176,7 @@ impl Info {
         }
     }
 
+    /// Returns the repository UUID.
     pub fn repos_uuid(&self) -> &str {
         unsafe {
             let uuid = (*self.0).repos_UUID;
@@ -169,14 +184,17 @@ impl Info {
         }
     }
 
+    /// Returns the last changed revision number.
     pub fn last_changed_rev(&self) -> Revnum {
         Revnum::from_raw(unsafe { (*self.0).last_changed_rev }).unwrap()
     }
 
+    /// Returns the last changed date.
     pub fn last_changed_date(&self) -> apr::time::Time {
         unsafe { (*self.0).last_changed_date.into() }
     }
 
+    /// Returns the last changed author.
     pub fn last_changed_author(&self) -> &str {
         unsafe {
             let author = (*self.0).last_changed_author;
@@ -218,7 +236,7 @@ unsafe extern "C" fn blame_receiver_wrapper(
     merged_path: *const i8,
     line: *const subversion_sys::svn_string_t,
     local_change: subversion_sys::svn_boolean_t,
-    pool: *mut subversion_sys::apr_pool_t,
+    _pool: *mut subversion_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     let callback = &mut *(baton as *mut &mut dyn FnMut(BlameInfo) -> Result<(), Error>);
 
@@ -279,84 +297,135 @@ unsafe extern "C" fn blame_receiver_wrapper(
 
 /// Options for cat
 #[derive(Debug, Clone, Copy, Default)]
+/// Options for the cat operation to retrieve file contents.
 pub struct CatOptions {
+    /// Revision to retrieve.
     pub revision: Revision,
+    /// Peg revision for the path.
     pub peg_revision: Revision,
+    /// Whether to expand keywords in the file content.
     pub expand_keywords: bool,
 }
 
 /// Options for cleanup
 #[derive(Debug, Clone, Copy, Default)]
+/// Options for the cleanup operation to remove locks and complete unfinished operations.
 pub struct CleanupOptions {
+    /// Whether to break locks.
     pub break_locks: bool,
+    /// Whether to fix recorded timestamps.
     pub fix_recorded_timestamps: bool,
+    /// Whether to clear DAV cache.
     pub clear_dav_cache: bool,
+    /// Whether to vacuum pristine copies.
     pub vacuum_pristines: bool,
+    /// Whether to include externals.
     pub include_externals: bool,
 }
 
 /// Options for proplist
 #[derive(Debug, Clone, Copy, Default)]
+/// Options for listing properties on versioned items.
 pub struct ProplistOptions<'a> {
+    /// Peg revision for the path.
     pub peg_revision: Revision,
+    /// Revision to list properties from.
     pub revision: Revision,
+    /// Depth of the operation.
     pub depth: Depth,
+    /// Changelists to filter by.
     pub changelists: Option<&'a [&'a str]>,
+    /// Whether to get inherited properties.
     pub get_target_inherited_props: bool,
 }
 
 /// Options for export
 #[derive(Debug, Clone, Copy, Default)]
+/// Options for exporting a tree from the repository.
 pub struct ExportOptions {
+    /// Peg revision for the path.
     pub peg_revision: Revision,
+    /// Revision to export.
     pub revision: Revision,
+    /// Whether to overwrite existing files.
     pub overwrite: bool,
+    /// Whether to ignore externals.
     pub ignore_externals: bool,
+    /// Whether to ignore keywords.
     pub ignore_keywords: bool,
+    /// Depth of the export.
     pub depth: Depth,
+    /// Native end-of-line style.
     pub native_eol: crate::NativeEOL,
 }
 
 /// Options for vacuum
 #[derive(Debug, Clone, Copy, Default)]
+/// Options for vacuuming the working copy to remove unversioned and ignored items.
 pub struct VacuumOptions {
+    /// Whether to remove unversioned items.
     pub remove_unversioned_items: bool,
+    /// Whether to remove ignored items.
     pub remove_ignored_items: bool,
+    /// Whether to fix recorded timestamps.
     pub fix_recorded_timestamps: bool,
+    /// Whether to vacuum pristine copies.
     pub vacuum_pristines: bool,
+    /// Whether to include externals.
     pub include_externals: bool,
 }
 
 /// Options for a checkout
 #[derive(Debug, Clone, Copy, Default)]
+/// Options for checking out a working copy from a repository.
 pub struct CheckoutOptions {
+    /// Peg revision for the URL.
     pub peg_revision: Revision,
+    /// Revision to check out.
     pub revision: Revision,
+    /// Depth of the checkout.
     pub depth: Depth,
+    /// Whether to ignore externals.
     pub ignore_externals: bool,
+    /// Whether to allow unversioned obstructions.
     pub allow_unver_obstructions: bool,
 }
 
 /// Options for an update
 #[derive(Debug, Clone, Copy, Default)]
+/// Options for updating a working copy to a different revision.
 pub struct UpdateOptions {
+    /// Depth of the update.
     pub depth: Depth,
+    /// Whether the depth setting is sticky.
     pub depth_is_sticky: bool,
+    /// Whether to ignore externals.
     pub ignore_externals: bool,
+    /// Whether to allow unversioned obstructions.
     pub allow_unver_obstructions: bool,
+    /// Whether to treat adds as modifications.
     pub adds_as_modifications: bool,
+    /// Whether to create parent directories.
     pub make_parents: bool,
 }
 
 /// Options for a switch
 #[derive(Debug, Clone, Copy)]
+/// Options for switching a working copy to a different URL.
 pub struct SwitchOptions {
+    /// Peg revision for the URL.
     pub peg_revision: Revision,
+    /// Revision to switch to.
     pub revision: Revision,
+    /// Depth of the switch.
     pub depth: Depth,
+    /// Whether the depth setting is sticky.
     pub depth_is_sticky: bool,
+    /// Whether to ignore externals.
     pub ignore_externals: bool,
+    /// Whether to allow unversioned obstructions.
     pub allow_unver_obstructions: bool,
+    /// Whether to create parent directories.
     pub make_parents: bool,
 }
 
@@ -375,40 +444,48 @@ impl Default for SwitchOptions {
 }
 
 impl SwitchOptions {
+    /// Creates a new SwitchOptions with default values.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Sets the peg revision.
     pub fn with_peg_revision(mut self, peg_revision: Revision) -> Self {
         self.peg_revision = peg_revision;
         self
     }
 
+    /// Sets the revision.
     pub fn with_revision(mut self, revision: Revision) -> Self {
         self.revision = revision;
         self
     }
 
+    /// Sets the depth.
     pub fn with_depth(mut self, depth: Depth) -> Self {
         self.depth = depth;
         self
     }
 
+    /// Sets whether the depth is sticky.
     pub fn with_depth_is_sticky(mut self, depth_is_sticky: bool) -> Self {
         self.depth_is_sticky = depth_is_sticky;
         self
     }
 
+    /// Sets whether to ignore externals.
     pub fn with_ignore_externals(mut self, ignore_externals: bool) -> Self {
         self.ignore_externals = ignore_externals;
         self
     }
 
+    /// Sets whether to allow unversioned obstructions.
     pub fn with_allow_unver_obstructions(mut self, allow_unver_obstructions: bool) -> Self {
         self.allow_unver_obstructions = allow_unver_obstructions;
         self
     }
 
+    /// Sets whether to create parent directories.
     pub fn with_make_parents(mut self, make_parents: bool) -> Self {
         self.make_parents = make_parents;
         self
@@ -417,11 +494,17 @@ impl SwitchOptions {
 
 /// Options for add
 #[derive(Debug, Clone, Copy)]
+/// Options for adding files and directories to version control.
 pub struct AddOptions {
+    /// Depth of the add operation.
     pub depth: Depth,
+    /// Whether to force the add.
     pub force: bool,
+    /// Whether to add files that match ignore patterns.
     pub no_ignore: bool,
+    /// Whether to disable automatic properties.
     pub no_autoprops: bool,
+    /// Whether to add parent directories.
     pub add_parents: bool,
 }
 
@@ -438,30 +521,36 @@ impl Default for AddOptions {
 }
 
 impl AddOptions {
+    /// Creates a new AddOptions with default values.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Sets the depth of the add operation.
     pub fn with_depth(mut self, depth: Depth) -> Self {
         self.depth = depth;
         self
     }
 
+    /// Sets whether to force the add.
     pub fn with_force(mut self, force: bool) -> Self {
         self.force = force;
         self
     }
 
+    /// Sets whether to add files that match ignore patterns.
     pub fn with_no_ignore(mut self, no_ignore: bool) -> Self {
         self.no_ignore = no_ignore;
         self
     }
 
+    /// Sets whether to disable automatic properties.
     pub fn with_no_autoprops(mut self, no_autoprops: bool) -> Self {
         self.no_autoprops = no_autoprops;
         self
     }
 
+    /// Sets whether to add parent directories.
     pub fn with_add_parents(mut self, add_parents: bool) -> Self {
         self.add_parents = add_parents;
         self
@@ -470,21 +559,27 @@ impl AddOptions {
 
 /// Options for delete
 #[derive(Debug, Clone, Copy, Default)]
+/// Options for deleting versioned items.
 pub struct DeleteOptions {
+    /// Whether to force deletion even if there are local modifications.
     pub force: bool,
+    /// Whether to keep the local copy of the file.
     pub keep_local: bool,
 }
 
 impl DeleteOptions {
+    /// Creates a new DeleteOptions with default values.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Sets whether to force deletion.
     pub fn with_force(mut self, force: bool) -> Self {
         self.force = force;
         self
     }
 
+    /// Sets whether to keep the local copy.
     pub fn with_keep_local(mut self, keep_local: bool) -> Self {
         self.keep_local = keep_local;
         self
@@ -493,13 +588,21 @@ impl DeleteOptions {
 
 /// Options for commit
 #[derive(Debug, Clone)]
+/// Options for committing changes to the repository.
 pub struct CommitOptions {
+    /// Depth of the commit.
     pub depth: Depth,
+    /// Whether to keep locks after commit.
     pub keep_locks: bool,
+    /// Whether to keep changelists after commit.
     pub keep_changelists: bool,
+    /// Whether to commit as operations.
     pub commit_as_operations: bool,
+    /// Whether to include file externals.
     pub include_file_externals: bool,
+    /// Whether to include directory externals.
     pub include_dir_externals: bool,
+    /// Changelists to commit.
     pub changelists: Option<Vec<String>>,
 }
 
@@ -518,40 +621,48 @@ impl Default for CommitOptions {
 }
 
 impl CommitOptions {
+    /// Creates a new CommitOptions with default values.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Sets the depth for the commit.
     pub fn with_depth(mut self, depth: Depth) -> Self {
         self.depth = depth;
         self
     }
 
+    /// Sets whether to keep locks after commit.
     pub fn with_keep_locks(mut self, keep_locks: bool) -> Self {
         self.keep_locks = keep_locks;
         self
     }
 
+    /// Sets whether to keep changelists after commit.
     pub fn with_keep_changelists(mut self, keep_changelists: bool) -> Self {
         self.keep_changelists = keep_changelists;
         self
     }
 
+    /// Sets whether to commit as operations.
     pub fn with_commit_as_operations(mut self, commit_as_operations: bool) -> Self {
         self.commit_as_operations = commit_as_operations;
         self
     }
 
+    /// Sets whether to include file externals.
     pub fn with_include_file_externals(mut self, include_file_externals: bool) -> Self {
         self.include_file_externals = include_file_externals;
         self
     }
 
+    /// Sets whether to include directory externals.
     pub fn with_include_dir_externals(mut self, include_dir_externals: bool) -> Self {
         self.include_dir_externals = include_dir_externals;
         self
     }
 
+    /// Sets the changelists to include in the commit.
     pub fn with_changelists(mut self, changelists: Vec<String>) -> Self {
         self.changelists = Some(changelists);
         self
@@ -560,15 +671,25 @@ impl CommitOptions {
 
 /// Options for status
 #[derive(Debug, Clone)]
+/// Options for retrieving status information about working copy items.
 pub struct StatusOptions {
+    /// Revision to check status against.
     pub revision: Revision,
+    /// Depth of the status operation.
     pub depth: Depth,
+    /// Whether to get all entries.
     pub get_all: bool,
+    /// Whether to check out-of-date status.
     pub check_out_of_date: bool,
+    /// Whether to check the working copy.
     pub check_working_copy: bool,
+    /// Whether to include ignored files.
     pub no_ignore: bool,
+    /// Whether to ignore externals.
     pub ignore_externals: bool,
+    /// Whether to treat depth as sticky.
     pub depth_as_sticky: bool,
+    /// Changelists to filter by.
     pub changelists: Option<Vec<String>>,
 }
 
@@ -589,50 +710,60 @@ impl Default for StatusOptions {
 }
 
 impl StatusOptions {
+    /// Creates a new StatusOptions with default values.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Sets the revision to check status against.
     pub fn with_revision(mut self, revision: Revision) -> Self {
         self.revision = revision;
         self
     }
 
+    /// Sets the depth of the status operation.
     pub fn with_depth(mut self, depth: Depth) -> Self {
         self.depth = depth;
         self
     }
 
+    /// Sets whether to get all entries.
     pub fn with_get_all(mut self, get_all: bool) -> Self {
         self.get_all = get_all;
         self
     }
 
+    /// Sets whether to check out-of-date status.
     pub fn with_check_out_of_date(mut self, check_out_of_date: bool) -> Self {
         self.check_out_of_date = check_out_of_date;
         self
     }
 
+    /// Sets whether to check the working copy.
     pub fn with_check_working_copy(mut self, check_working_copy: bool) -> Self {
         self.check_working_copy = check_working_copy;
         self
     }
 
+    /// Sets whether to include ignored files.
     pub fn with_no_ignore(mut self, no_ignore: bool) -> Self {
         self.no_ignore = no_ignore;
         self
     }
 
+    /// Sets whether to ignore externals.
     pub fn with_ignore_externals(mut self, ignore_externals: bool) -> Self {
         self.ignore_externals = ignore_externals;
         self
     }
 
+    /// Sets whether to treat depth as sticky.
     pub fn with_depth_as_sticky(mut self, depth_as_sticky: bool) -> Self {
         self.depth_as_sticky = depth_as_sticky;
         self
     }
 
+    /// Sets the changelists to filter by.
     pub fn with_changelists(mut self, changelists: Vec<String>) -> Self {
         self.changelists = Some(changelists);
         self
@@ -643,6 +774,7 @@ impl StatusOptions {
 ///
 /// This is the main entry point for the client library. It holds client specific configuration and
 /// callbacks
+/// Client context for performing Subversion operations.
 pub struct Context {
     ptr: *mut svn_client_ctx_t,
     pool: apr::Pool,
@@ -673,6 +805,7 @@ impl Drop for Context {
 }
 
 impl Context {
+    /// Creates a new Subversion client context.
     pub fn new() -> Result<Self, Error> {
         let pool = apr::Pool::new();
         let mut ctx = std::ptr::null_mut();
@@ -768,6 +901,7 @@ impl Context {
         self.cancel_handler = None;
     }
 
+    /// Sets the authentication baton for this context.
     pub fn set_auth<'a, 'b>(&'a mut self, auth_baton: &'b mut crate::auth::AuthBaton)
     where
         'b: 'a,
@@ -802,7 +936,7 @@ impl Context {
         let url = url.as_canonical_uri()?;
         let path = path.as_canonical_dirent()?;
 
-        with_tmp_pool(|tmp_pool| unsafe {
+        with_tmp_pool(|_tmp_pool| unsafe {
             let mut revnum = 0;
             // Convert to C strings for FFI
             let url_cstr = std::ffi::CString::new(url.as_str())?;
@@ -825,6 +959,7 @@ impl Context {
         })
     }
 
+    /// Updates working copy paths to a specific revision.
     pub fn update(
         &mut self,
         paths: &[&str],
@@ -864,6 +999,7 @@ impl Context {
         }
     }
 
+    /// Switches a working copy path to a different URL.
     pub fn switch(
         &mut self,
         path: impl AsCanonicalDirent,
@@ -877,7 +1013,7 @@ impl Context {
         let path = path.as_canonical_dirent()?;
         let url = url.as_canonical_uri()?;
 
-        with_tmp_pool(|tmp_pool| unsafe {
+        with_tmp_pool(|_tmp_pool| unsafe {
             // Convert to C strings for FFI
             let path_cstr = std::ffi::CString::new(path.as_str())?;
             let url_cstr = std::ffi::CString::new(url.as_str())?;
@@ -901,10 +1037,11 @@ impl Context {
         })
     }
 
+    /// Adds a file or directory to version control.
     pub fn add(&mut self, path: impl AsCanonicalDirent, options: &AddOptions) -> Result<(), Error> {
         let pool = Pool::default();
         let path = path.as_canonical_dirent()?;
-        with_tmp_pool(|tmp_pool| unsafe {
+        with_tmp_pool(|_tmp_pool| unsafe {
             let path_cstr = std::ffi::CString::new(path.as_str())?;
             let err = svn_client_add5(
                 path_cstr.as_ptr(),
@@ -921,6 +1058,7 @@ impl Context {
         })
     }
 
+    /// Creates directories in version control.
     pub fn mkdir(
         &mut self,
         paths: &[&str],
@@ -965,6 +1103,7 @@ impl Context {
         }
     }
 
+    /// Deletes files or directories from version control.
     pub fn delete(
         &mut self,
         paths: &[&str],
@@ -1011,6 +1150,7 @@ impl Context {
         }
     }
 
+    /// Lists properties on a path.
     pub fn proplist(
         &mut self,
         target: &str,
@@ -1057,6 +1197,7 @@ impl Context {
         }
     }
 
+    /// Imports an unversioned path into the repository.
     pub fn import(
         &mut self,
         path: impl AsCanonicalDirent,
@@ -1110,13 +1251,14 @@ impl Context {
         }
     }
 
+    /// Exports a versioned path to an unversioned path.
     pub fn export(
         &mut self,
         from_path_or_url: &str,
         to_path: impl AsCanonicalDirent,
         options: &ExportOptions,
     ) -> Result<Revnum, Error> {
-        let pool = std::rc::Rc::new(Pool::default());
+        let _pool = std::rc::Rc::new(Pool::default());
         let native_eol: Option<&str> = options.native_eol.into();
         let native_eol = native_eol.map(|s| std::ffi::CString::new(s).unwrap());
         let mut revnum = 0;
@@ -1142,6 +1284,7 @@ impl Context {
         })
     }
 
+    /// Commits changes from a working copy to the repository.
     pub fn commit(
         &mut self,
         targets: &[&str],
@@ -1210,6 +1353,7 @@ impl Context {
         }
     }
 
+    /// Gets the status of a working copy path.
     pub fn status(
         &mut self,
         path: &str,
@@ -1422,6 +1566,7 @@ impl Context {
             .map(|x| x.transpose().unwrap())
     }*/
 
+    /// Converts command-line arguments to a target array.
     pub fn args_to_target_array(
         &mut self,
         mut os: apr::getopt::Getopt,
@@ -1459,6 +1604,7 @@ impl Context {
             .collect::<Vec<_>>())
     }
 
+    /// Vacuums pristine copies from a working copy.
     pub fn vacuum(&mut self, path: &str, options: &VacuumOptions) -> Result<(), Error> {
         let mut pool = std::rc::Rc::new(Pool::default());
         let path = std::ffi::CString::new(path).unwrap();
@@ -1478,6 +1624,7 @@ impl Context {
         }
     }
 
+    /// Cleans up a working copy.
     pub fn cleanup(&mut self, path: &str, options: &CleanupOptions) -> Result<(), Error> {
         let mut pool = std::rc::Rc::new(Pool::default());
         let path = std::ffi::CString::new(path).unwrap();
@@ -1497,12 +1644,13 @@ impl Context {
         }
     }
 
+    /// Gets conflict information for a path.
     pub fn conflict_get(
         &mut self,
         local_abspath: impl AsCanonicalDirent,
     ) -> Result<Conflict, Error> {
         let pool = apr::Pool::new();
-        let scratch_pool = apr::Pool::new();
+        let _scratch_pool = apr::Pool::new();
         let local_abspath = local_abspath.as_canonical_dirent()?;
         let mut conflict: *mut subversion_sys::svn_client_conflict_t = std::ptr::null_mut();
         with_tmp_pool(|tmp_pool| unsafe {
@@ -1519,6 +1667,7 @@ impl Context {
         })
     }
 
+    /// Outputs the contents of a file.
     pub fn cat(
         &mut self,
         path_or_url: &str,
@@ -1542,11 +1691,12 @@ impl Context {
                 apr::pool::Pool::new().as_mut_ptr(),
             );
             Error::from_raw(err)?;
-            let prop_hash = unsafe { crate::props::PropHash::from_ptr(props) };
+            let prop_hash = crate::props::PropHash::from_ptr(props);
             Ok(prop_hash.to_hashmap())
         }
     }
 
+    /// Locks paths in the repository.
     pub fn lock(&mut self, targets: &[&str], comment: &str, steal_lock: bool) -> Result<(), Error> {
         let mut pool = std::rc::Rc::new(Pool::default());
         let targets = targets
@@ -1571,6 +1721,7 @@ impl Context {
         }
     }
 
+    /// Unlocks paths in the repository.
     pub fn unlock(&mut self, targets: &[&str], break_lock: bool) -> Result<(), Error> {
         let mut pool = std::rc::Rc::new(Pool::default());
         let targets = targets
@@ -1593,11 +1744,12 @@ impl Context {
         }
     }
 
+    /// Gets the root of the working copy.
     pub fn get_wc_root(
         &mut self,
         path: impl AsCanonicalDirent,
     ) -> Result<std::path::PathBuf, Error> {
-        let pool = std::rc::Rc::new(Pool::default());
+        let _pool = std::rc::Rc::new(Pool::default());
         let path = path.as_canonical_dirent()?;
         let mut wc_root: *const i8 = std::ptr::null();
         with_tmp_pool(|tmp_pool| unsafe {
@@ -1614,12 +1766,13 @@ impl Context {
         })
     }
 
+    /// Gets the minimum and maximum revisions in a working copy.
     pub fn min_max_revisions(
         &mut self,
         local_abspath: impl AsCanonicalDirent,
         committed: bool,
     ) -> Result<(Revnum, Revnum), Error> {
-        let scratch_pool = apr::pool::Pool::new();
+        let _scratch_pool = apr::pool::Pool::new();
         let local_abspath = local_abspath.as_canonical_dirent()?;
         let mut min_revision: subversion_sys::svn_revnum_t = 0;
         let mut max_revision: subversion_sys::svn_revnum_t = 0;
@@ -1641,13 +1794,14 @@ impl Context {
         })
     }
 
+    /// Gets the URL for a working copy path.
     pub fn url_from_path(&mut self, path: impl AsCanonicalUri) -> Result<String, Error> {
         let pool = Pool::default();
 
         // Canonicalize input
         let path = path.as_canonical_uri()?;
 
-        with_tmp_pool(|tmp_pool| unsafe {
+        with_tmp_pool(|_tmp_pool| unsafe {
             let mut url: *const i8 = std::ptr::null();
             let path_cstr = std::ffi::CString::new(path.as_str())?;
 
@@ -1663,6 +1817,7 @@ impl Context {
         })
     }
 
+    /// Gets the repository root URL and UUID for a path or URL.
     pub fn get_repos_root(&mut self, path_or_url: &str) -> Result<(String, String), Error> {
         let pool = Pool::default();
         let path_or_url = std::ffi::CString::new(path_or_url).unwrap();
@@ -1692,6 +1847,7 @@ impl Context {
     }
 
     #[cfg(feature = "ra")]
+    /// Opens a raw repository access session.
     pub fn open_raw_session(
         &mut self,
         url: &str,
@@ -1716,6 +1872,7 @@ impl Context {
         }
     }
 
+    /// Gets information about a path or URL.
     pub fn info(
         &mut self,
         abspath_or_url: &str,
@@ -1753,7 +1910,7 @@ impl Context {
                 fetch_excluded as i32,
                 fetch_actual_only as i32,
                 include_externals as i32,
-                changelists.map_or(std::ptr::null(), |cl| unsafe { cl.as_ptr() }),
+                changelists.map_or(std::ptr::null(), |cl| cl.as_ptr()),
                 Some(wrap_info_receiver2),
                 receiver,
                 self.as_mut_ptr(),
@@ -1973,7 +2130,7 @@ impl Context {
                         std::ptr::null_mut()
                     },
                     depth.into(),
-                    changelists.map_or(std::ptr::null(), |cl| unsafe { cl.as_ptr() }),
+                    changelists.map_or(std::ptr::null(), |cl| cl.as_ptr()),
                     self.as_mut_ptr(),
                     pool.as_mut_ptr(),
                     pool.as_mut_ptr(),
@@ -2003,7 +2160,7 @@ impl Context {
         target: &str,
         depth: Depth,
         skip_checks: bool,
-        base_revision_for_url: Revnum,
+        _base_revision_for_url: Revnum,
         changelists: Option<&[&str]>,
     ) -> Result<(), Error> {
         with_tmp_pool(|pool| {
@@ -2037,7 +2194,7 @@ impl Context {
                     targets_array.as_ptr(),
                     depth.into(),
                     skip_checks as i32,
-                    changelists.map_or(std::ptr::null(), |cl| unsafe { cl.as_ptr() }),
+                    changelists.map_or(std::ptr::null(), |cl| cl.as_ptr()),
                     self.as_mut_ptr(),
                     pool.as_mut_ptr(),
                 )
@@ -2106,7 +2263,7 @@ impl Context {
                     &(*peg_revision).into(),
                     &(*revision).into(),
                     depth.into(),
-                    changelists.map_or(std::ptr::null(), |cl| unsafe { cl.as_ptr() }),
+                    changelists.map_or(std::ptr::null(), |cl| cl.as_ptr()),
                     get_target_inherited_props as i32,
                     Some(proplist_receiver),
                     receiver_ptr,
@@ -2188,7 +2345,7 @@ impl Context {
                     header_encoding_c.as_ptr(),
                     outstream.as_mut_ptr(),
                     errstream.as_mut_ptr(),
-                    changelists.map_or(std::ptr::null(), |cl| unsafe { cl.as_ptr() }),
+                    changelists.map_or(std::ptr::null(), |cl| cl.as_ptr()),
                     self.as_mut_ptr(),
                     pool.as_mut_ptr(),
                 )
@@ -2317,6 +2474,7 @@ impl Context {
 // Note: Context now requires a pool parameter, so no Default impl
 
 /// Builder for diff operations
+/// Builder for creating diff operations with various options.
 pub struct DiffBuilder<'a> {
     ctx: &'a mut Context,
     path1: String,
@@ -2339,6 +2497,7 @@ pub struct DiffBuilder<'a> {
 }
 
 impl<'a> DiffBuilder<'a> {
+    /// Creates a new DiffBuilder for comparing two paths/revisions.
     pub fn new(
         ctx: &'a mut Context,
         path1: impl Into<String>,
@@ -2368,71 +2527,85 @@ impl<'a> DiffBuilder<'a> {
         }
     }
 
+    /// Sets the depth for the diff operation.
     pub fn depth(mut self, depth: Depth) -> Self {
         self.depth = depth;
         self
     }
 
+    /// Sets additional options to pass to the diff command.
     pub fn diff_options(mut self, options: Vec<String>) -> Self {
         self.diff_options = options;
         self
     }
 
+    /// Sets the directory to make paths relative to.
     pub fn relative_to_dir(mut self, dir: impl Into<String>) -> Self {
         self.relative_to_dir = Some(dir.into());
         self
     }
 
+    /// Sets whether to ignore ancestry when comparing.
     pub fn ignore_ancestry(mut self, ignore: bool) -> Self {
         self.ignore_ancestry = ignore;
         self
     }
 
+    /// Sets whether to omit diffs for added files.
     pub fn no_diff_added(mut self, no_diff: bool) -> Self {
         self.no_diff_added = no_diff;
         self
     }
 
+    /// Sets whether to omit diffs for deleted files.
     pub fn no_diff_deleted(mut self, no_diff: bool) -> Self {
         self.no_diff_deleted = no_diff;
         self
     }
 
+    /// Sets whether to show copies as additions.
     pub fn show_copies_as_adds(mut self, show: bool) -> Self {
         self.show_copies_as_adds = show;
         self
     }
 
+    /// Sets whether to ignore content type differences.
     pub fn ignore_content_type(mut self, ignore: bool) -> Self {
         self.ignore_content_type = ignore;
         self
     }
 
+    /// Sets whether to ignore property differences.
     pub fn ignore_properties(mut self, ignore: bool) -> Self {
         self.ignore_properties = ignore;
         self
     }
 
+    /// Sets whether to show only property differences.
     pub fn properties_only(mut self, only: bool) -> Self {
         self.properties_only = only;
         self
     }
 
+    /// Sets whether to use Git diff format.
     pub fn use_git_diff_format(mut self, use_git: bool) -> Self {
         self.use_git_diff_format = use_git;
         self
     }
 
+    /// Sets the encoding for diff headers.
     pub fn header_encoding(mut self, encoding: impl Into<String>) -> Self {
         self.header_encoding = encoding.into();
         self
     }
 
+    /// Sets the changelists to include in the diff.
     pub fn changelists(mut self, lists: Vec<String>) -> Self {
         self.changelists = Some(lists);
         self
     }
 
+    /// Executes the diff operation.
     pub fn execute(
         self,
         outstream: &mut crate::io::Stream,
@@ -2469,6 +2642,7 @@ impl<'a> DiffBuilder<'a> {
 }
 
 /// Builder for list operations
+/// Builder for listing directory contents from the repository.
 pub struct ListBuilder<'a> {
     ctx: &'a mut Context,
     path_or_url: String,
@@ -2482,6 +2656,7 @@ pub struct ListBuilder<'a> {
 }
 
 impl<'a> ListBuilder<'a> {
+    /// Creates a new ListBuilder for listing directory entries.
     pub fn new(ctx: &'a mut Context, path_or_url: impl Into<String>) -> Self {
         Self {
             ctx,
@@ -2501,41 +2676,49 @@ impl<'a> ListBuilder<'a> {
         }
     }
 
+    /// Sets the peg revision for the path.
     pub fn peg_revision(mut self, rev: Revision) -> Self {
         self.peg_revision = rev;
         self
     }
 
+    /// Sets the revision to list.
     pub fn revision(mut self, rev: Revision) -> Self {
         self.revision = rev;
         self
     }
 
+    /// Sets the glob patterns to filter entries.
     pub fn patterns(mut self, patterns: Vec<String>) -> Self {
         self.patterns = Some(patterns);
         self
     }
 
+    /// Sets the depth for the listing.
     pub fn depth(mut self, depth: Depth) -> Self {
         self.depth = depth;
         self
     }
 
+    /// Sets which dirent fields to retrieve.
     pub fn dirent_fields(mut self, fields: u32) -> Self {
         self.dirent_fields = fields;
         self
     }
 
+    /// Sets whether to fetch lock information.
     pub fn fetch_locks(mut self, fetch: bool) -> Self {
         self.fetch_locks = fetch;
         self
     }
 
+    /// Sets whether to include externals.
     pub fn include_externals(mut self, include: bool) -> Self {
         self.include_externals = include;
         self
     }
 
+    /// Executes the list operation.
     pub fn execute(
         self,
         list_func: &mut dyn FnMut(
@@ -2564,6 +2747,7 @@ impl<'a> ListBuilder<'a> {
 }
 
 /// Builder for copy operations
+/// Builder for copying versioned items in the repository or working copy.
 pub struct CopyBuilder<'a> {
     ctx: &'a mut Context,
     sources: Vec<(String, Option<Revision>)>,
@@ -2576,6 +2760,7 @@ pub struct CopyBuilder<'a> {
 }
 
 impl<'a> CopyBuilder<'a> {
+    /// Creates a new CopyBuilder for copying versioned items.
     pub fn new(ctx: &'a mut Context, dst_path: impl Into<String>) -> Self {
         Self {
             ctx,
@@ -2589,36 +2774,43 @@ impl<'a> CopyBuilder<'a> {
         }
     }
 
+    /// Adds a source path to copy from.
     pub fn add_source(mut self, path: impl Into<String>, revision: Option<Revision>) -> Self {
         self.sources.push((path.into(), revision));
         self
     }
 
+    /// Sets whether to copy as a child of the destination.
     pub fn copy_as_child(mut self, as_child: bool) -> Self {
         self.copy_as_child = as_child;
         self
     }
 
+    /// Sets whether to create parent directories.
     pub fn make_parents(mut self, make: bool) -> Self {
         self.make_parents = make;
         self
     }
 
+    /// Sets whether to ignore externals.
     pub fn ignore_externals(mut self, ignore: bool) -> Self {
         self.ignore_externals = ignore;
         self
     }
 
+    /// Sets whether to copy metadata only.
     pub fn metadata_only(mut self, only: bool) -> Self {
         self.metadata_only = only;
         self
     }
 
+    /// Sets whether to pin externals.
     pub fn pin_externals(mut self, pin: bool) -> Self {
         self.pin_externals = pin;
         self
     }
 
+    /// Executes the copy operation.
     pub fn execute(self) -> Result<(), Error> {
         let sources: Vec<(&str, Option<Revision>)> = self
             .sources
@@ -2639,6 +2831,7 @@ impl<'a> CopyBuilder<'a> {
 }
 
 /// Builder for info operations
+/// Builder for retrieving information about versioned items.
 pub struct InfoBuilder<'a> {
     ctx: &'a mut Context,
     abspath_or_url: String,
@@ -2652,6 +2845,7 @@ pub struct InfoBuilder<'a> {
 }
 
 impl<'a> InfoBuilder<'a> {
+    /// Creates a new InfoBuilder for retrieving information about versioned items.
     pub fn new(ctx: &'a mut Context, abspath_or_url: impl Into<String>) -> Self {
         Self {
             ctx,
@@ -2666,41 +2860,49 @@ impl<'a> InfoBuilder<'a> {
         }
     }
 
+    /// Sets the peg revision for the path.
     pub fn peg_revision(mut self, rev: Revision) -> Self {
         self.peg_revision = rev;
         self
     }
 
+    /// Sets the revision to get info for.
     pub fn revision(mut self, rev: Revision) -> Self {
         self.revision = rev;
         self
     }
 
+    /// Sets the depth for the info operation.
     pub fn depth(mut self, depth: Depth) -> Self {
         self.depth = depth;
         self
     }
 
+    /// Sets whether to fetch excluded items.
     pub fn fetch_excluded(mut self, fetch: bool) -> Self {
         self.fetch_excluded = fetch;
         self
     }
 
+    /// Sets whether to fetch actual nodes only.
     pub fn fetch_actual_only(mut self, fetch: bool) -> Self {
         self.fetch_actual_only = fetch;
         self
     }
 
+    /// Sets whether to include externals.
     pub fn include_externals(mut self, include: bool) -> Self {
         self.include_externals = include;
         self
     }
 
+    /// Sets the changelists to filter by.
     pub fn changelists(mut self, lists: Vec<String>) -> Self {
         self.changelists = Some(lists);
         self
     }
 
+    /// Executes the info operation.
     pub fn execute(self, receiver: &dyn FnMut(&Info) -> Result<(), Error>) -> Result<(), Error> {
         let changelists = self
             .changelists
@@ -2722,6 +2924,7 @@ impl<'a> InfoBuilder<'a> {
 }
 
 /// Builder for commit operations
+/// Builder for creating commit operations with various options.
 pub struct CommitBuilder<'a> {
     ctx: &'a mut Context,
     targets: Vec<String>,
@@ -2736,6 +2939,7 @@ pub struct CommitBuilder<'a> {
 }
 
 impl<'a> CommitBuilder<'a> {
+    /// Creates a new CommitBuilder for committing changes.
     pub fn new(ctx: &'a mut Context) -> Self {
         Self {
             ctx,
@@ -2751,61 +2955,73 @@ impl<'a> CommitBuilder<'a> {
         }
     }
 
+    /// Adds a target path to commit.
     pub fn add_target(mut self, target: impl Into<String>) -> Self {
         self.targets.push(target.into());
         self
     }
 
+    /// Sets the target paths to commit.
     pub fn targets(mut self, targets: Vec<String>) -> Self {
         self.targets = targets;
         self
     }
 
+    /// Sets the depth for the commit.
     pub fn depth(mut self, depth: Depth) -> Self {
         self.depth = depth;
         self
     }
 
+    /// Sets whether to keep locks after commit.
     pub fn keep_locks(mut self, keep: bool) -> Self {
         self.keep_locks = keep;
         self
     }
 
+    /// Sets whether to keep changelists after commit.
     pub fn keep_changelists(mut self, keep: bool) -> Self {
         self.keep_changelists = keep;
         self
     }
 
+    /// Sets whether to commit as operations.
     pub fn commit_as_operations(mut self, as_ops: bool) -> Self {
         self.commit_as_operations = as_ops;
         self
     }
 
+    /// Sets whether to include file externals.
     pub fn include_file_externals(mut self, include: bool) -> Self {
         self.include_file_externals = include;
         self
     }
 
+    /// Sets whether to include directory externals.
     pub fn include_dir_externals(mut self, include: bool) -> Self {
         self.include_dir_externals = include;
         self
     }
 
+    /// Sets the changelists to commit.
     pub fn changelists(mut self, lists: Vec<String>) -> Self {
         self.changelists = Some(lists);
         self
     }
 
+    /// Adds a revision property.
     pub fn add_revprop(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.revprop_table.insert(name.into(), value.into());
         self
     }
 
+    /// Sets all revision properties.
     pub fn revprops(mut self, props: std::collections::HashMap<String, String>) -> Self {
         self.revprop_table = props;
         self
     }
 
+    /// Executes the commit operation.
     pub fn execute(
         self,
         commit_callback: &dyn FnMut(&crate::CommitInfo) -> Result<(), Error>,
@@ -2837,6 +3053,7 @@ impl<'a> CommitBuilder<'a> {
 }
 
 /// Builder for log operations
+/// Builder for retrieving log messages from the repository.
 pub struct LogBuilder<'a> {
     ctx: &'a mut Context,
     targets: Vec<String>,
@@ -2850,6 +3067,7 @@ pub struct LogBuilder<'a> {
 }
 
 impl<'a> LogBuilder<'a> {
+    /// Creates a new LogBuilder for retrieving log messages.
     pub fn new(ctx: &'a mut Context) -> Self {
         Self {
             ctx,
@@ -2867,61 +3085,73 @@ impl<'a> LogBuilder<'a> {
         }
     }
 
+    /// Adds a target path for the log.
     pub fn add_target(mut self, target: impl Into<String>) -> Self {
         self.targets.push(target.into());
         self
     }
 
+    /// Sets the target paths for the log.
     pub fn targets(mut self, targets: Vec<String>) -> Self {
         self.targets = targets;
         self
     }
 
+    /// Sets the peg revision.
     pub fn peg_revision(mut self, rev: Revision) -> Self {
         self.peg_revision = rev;
         self
     }
 
+    /// Adds a revision range to retrieve.
     pub fn add_revision_range(mut self, start: Revision, end: Revision) -> Self {
         self.revision_ranges.push(RevisionRange::new(start, end));
         self
     }
 
+    /// Sets the revision ranges to retrieve.
     pub fn revision_ranges(mut self, ranges: Vec<RevisionRange>) -> Self {
         self.revision_ranges = ranges;
         self
     }
 
+    /// Sets the maximum number of log entries to retrieve.
     pub fn limit(mut self, limit: i32) -> Self {
         self.limit = limit;
         self
     }
 
+    /// Sets whether to discover changed paths.
     pub fn discover_changed_paths(mut self, discover: bool) -> Self {
         self.discover_changed_paths = discover;
         self
     }
 
+    /// Sets whether to use strict node history.
     pub fn strict_node_history(mut self, strict: bool) -> Self {
         self.strict_node_history = strict;
         self
     }
 
+    /// Sets whether to include merged revisions.
     pub fn include_merged_revisions(mut self, include: bool) -> Self {
         self.include_merged_revisions = include;
         self
     }
 
+    /// Adds a revision property to retrieve.
     pub fn add_revprop(mut self, prop: impl Into<String>) -> Self {
         self.revprops.push(prop.into());
         self
     }
 
+    /// Sets the revision properties to retrieve.
     pub fn revprops(mut self, props: Vec<String>) -> Self {
         self.revprops = props;
         self
     }
 
+    /// Executes the log operation.
     pub fn execute(
         self,
         log_entry_receiver: &dyn FnMut(&LogEntry) -> Result<(), Error>,
@@ -2944,6 +3174,7 @@ impl<'a> LogBuilder<'a> {
 }
 
 /// Builder for update operations
+/// Builder for updating working copy items to a different revision.
 pub struct UpdateBuilder<'a> {
     ctx: &'a mut Context,
     paths: Vec<String>,
@@ -2957,6 +3188,7 @@ pub struct UpdateBuilder<'a> {
 }
 
 impl<'a> UpdateBuilder<'a> {
+    /// Creates a new UpdateBuilder for updating working copies.
     pub fn new(ctx: &'a mut Context) -> Self {
         Self {
             ctx,
@@ -2971,51 +3203,61 @@ impl<'a> UpdateBuilder<'a> {
         }
     }
 
+    /// Adds a path to update.
     pub fn add_path(mut self, path: impl Into<String>) -> Self {
         self.paths.push(path.into());
         self
     }
 
+    /// Sets the paths to update.
     pub fn paths(mut self, paths: Vec<String>) -> Self {
         self.paths = paths;
         self
     }
 
+    /// Sets the revision to update to.
     pub fn revision(mut self, rev: Revision) -> Self {
         self.revision = rev;
         self
     }
 
+    /// Sets the depth for the update.
     pub fn depth(mut self, depth: Depth) -> Self {
         self.depth = depth;
         self
     }
 
+    /// Sets whether the depth is sticky.
     pub fn depth_is_sticky(mut self, sticky: bool) -> Self {
         self.depth_is_sticky = sticky;
         self
     }
 
+    /// Sets whether to ignore externals.
     pub fn ignore_externals(mut self, ignore: bool) -> Self {
         self.ignore_externals = ignore;
         self
     }
 
+    /// Sets whether to allow unversioned obstructions.
     pub fn allow_unver_obstructions(mut self, allow: bool) -> Self {
         self.allow_unver_obstructions = allow;
         self
     }
 
+    /// Sets whether to treat adds as modifications.
     pub fn adds_as_modification(mut self, as_mod: bool) -> Self {
         self.adds_as_modifications = as_mod;
         self
     }
 
+    /// Sets whether to create parent directories.
     pub fn make_parents(mut self, make: bool) -> Self {
         self.make_parents = make;
         self
     }
 
+    /// Executes the update operation.
     pub fn execute(self) -> Result<Vec<Revnum>, Error> {
         let paths_ref: Vec<&str> = self.paths.iter().map(|s| s.as_str()).collect();
         let options = UpdateOptions {
@@ -3032,6 +3274,7 @@ impl<'a> UpdateBuilder<'a> {
 }
 
 /// Builder for mkdir operations
+/// Builder for creating directories in the repository or working copy.
 pub struct MkdirBuilder<'a> {
     ctx: &'a mut Context,
     paths: Vec<String>,
@@ -3040,6 +3283,7 @@ pub struct MkdirBuilder<'a> {
 }
 
 impl<'a> MkdirBuilder<'a> {
+    /// Creates a new MkdirBuilder for creating directories.
     pub fn new(ctx: &'a mut Context) -> Self {
         Self {
             ctx,
@@ -3049,31 +3293,37 @@ impl<'a> MkdirBuilder<'a> {
         }
     }
 
+    /// Adds a directory path to create.
     pub fn add_path(mut self, path: impl Into<String>) -> Self {
         self.paths.push(path.into());
         self
     }
 
+    /// Sets the directory paths to create.
     pub fn paths(mut self, paths: Vec<String>) -> Self {
         self.paths = paths;
         self
     }
 
+    /// Sets whether to create parent directories.
     pub fn make_parents(mut self, make: bool) -> Self {
         self.make_parents = make;
         self
     }
 
+    /// Adds a revision property.
     pub fn add_revprop(mut self, name: impl Into<String>, value: Vec<u8>) -> Self {
         self.revprop_table.insert(name.into(), value);
         self
     }
 
+    /// Sets all revision properties.
     pub fn revprops(mut self, props: std::collections::HashMap<String, Vec<u8>>) -> Self {
         self.revprop_table = props;
         self
     }
 
+    /// Executes the mkdir operation.
     pub fn execute(
         self,
         commit_callback: &dyn FnMut(&crate::CommitInfo) -> Result<(), Error>,
@@ -3719,7 +3969,7 @@ impl Context {
             Error::from_raw(err)?;
 
             let result = if !props_hash.is_null() {
-                let prop_hash = unsafe { crate::props::PropHash::from_ptr(props_hash) };
+                let prop_hash = crate::props::PropHash::from_ptr(props_hash);
                 prop_hash.to_hashmap()
             } else {
                 std::collections::HashMap::new()
@@ -3783,13 +4033,16 @@ impl Context {
     }
 }
 
+/// Status information for a working copy item.
 pub struct Status(pub(crate) *const subversion_sys::svn_client_status_t);
 
 impl Status {
+    /// Returns the node kind (file, directory, etc.).
     pub fn kind(&self) -> crate::NodeKind {
         unsafe { (*self.0).kind.into() }
     }
 
+    /// Returns the local absolute path of the item.
     pub fn local_abspath(&self) -> &str {
         unsafe {
             std::ffi::CStr::from_ptr((*self.0).local_abspath)
@@ -3798,38 +4051,47 @@ impl Status {
         }
     }
 
+    /// Returns the file size.
     pub fn filesize(&self) -> i64 {
         unsafe { (*self.0).filesize }
     }
 
+    /// Returns whether the item is versioned.
     pub fn versioned(&self) -> bool {
         unsafe { (*self.0).versioned != 0 }
     }
 
+    /// Returns whether the item is conflicted.
     pub fn conflicted(&self) -> bool {
         unsafe { (*self.0).conflicted != 0 }
     }
 
+    /// Returns the node status.
     pub fn node_status(&self) -> crate::StatusKind {
         unsafe { (*self.0).node_status.into() }
     }
 
+    /// Returns the text status.
     pub fn text_status(&self) -> crate::StatusKind {
         unsafe { (*self.0).text_status.into() }
     }
 
+    /// Returns the property status.
     pub fn prop_status(&self) -> crate::StatusKind {
         unsafe { (*self.0).prop_status.into() }
     }
 
+    /// Returns whether the working copy is locked.
     pub fn wc_is_locked(&self) -> bool {
         unsafe { (*self.0).wc_is_locked != 0 }
     }
 
+    /// Returns whether the item was copied.
     pub fn copied(&self) -> bool {
         unsafe { (*self.0).copied != 0 }
     }
 
+    /// Returns the repository root URL.
     pub fn repos_root_url(&self) -> &str {
         unsafe {
             std::ffi::CStr::from_ptr((*self.0).repos_root_url)
@@ -3838,6 +4100,7 @@ impl Status {
         }
     }
 
+    /// Returns the repository UUID.
     pub fn repos_uuid(&self) -> &str {
         unsafe {
             std::ffi::CStr::from_ptr((*self.0).repos_uuid)
@@ -3846,6 +4109,7 @@ impl Status {
         }
     }
 
+    /// Returns the repository relative path.
     pub fn repos_relpath(&self) -> &str {
         unsafe {
             std::ffi::CStr::from_ptr((*self.0).repos_relpath)
@@ -3854,18 +4118,22 @@ impl Status {
         }
     }
 
+    /// Returns the revision number.
     pub fn revision(&self) -> Revnum {
         Revnum::from_raw(unsafe { (*self.0).revision }).unwrap()
     }
 
+    /// Returns the last changed revision.
     pub fn changed_rev(&self) -> Revnum {
         Revnum::from_raw(unsafe { (*self.0).changed_rev }).unwrap()
     }
 
+    /// Returns the last changed date.
     pub fn changed_date(&self) -> apr::time::Time {
         unsafe { apr::time::Time::from((*self.0).changed_date) }
     }
 
+    /// Returns the last changed author.
     pub fn changed_author(&self) -> &str {
         unsafe {
             std::ffi::CStr::from_ptr((*self.0).changed_author)
@@ -3874,14 +4142,17 @@ impl Status {
         }
     }
 
+    /// Returns whether the item is switched.
     pub fn switched(&self) -> bool {
         unsafe { (*self.0).switched != 0 }
     }
 
+    /// Returns whether the item is a file external.
     pub fn file_external(&self) -> bool {
         unsafe { (*self.0).file_external != 0 }
     }
 
+    /// Returns the lock information if the item is locked.
     pub fn lock(&self) -> Option<crate::Lock> {
         let lock_ptr = unsafe { (*self.0).lock };
         if lock_ptr.is_null() {
@@ -3891,6 +4162,7 @@ impl Status {
         }
     }
 
+    /// Returns the changelist name if the item is in a changelist.
     pub fn changelist(&self) -> Option<&str> {
         unsafe {
             if (*self.0).changelist.is_null() {
@@ -3905,26 +4177,32 @@ impl Status {
         }
     }
 
+    /// Returns the depth of the item.
     pub fn depth(&self) -> crate::Depth {
         unsafe { (*self.0).depth.into() }
     }
 
+    /// Returns the out-of-date node kind.
     pub fn ood_kind(&self) -> crate::NodeKind {
         unsafe { (*self.0).ood_kind.into() }
     }
 
+    /// Returns the repository node status.
     pub fn repos_node_status(&self) -> crate::StatusKind {
         unsafe { (*self.0).repos_node_status.into() }
     }
 
+    /// Returns the repository text status.
     pub fn repos_text_status(&self) -> crate::StatusKind {
         unsafe { (*self.0).repos_text_status.into() }
     }
 
+    /// Returns the repository property status.
     pub fn repos_prop_status(&self) -> crate::StatusKind {
         unsafe { (*self.0).repos_prop_status.into() }
     }
 
+    /// Returns the repository lock information.
     pub fn repos_lock(&self) -> Option<crate::Lock> {
         let lock_ptr = unsafe { (*self.0).repos_lock };
         if lock_ptr.is_null() {
@@ -3934,10 +4212,12 @@ impl Status {
         }
     }
 
+    /// Returns the out-of-date changed revision.
     pub fn ood_changed_rev(&self) -> Option<Revnum> {
         Revnum::from_raw(unsafe { (*self.0).ood_changed_rev })
     }
 
+    /// Returns the out-of-date changed author.
     pub fn ood_changed_author(&self) -> Option<&str> {
         unsafe {
             if (*self.0).ood_changed_author.is_null() {
@@ -3952,6 +4232,7 @@ impl Status {
         }
     }
 
+    /// Returns the absolute path the item was moved from.
     pub fn moved_from_abspath(&self) -> Option<&str> {
         unsafe {
             if (*self.0).moved_from_abspath.is_null() {
@@ -3966,6 +4247,7 @@ impl Status {
         }
     }
 
+    /// Returns the absolute path the item was moved to.
     pub fn moved_to_abspath(&self) -> Option<&str> {
         unsafe {
             if (*self.0).moved_to_abspath.is_null() {
@@ -3982,6 +4264,7 @@ impl Status {
 }
 
 /// Conflict handle with RAII cleanup
+/// Represents a conflict in the working copy.
 pub struct Conflict {
     ptr: *mut subversion_sys::svn_client_conflict_t,
     pool: apr::Pool,
@@ -4020,6 +4303,7 @@ impl Conflict {
         }
     }
 
+    /// Gets the description of a property conflict.
     pub fn prop_get_description(&mut self) -> Result<String, Error> {
         let pool = apr::pool::Pool::new();
         let mut description: *const i8 = std::ptr::null_mut();
@@ -4117,11 +4401,9 @@ impl Conflict {
             let mut prop_conflicts = Vec::new();
             if !props_conflicted.is_null() {
                 // Property conflicts array contains property names
-                let array = unsafe {
-                    apr::tables::TypedArray::<*const std::ffi::c_char>::from_ptr(props_conflicted)
-                };
+                let array = apr::tables::TypedArray::<*const std::ffi::c_char>::from_ptr(props_conflicted);
                 for cstr_ptr in array.iter() {
-                    let cstr = unsafe { std::ffi::CStr::from_ptr(cstr_ptr) };
+                    let cstr = std::ffi::CStr::from_ptr(cstr_ptr);
                     let propname = cstr.to_string_lossy().into_owned();
                     prop_conflicts.push(propname);
                 }

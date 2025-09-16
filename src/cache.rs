@@ -38,6 +38,7 @@ impl Default for CacheConfig {
 /// The configuration is stored but not applied to the SVN library.
 static CURRENT_CONFIG: Mutex<Option<CacheConfig>> = Mutex::new(None);
 
+/// Sets the global cache configuration.
 pub fn set_cache_config(config: &CacheConfig) -> Result<(), Error> {
     if let Ok(mut current) = CURRENT_CONFIG.lock() {
         *current = Some(config.clone());

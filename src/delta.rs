@@ -4,15 +4,20 @@ use std::marker::PhantomData;
 
 // Helper structure to pass fat pointers through FFI
 #[repr(C)]
+/// Baton for passing editor callbacks through FFI.
 pub struct EditorBaton {
+    /// Data pointer.
     pub data_ptr: *mut std::ffi::c_void,
+    /// Vtable pointer.
     pub vtable_ptr: *mut std::ffi::c_void,
 }
 
+/// Returns the version of the delta library.
 pub fn version() -> crate::Version {
     crate::Version(unsafe { subversion_sys::svn_delta_version() })
 }
 
+/// Wrapper for a Subversion delta editor.
 pub struct WrapEditor<'pool> {
     pub(crate) editor: *const subversion_sys::svn_delta_editor_t,
     pub(crate) baton: *mut std::ffi::c_void,
@@ -82,6 +87,7 @@ impl<'pool> Editor for WrapEditor<'pool> {
     }
 }
 
+/// Wrapper for a Subversion directory editor.
 pub struct WrapDirectoryEditor<'pool> {
     pub(crate) editor: *const subversion_sys::svn_delta_editor_t,
     pub(crate) baton: *mut std::ffi::c_void,
@@ -264,6 +270,7 @@ impl<'pool> DirectoryEditor for WrapDirectoryEditor<'pool> {
     }
 }
 
+/// Wrapper for a Subversion file editor.
 pub struct WrapFileEditor {
     editor: *const subversion_sys::svn_delta_editor_t,
     baton: *mut std::ffi::c_void,
@@ -284,6 +291,7 @@ impl WrapFileEditor {
 }
 
 #[allow(dead_code)]
+/// Wrapper for a text delta window handler.
 pub struct WrapTxdeltaWindowHandler {
     handler: *mut subversion_sys::svn_txdelta_window_handler_t,
     baton: *mut std::ffi::c_void,
@@ -363,16 +371,21 @@ impl FileEditor for WrapFileEditor {
     }
 }
 
+/// Trait for delta editor operations.
 pub trait Editor {
+    /// Sets the target revision for the edit.
     fn set_target_revision(&mut self, revision: Option<Revnum>) -> Result<(), crate::Error>;
 
+    /// Opens the root directory.
     fn open_root(
         &mut self,
         base_revision: Option<Revnum>,
     ) -> Result<Box<dyn DirectoryEditor + 'static>, crate::Error>;
 
+    /// Closes the editor.
     fn close(&mut self) -> Result<(), crate::Error>;
 
+    /// Aborts the edit operation.
     fn abort(&mut self) -> Result<(), crate::Error>;
 
     /// Get raw pointers for FFI operations that need access to the underlying C structures
@@ -384,42 +397,53 @@ pub trait Editor {
     );
 }
 
+/// Trait for directory editor operations.
 pub trait DirectoryEditor {
+    /// Deletes an entry from the directory.
     fn delete_entry(&mut self, path: &str, revision: Option<Revnum>) -> Result<(), crate::Error>;
 
+    /// Adds a new directory.
     fn add_directory(
         &mut self,
         path: &str,
         copyfrom: Option<(&str, Revnum)>,
     ) -> Result<Box<dyn DirectoryEditor + 'static>, crate::Error>;
 
+    /// Opens an existing directory.
     fn open_directory(
         &mut self,
         path: &str,
         base_revision: Option<Revnum>,
     ) -> Result<Box<dyn DirectoryEditor + 'static>, crate::Error>;
 
+    /// Changes a property on the directory.
     fn change_prop(&mut self, name: &str, value: &[u8]) -> Result<(), crate::Error>;
 
+    /// Closes the directory.
     fn close(&mut self) -> Result<(), crate::Error>;
 
+    /// Marks a directory as absent.
     fn absent_directory(&mut self, path: &str) -> Result<(), crate::Error>;
 
+    /// Adds a new file to the directory.
     fn add_file(
         &mut self,
         path: &str,
         copyfrom: Option<(&str, Revnum)>,
     ) -> Result<Box<dyn FileEditor + 'static>, crate::Error>;
 
+    /// Opens an existing file for editing.
     fn open_file(
         &mut self,
         path: &str,
         base_revision: Option<Revnum>,
     ) -> Result<Box<dyn FileEditor + 'static>, crate::Error>;
 
+    /// Marks a file as absent.
     fn absent_file(&mut self, path: &str) -> Result<(), crate::Error>;
 }
 
+/// No-op handler for text delta windows.
 pub fn noop_window_handler(window: &mut TxDeltaWindow) -> Result<(), crate::Error> {
     let err = unsafe {
         subversion_sys::svn_delta_noop_window_handler(window.as_mut_ptr(), std::ptr::null_mut())
@@ -428,7 +452,9 @@ pub fn noop_window_handler(window: &mut TxDeltaWindow) -> Result<(), crate::Erro
     Ok(())
 }
 
+/// Trait for file editor operations.
 pub trait FileEditor {
+    /// Applies a text delta to the file.
     fn apply_textdelta(
         &mut self,
         base_checksum: Option<&str>,
@@ -439,8 +465,10 @@ pub trait FileEditor {
 
     // TODO: fn apply_textdelta_stream(&mut self, base_checksum: Option<&str>) -> Result<&dyn TextDelta, crate::Error>;
 
+    /// Changes a property on the file.
     fn change_prop(&mut self, name: &str, value: &[u8]) -> Result<(), crate::Error>;
 
+    /// Closes the file editor.
     fn close(&mut self, text_checksum: Option<&str>) -> Result<(), crate::Error>;
 }
 
@@ -473,10 +501,12 @@ impl TxDeltaWindow {
     pub fn as_mut_ptr(&mut self) -> *mut subversion_sys::svn_txdelta_window_t {
         self.ptr
     }
+    /// Get the raw pointer to the window.
     pub fn as_ptr(&self) -> *const subversion_sys::svn_txdelta_window_t {
         self.ptr
     }
 
+    /// Creates a new TxDelta window.
     pub fn new() -> Self {
         let pool = apr::Pool::new();
         let ptr = pool.calloc::<subversion_sys::svn_txdelta_window_t>();
@@ -487,18 +517,22 @@ impl TxDeltaWindow {
         }
     }
 
+    /// Gets the source view length.
     pub fn sview_len(&self) -> subversion_sys::apr_size_t {
         unsafe { (*self.ptr).sview_len }
     }
 
+    /// Gets the target view length.
     pub fn tview_len(&self) -> subversion_sys::apr_size_t {
         unsafe { (*self.ptr).tview_len }
     }
 
+    /// Gets the source view offset.
     pub fn sview_offset(&self) -> crate::FileSize {
         unsafe { (*self.ptr).sview_offset }
     }
 
+    /// Composes two TxDelta windows.
     pub fn compose(a: &Self, b: &Self) -> Self {
         let pool = apr::Pool::new();
         let ptr =
@@ -510,6 +544,7 @@ impl TxDeltaWindow {
         }
     }
 
+    /// Applies the window instructions to transform source to target.
     pub fn apply_instructions(
         &mut self,
         source: &mut [u8],
@@ -528,6 +563,7 @@ impl TxDeltaWindow {
         Ok(())
     }
 
+    /// Creates a duplicate of the window.
     pub fn dup(&self) -> Self {
         let pool = apr::Pool::new();
         let ptr = unsafe { subversion_sys::svn_txdelta_window_dup(self.ptr, pool.as_mut_ptr()) };
@@ -791,12 +827,13 @@ unsafe extern "C" fn wrap_editor_open_file(
     }
 }
 
-// Non-owning wrapper for TxDeltaWindow when we receive a window from SVN
+/// Non-owning wrapper for TxDeltaWindow when we receive a window from SVN.
 pub struct TxDeltaWindowRef {
     ptr: *mut subversion_sys::svn_txdelta_window_t,
 }
 
 impl TxDeltaWindowRef {
+    /// Gets the mutable raw pointer to the window.
     pub fn as_mut_ptr(&mut self) -> *mut subversion_sys::svn_txdelta_window_t {
         self.ptr
     }

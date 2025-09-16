@@ -116,6 +116,7 @@ impl Default for BufferBackend {
 }
 
 impl BufferBackend {
+    /// Creates a new empty buffer backend.
     pub fn new() -> Self {
         Self {
             buffer: Vec::new(),
@@ -124,6 +125,7 @@ impl BufferBackend {
         }
     }
 
+    /// Creates a new buffer backend with the specified capacity.
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             buffer: Vec::with_capacity(capacity),
@@ -132,6 +134,7 @@ impl BufferBackend {
         }
     }
 
+    /// Creates a buffer backend from an existing vector.
     pub fn from_vec(buffer: Vec<u8>) -> Self {
         let len = buffer.len();
         Self {
@@ -203,6 +206,7 @@ pub struct ReadOnlyBackend<R: Read + Send + 'static> {
 }
 
 impl<R: Read + Send + 'static> ReadOnlyBackend<R> {
+    /// Creates a new read-only backend from a reader.
     pub fn new(reader: R) -> Self {
         Self { reader }
     }
@@ -222,6 +226,7 @@ pub struct WriteOnlyBackend<W: Write + Send + 'static> {
 }
 
 impl<W: Write + Send + 'static> WriteOnlyBackend<W> {
+    /// Creates a new write-only backend from a writer.
     pub fn new(writer: W) -> Self {
         Self { writer }
     }

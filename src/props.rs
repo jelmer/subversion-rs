@@ -1,7 +1,11 @@
+/// Kinds of Subversion properties.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Kind {
+    /// Entry property.
     Entry,
+    /// Working copy property.
     Wc,
+    /// Regular property.
     Regular,
 }
 
@@ -16,46 +20,55 @@ impl From<subversion_sys::svn_prop_kind_t> for Kind {
     }
 }
 
+/// Gets the kind of a property by its name.
 pub fn kind(name: &str) -> Kind {
     let name = std::ffi::CString::new(name).unwrap();
     unsafe { subversion_sys::svn_property_kind2(name.as_ptr()) }.into()
 }
 
+/// Checks if a property name is a Subversion property.
 pub fn is_svn_prop(name: &str) -> bool {
     let name = std::ffi::CString::new(name).unwrap();
     unsafe { subversion_sys::svn_prop_is_svn_prop(name.as_ptr()) != 0 }
 }
 
+/// Checks if a property is a boolean property.
 pub fn is_boolean(name: &str) -> bool {
     let name = std::ffi::CString::new(name).unwrap();
     unsafe { subversion_sys::svn_prop_is_boolean(name.as_ptr()) != 0 }
 }
 
+/// Checks if a property is a known Subversion revision property.
 pub fn is_known_svn_rev_prop(name: &str) -> bool {
     let name = std::ffi::CString::new(name).unwrap();
     unsafe { subversion_sys::svn_prop_is_known_svn_rev_prop(name.as_ptr()) != 0 }
 }
 
+/// Checks if a property is a known Subversion node property.
 pub fn is_known_svn_node_prop(name: &str) -> bool {
     let name = std::ffi::CString::new(name).unwrap();
     unsafe { subversion_sys::svn_prop_is_known_svn_node_prop(name.as_ptr()) != 0 }
 }
 
+/// Checks if a property is a known Subversion file property.
 pub fn is_known_svn_file_prop(name: &str) -> bool {
     let name = std::ffi::CString::new(name).unwrap();
     unsafe { subversion_sys::svn_prop_is_known_svn_file_prop(name.as_ptr()) != 0 }
 }
 
+/// Checks if a property is a known Subversion directory property.
 pub fn is_known_svn_dir_prop(name: &str) -> bool {
     let name = std::ffi::CString::new(name).unwrap();
     unsafe { subversion_sys::svn_prop_is_known_svn_dir_prop(name.as_ptr()) != 0 }
 }
 
+/// Checks if a property needs translation.
 pub fn needs_translation(name: &str) -> bool {
     let name = std::ffi::CString::new(name).unwrap();
     unsafe { subversion_sys::svn_prop_needs_translation(name.as_ptr()) != 0 }
 }
 
+/// Checks if a property name is valid.
 pub fn name_is_valid(name: &str) -> bool {
     let name = std::ffi::CString::new(name).unwrap();
     unsafe { subversion_sys::svn_prop_name_is_valid(name.as_ptr()) != 0 }

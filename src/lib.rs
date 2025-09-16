@@ -1,3 +1,27 @@
+//! Rust bindings for the Subversion version control system.
+//!
+//! This crate provides idiomatic Rust bindings for the Subversion C libraries,
+//! enabling Rust applications to interact with Subversion repositories and working copies.
+//!
+//! # Features
+//!
+//! - `client` - Client operations (checkout, commit, update, etc.)
+//! - `ra` - Repository access layer
+//! - `wc` - Working copy management
+//! - `delta` - Delta operations for efficient data transfer
+//! - `repos` - Repository administration
+//!
+//! # Example
+//!
+//! ```no_run
+//! use subversion::client::Context;
+//!
+//! let mut ctx = Context::new().unwrap();
+//! // Use the context for Subversion operations
+//! ```
+
+#![deny(missing_docs)]
+
 // Re-export apr_sys for internal use
 extern crate apr_sys;
 
@@ -12,42 +36,73 @@ pub(crate) fn svn_result(code: *mut subversion_sys::svn_error_t) -> Result<(), E
     Error::from_raw(code)
 }
 
+/// Authentication and credential management.
 pub mod auth;
+/// Cache configuration and management.
 pub mod cache;
+/// Subversion client operations.
 #[cfg(feature = "client")]
 pub mod client;
+/// Command-line utilities and helpers.
 pub mod cmdline;
+/// Configuration file handling.
 pub mod config;
+/// Conflict resolution for working copy operations.
 #[cfg(feature = "client")]
 pub mod conflict;
+/// Delta editor for tree modifications.
 #[cfg(feature = "delta")]
 pub mod delta;
+/// Diff generation and processing.
 pub mod diff;
+/// Directory entry operations.
 pub mod dirent;
+/// Error handling types and utilities.
 pub mod error;
+/// Filesystem backend for repositories.
 pub mod fs;
+/// Hash table utilities.
 pub mod hash;
+/// Input/output stream handling.
 pub mod io;
+/// Iterator utilities for Subversion data structures.
 pub mod iter;
+/// Merge operations for branches.
 #[cfg(feature = "client")]
 pub mod merge;
+/// Merge tracking information.
 pub mod mergeinfo;
+/// Native language support and internationalization.
 pub mod nls;
+/// Option parsing and command-line argument handling.
 pub mod opt;
+/// Property management for versioned items.
 pub mod props;
+/// Repository access layer for remote operations.
 #[cfg(feature = "ra")]
 pub mod ra;
+/// Repository administration and management.
 pub mod repos;
+/// Sorting utilities for Subversion data.
 pub mod sorts;
+/// String manipulation utilities.
 pub mod string;
+/// Keyword and EOL substitution.
 pub mod subst;
+/// Time and date utilities.
 pub mod time;
+/// URI manipulation and validation.
 pub mod uri;
+/// UTF-8 string validation and conversion.
 pub mod utf;
+/// Version information and compatibility checking.
 pub mod version;
+/// Working copy management and operations.
 #[cfg(feature = "wc")]
 pub mod wc;
+/// X.509 certificate handling.
 pub mod x509;
+/// XML parsing and generation utilities.
 pub mod xml;
 use bitflags::bitflags;
 use std::str::FromStr;
@@ -59,16 +114,24 @@ pub use version::Version;
 pub use repos::{LoadUUID, Notify};
 
 bitflags! {
+    /// Flags indicating which fields are present in a directory entry.
     pub struct DirentField: u32 {
+        /// Node kind field is present.
         const Kind = subversion_sys::SVN_DIRENT_KIND;
+        /// File size field is present.
         const Size = subversion_sys::SVN_DIRENT_SIZE;
+        /// Has properties field is present.
         const HasProps = subversion_sys::SVN_DIRENT_HAS_PROPS;
+        /// Created revision field is present.
         const CreatedRevision = subversion_sys::SVN_DIRENT_CREATED_REV;
+        /// Modification time field is present.
         const Time = subversion_sys::SVN_DIRENT_TIME;
+        /// Last author field is present.
         const LastAuthor = subversion_sys::SVN_DIRENT_LAST_AUTHOR;
     }
 }
 
+/// A Subversion revision number.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
 pub struct Revnum(subversion_sys::svn_revnum_t);
 
@@ -115,6 +178,8 @@ impl From<Revnum> for u64 {
 }
 
 impl Revnum {
+    /// Creates a Revnum from a raw svn_revnum_t value.
+    /// Returns None if the value is negative (invalid revision).
     pub fn from_raw(raw: subversion_sys::svn_revnum_t) -> Option<Self> {
         if raw < 0 {
             None
@@ -331,16 +396,25 @@ mod tests {
     }
 }
 
+/// A revision specification.
 #[derive(Debug, Default, Clone, Copy)]
 pub enum Revision {
+    /// No revision specified.
     #[default]
     Unspecified,
+    /// A specific revision number.
     Number(Revnum),
+    /// A revision at a specific date/time.
     Date(i64),
+    /// The last committed revision.
     Committed,
+    /// The revision before the last committed revision.
     Previous,
+    /// The base revision of the working copy.
     Base,
+    /// The working copy revision.
     Working,
+    /// The latest revision in the repository.
     Head,
 }
 
@@ -484,14 +558,21 @@ impl From<svn_opt_revision_t> for Revision {
     }
 }
 
+/// The depth of a Subversion operation.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Depth {
+    /// Depth not specified or unknown.
     #[default]
     Unknown,
+    /// Exclude the item.
     Exclude,
+    /// Just the item itself.
     Empty,
+    /// The item and its file children.
     Files,
+    /// The item and its immediate children.
     Immediates,
+    /// The item and all descendants.
     Infinity,
 }
 
@@ -559,6 +640,7 @@ impl pyo3::FromPyObject<'_> for Depth {
     }
 }
 
+/// Information about a committed revision.
 pub struct CommitInfo<'pool> {
     ptr: *const subversion_sys::svn_commit_info_t,
     _pool: std::marker::PhantomData<&'pool apr::Pool>,
@@ -566,6 +648,7 @@ pub struct CommitInfo<'pool> {
 unsafe impl Send for CommitInfo<'_> {}
 
 impl<'pool> CommitInfo<'pool> {
+    /// Creates a CommitInfo from a raw pointer.
     pub fn from_raw(ptr: *const subversion_sys::svn_commit_info_t) -> Self {
         Self {
             ptr,
@@ -573,10 +656,12 @@ impl<'pool> CommitInfo<'pool> {
         }
     }
 
+    /// Returns the revision number of the commit.
     pub fn revision(&self) -> Revnum {
         Revnum::from_raw(unsafe { (*self.ptr).revision }).unwrap()
     }
 
+    /// Returns the date of the commit.
     pub fn date(&self) -> &str {
         unsafe {
             let date = (*self.ptr).date;
@@ -584,12 +669,14 @@ impl<'pool> CommitInfo<'pool> {
         }
     }
 
+    /// Returns the author of the commit.
     pub fn author(&self) -> &str {
         unsafe {
             let author = (*self.ptr).author;
             std::ffi::CStr::from_ptr(author).to_str().unwrap()
         }
     }
+    /// Returns any post-commit error message.
     pub fn post_commit_err(&self) -> Option<&str> {
         unsafe {
             let err = (*self.ptr).post_commit_err;
@@ -600,6 +687,7 @@ impl<'pool> CommitInfo<'pool> {
             }
         }
     }
+    /// Returns the repository root URL.
     pub fn repos_root(&self) -> &str {
         unsafe {
             let repos_root = (*self.ptr).repos_root;
@@ -607,6 +695,7 @@ impl<'pool> CommitInfo<'pool> {
         }
     }
 
+    /// Duplicates the commit info in the given pool.
     pub fn dup(&self, pool: &'pool apr::Pool) -> Result<CommitInfo<'pool>, Error> {
         unsafe {
             let duplicated = subversion_sys::svn_commit_info_dup(self.ptr, pool.as_mut_ptr());
@@ -615,13 +704,17 @@ impl<'pool> CommitInfo<'pool> {
     }
 }
 
+/// A range of revisions.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct RevisionRange {
+    /// Starting revision of the range.
     pub start: Revision,
+    /// Ending revision of the range.
     pub end: Revision,
 }
 
 impl RevisionRange {
+    /// Creates a new revision range.
     pub fn new(start: Revision, end: Revision) -> Self {
         Self { start, end }
     }
@@ -637,6 +730,7 @@ impl From<&RevisionRange> for subversion_sys::svn_opt_revision_range_t {
 }
 
 impl RevisionRange {
+    /// Converts to a C revision range structure.
     pub unsafe fn to_c(&self, pool: &apr::Pool) -> *mut subversion_sys::svn_opt_revision_range_t {
         let range = pool.calloc::<subversion_sys::svn_opt_revision_range_t>();
         *range = self.into();
@@ -644,6 +738,7 @@ impl RevisionRange {
     }
 }
 
+/// A log entry from the repository history.
 pub struct LogEntry<'pool> {
     ptr: *const subversion_sys::svn_log_entry_t,
     _pool: std::marker::PhantomData<&'pool apr::Pool>,
@@ -651,6 +746,7 @@ pub struct LogEntry<'pool> {
 unsafe impl Send for LogEntry<'_> {}
 
 impl<'pool> LogEntry<'pool> {
+    /// Creates a LogEntry from a raw pointer.
     pub fn from_raw(ptr: *const subversion_sys::svn_log_entry_t) -> Self {
         Self {
             ptr,
@@ -658,6 +754,7 @@ impl<'pool> LogEntry<'pool> {
         }
     }
 
+    /// Duplicates the log entry in the given pool.
     pub fn dup(&self, pool: &'pool apr::Pool) -> Result<LogEntry<'pool>, Error> {
         unsafe {
             let duplicated = subversion_sys::svn_log_entry_dup(self.ptr, pool.as_mut_ptr());
@@ -665,6 +762,7 @@ impl<'pool> LogEntry<'pool> {
         }
     }
 
+    /// Returns the raw pointer to the log entry.
     pub fn as_ptr(&self) -> *const subversion_sys::svn_log_entry_t {
         self.ptr
     }
@@ -720,14 +818,20 @@ impl<'pool> LogEntry<'pool> {
     }
 }
 
+/// File size type.
 pub type FileSize = subversion_sys::svn_filesize_t;
 
+/// Native end-of-line style.
 #[derive(Debug, Clone, Copy, Default)]
 pub enum NativeEOL {
+    /// Use the standard EOL for the platform.
     #[default]
     Standard,
+    /// Unix-style line feed.
     LF,
+    /// Windows-style carriage return + line feed.
     CRLF,
+    /// Mac-style carriage return.
     CR,
 }
 
@@ -760,12 +864,14 @@ impl From<NativeEOL> for Option<&str> {
     }
 }
 
+/// An inherited property item.
 pub struct InheritedItem<'pool> {
     ptr: *const subversion_sys::svn_prop_inherited_item_t,
     _pool: std::marker::PhantomData<&'pool apr::Pool>,
 }
 
 impl<'pool> InheritedItem<'pool> {
+    /// Creates an InheritedItem from a raw pointer.
     pub fn from_raw(ptr: *const subversion_sys::svn_prop_inherited_item_t) -> Self {
         Self {
             ptr,
@@ -773,6 +879,7 @@ impl<'pool> InheritedItem<'pool> {
         }
     }
 
+    /// Returns the path or URL of the item.
     pub fn path_or_url(&self) -> &str {
         unsafe {
             let path_or_url = (*self.ptr).path_or_url;
@@ -781,6 +888,7 @@ impl<'pool> InheritedItem<'pool> {
     }
 }
 
+/// A canonicalized path or URL.
 #[derive(Clone)]
 pub struct Canonical<T>(T);
 
@@ -809,20 +917,31 @@ where
 
 impl<T> Eq for Canonical<T> where T: Eq {}
 
+/// The kind of a node in the repository.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NodeKind {
+    /// Not a node.
     None,
+    /// Regular file.
     File,
+    /// Directory.
     Dir,
+    /// Unknown node kind.
     Unknown,
+    /// Symbolic link.
     Symlink,
 }
 
+/// The kind of change made to a path in the filesystem.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FsPathChangeKind {
+    /// Path was modified.
     Modify,
+    /// Path was added.
     Add,
+    /// Path was deleted.
     Delete,
+    /// Path was replaced.
     Replace,
 }
 
@@ -871,21 +990,36 @@ impl From<NodeKind> for subversion_sys::svn_node_kind_t {
     }
 }
 
+/// The status of a working copy item.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StatusKind {
+    /// No status.
     None,
+    /// Not under version control.
     Unversioned,
+    /// Normal status.
     Normal,
+    /// Scheduled for addition.
     Added,
+    /// Missing from working copy.
     Missing,
+    /// Scheduled for deletion.
     Deleted,
+    /// Replaced in the working copy.
     Replaced,
+    /// Modified in the working copy.
     Modified,
+    /// Merged from another branch.
     Merged,
+    /// Has conflicts.
     Conflicted,
+    /// Ignored by version control.
     Ignored,
+    /// Obstructed by an unversioned item.
     Obstructed,
+    /// External definition.
     External,
+    /// Incomplete status.
     Incomplete,
 }
 
@@ -934,6 +1068,7 @@ impl From<StatusKind> for subversion_sys::svn_wc_status_kind {
     }
 }
 
+/// A lock on a path in the repository.
 pub struct Lock<'pool> {
     ptr: *const subversion_sys::svn_lock_t,
     _pool: std::marker::PhantomData<&'pool apr::Pool>,
@@ -941,6 +1076,7 @@ pub struct Lock<'pool> {
 unsafe impl Send for Lock<'_> {}
 
 impl<'pool> Lock<'pool> {
+    /// Creates a Lock from a raw pointer.
     pub fn from_raw(ptr: *const subversion_sys::svn_lock_t) -> Self {
         Self {
             ptr,
@@ -948,6 +1084,7 @@ impl<'pool> Lock<'pool> {
         }
     }
 
+    /// Returns the path that is locked.
     pub fn path(&self) -> &str {
         unsafe {
             let path = (*self.ptr).path;
@@ -955,6 +1092,7 @@ impl<'pool> Lock<'pool> {
         }
     }
 
+    /// Duplicates the lock in the given pool.
     pub fn dup(&self, pool: &'pool apr::Pool) -> Result<Lock<'pool>, Error> {
         unsafe {
             let duplicated = subversion_sys::svn_lock_dup(self.ptr, pool.as_mut_ptr());
@@ -962,6 +1100,7 @@ impl<'pool> Lock<'pool> {
         }
     }
 
+    /// Returns the lock token.
     pub fn token(&self) -> &str {
         unsafe {
             let token = (*self.ptr).token;
@@ -969,6 +1108,7 @@ impl<'pool> Lock<'pool> {
         }
     }
 
+    /// Returns the owner of the lock.
     pub fn owner(&self) -> &str {
         unsafe {
             let owner = (*self.ptr).owner;
@@ -976,6 +1116,7 @@ impl<'pool> Lock<'pool> {
         }
     }
 
+    /// Returns the lock comment.
     pub fn comment(&self) -> &str {
         unsafe {
             let comment = (*self.ptr).comment;
@@ -983,18 +1124,22 @@ impl<'pool> Lock<'pool> {
         }
     }
 
+    /// Returns true if the comment is a DAV comment.
     pub fn is_dav_comment(&self) -> bool {
         unsafe { (*self.ptr).is_dav_comment == 1 }
     }
 
+    /// Returns the creation date of the lock.
     pub fn creation_date(&self) -> i64 {
         unsafe { (*self.ptr).creation_date }
     }
 
+    /// Returns the expiration date of the lock.
     pub fn expiration_date(&self) -> apr::time::Time {
         apr::time::Time::from(unsafe { (*self.ptr).expiration_date })
     }
 
+    /// Creates a new lock.
     pub fn create(pool: &'pool apr::Pool) -> Result<Lock<'pool>, Error> {
         unsafe {
             let lock_ptr = subversion_sys::svn_lock_create(pool.as_mut_ptr());
@@ -1003,11 +1148,16 @@ impl<'pool> Lock<'pool> {
     }
 }
 
+/// The kind of checksum algorithm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChecksumKind {
+    /// MD5 checksum.
     MD5,
+    /// SHA1 checksum.
     SHA1,
+    /// FNV-1a 32-bit checksum.
     Fnv1a32,
+    /// FNV-1a 32-bit x4 checksum.
     Fnv1a32x4,
 }
 
@@ -1034,6 +1184,7 @@ impl From<ChecksumKind> for subversion_sys::svn_checksum_kind_t {
     }
 }
 
+/// A segment of a location in the repository history.
 pub struct LocationSegment<'pool> {
     ptr: *const subversion_sys::svn_location_segment_t,
     _pool: std::marker::PhantomData<&'pool apr::Pool>,
@@ -1041,6 +1192,7 @@ pub struct LocationSegment<'pool> {
 unsafe impl Send for LocationSegment<'_> {}
 
 impl<'pool> LocationSegment<'pool> {
+    /// Creates a LocationSegment from a raw pointer.
     pub fn from_raw(ptr: *const subversion_sys::svn_location_segment_t) -> Self {
         Self {
             ptr,
@@ -1048,6 +1200,7 @@ impl<'pool> LocationSegment<'pool> {
         }
     }
 
+    /// Duplicates the location segment in the given pool.
     pub fn dup(&self, pool: &'pool apr::Pool) -> Result<LocationSegment<'pool>, Error> {
         unsafe {
             let duplicated = subversion_sys::svn_location_segment_dup(self.ptr, pool.as_mut_ptr());
@@ -1055,6 +1208,7 @@ impl<'pool> LocationSegment<'pool> {
         }
     }
 
+    /// Returns the revision range for this segment.
     pub fn range(&self) -> std::ops::Range<Revnum> {
         unsafe {
             Revnum::from_raw((*self.ptr).range_end).unwrap()
@@ -1062,6 +1216,7 @@ impl<'pool> LocationSegment<'pool> {
         }
     }
 
+    /// Returns the path for this segment.
     pub fn path(&self) -> &str {
         unsafe {
             let path = (*self.ptr).path;
@@ -1196,13 +1351,21 @@ impl From<TreeConflictChoice> for subversion_sys::svn_client_conflict_option_id_
 /// Legacy conflict choice enum for backward compatibility with WC functions
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConflictChoice {
+    /// Postpone resolution for later.
     Postpone,
+    /// Use base version (original).
     Base,
+    /// Use their version (incoming changes).
     TheirsFull,
+    /// Use my version (local changes).
     MineFull,
+    /// Use their version for conflicts only.
     TheirsConflict,
+    /// Use my version for conflicts only.
     MineConflict,
+    /// Use a merged version.
     Merged,
+    /// Undefined/unspecified.
     Unspecified,
 }
 
@@ -1237,12 +1400,14 @@ impl From<ConflictChoice> for subversion_sys::svn_wc_conflict_choice_t {
     }
 }
 
+/// A checksum value.
 pub struct Checksum<'pool> {
     ptr: *const subversion_sys::svn_checksum_t,
     _pool: std::marker::PhantomData<&'pool apr::Pool>,
 }
 
 impl<'pool> Checksum<'pool> {
+    /// Creates a Checksum from a raw pointer.
     pub fn from_raw(ptr: *const subversion_sys::svn_checksum_t) -> Self {
         Self {
             ptr,
@@ -1250,18 +1415,22 @@ impl<'pool> Checksum<'pool> {
         }
     }
 
+    /// Returns the kind of checksum.
     pub fn kind(&self) -> ChecksumKind {
         ChecksumKind::from(unsafe { (*self.ptr).kind })
     }
 
+    /// Returns the size of the checksum in bytes.
     pub fn size(&self) -> usize {
         unsafe { subversion_sys::svn_checksum_size(self.ptr) }
     }
 
+    /// Returns true if the checksum is empty.
     pub fn is_empty(&self) -> bool {
         unsafe { subversion_sys::svn_checksum_is_empty_checksum(self.ptr as *mut _) == 1 }
     }
 
+    /// Returns the digest bytes.
     pub fn digest(&self) -> &[u8] {
         unsafe {
             let digest = (*self.ptr).digest;
@@ -1269,6 +1438,7 @@ impl<'pool> Checksum<'pool> {
         }
     }
 
+    /// Parses a checksum from a hexadecimal string.
     pub fn parse_hex(kind: ChecksumKind, hex: &str, pool: &'pool apr::Pool) -> Result<Self, Error> {
         let mut checksum = std::ptr::null_mut();
         let kind = kind.into();
@@ -1284,6 +1454,7 @@ impl<'pool> Checksum<'pool> {
         }
     }
 
+    /// Creates an empty checksum of the specified kind.
     pub fn empty(kind: ChecksumKind, pool: &'pool apr::Pool) -> Result<Self, Error> {
         let kind = kind.into();
         unsafe {
@@ -1390,12 +1561,14 @@ impl<'pool> Checksum<'pool> {
     }
 }
 
+/// A context for computing checksums incrementally.
 pub struct ChecksumContext<'pool> {
     ptr: *mut subversion_sys::svn_checksum_ctx_t,
     _pool: std::marker::PhantomData<&'pool apr::Pool>,
 }
 
 impl<'pool> ChecksumContext<'pool> {
+    /// Creates a new checksum context.
     pub fn new(kind: ChecksumKind, pool: &'pool apr::Pool) -> Result<Self, Error> {
         let kind = kind.into();
         unsafe {
@@ -1407,12 +1580,14 @@ impl<'pool> ChecksumContext<'pool> {
         }
     }
 
+    /// Resets the checksum context.
     pub fn reset(&mut self) -> Result<(), Error> {
         let err = unsafe { subversion_sys::svn_checksum_ctx_reset(self.ptr) };
         Error::from_raw(err)?;
         Ok(())
     }
 
+    /// Updates the checksum with more data.
     pub fn update(&mut self, data: &[u8]) -> Result<(), Error> {
         let err = unsafe {
             subversion_sys::svn_checksum_update(
@@ -1425,6 +1600,7 @@ impl<'pool> ChecksumContext<'pool> {
         Ok(())
     }
 
+    /// Finishes the checksum computation and returns the result.
     pub fn finish(&self, result_pool: &'pool apr::Pool) -> Result<Checksum<'pool>, Error> {
         let mut checksum = std::ptr::null_mut();
         unsafe {
@@ -1438,6 +1614,7 @@ impl<'pool> ChecksumContext<'pool> {
     }
 }
 
+/// Computes a checksum for the given data.
 pub fn checksum<'pool>(
     kind: ChecksumKind,
     data: &[u8],

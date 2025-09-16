@@ -41,26 +41,42 @@ pub struct CertificateInfo {
 /// Key usage enumeration
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KeyUsage {
+    /// Digital signature capability.
     DigitalSignature,
+    /// Non-repudiation capability.
     NonRepudiation,
+    /// Key encipherment capability.
     KeyEncipherment,
+    /// Data encipherment capability.
     DataEncipherment,
+    /// Key agreement capability.
     KeyAgreement,
+    /// Certificate signing capability.
     KeyCertSign,
+    /// CRL signing capability.
     CrlSign,
+    /// Encipher only capability.
     EncipherOnly,
+    /// Decipher only capability.
     DecipherOnly,
 }
 
 /// Extended key usage enumeration
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExtendedKeyUsage {
+    /// TLS server authentication.
     ServerAuth,
+    /// TLS client authentication.
     ClientAuth,
+    /// Code signing.
     CodeSigning,
+    /// Email protection.
     EmailProtection,
+    /// Time stamping.
     TimeStamping,
+    /// OCSP signing.
     OcspSigning,
+    /// Other extended key usage.
     Other(String),
 }
 
@@ -141,13 +157,21 @@ impl CertificateInfo {
 /// Certificate validation result
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ValidationResult {
+    /// Certificate is valid.
     Valid,
+    /// Certificate has expired.
     Expired,
+    /// Certificate is not yet valid.
     NotYetValid,
+    /// Certificate has an invalid signature.
     InvalidSignature,
+    /// Certificate issuer is not trusted.
     UntrustedIssuer,
+    /// Certificate has been revoked.
     Revoked,
+    /// Certificate is not valid for the hostname.
     InvalidHostname,
+    /// Other validation error.
     Other(String),
 }
 

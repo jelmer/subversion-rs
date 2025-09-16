@@ -12,20 +12,24 @@ pub struct DiffOptions {
 }
 
 impl DiffOptions {
+    /// Creates new diff options with default values.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Sets whether to ignore whitespace changes.
     pub fn with_ignore_whitespace(mut self, ignore: bool) -> Self {
         self.ignore_whitespace = ignore;
         self
     }
 
+    /// Sets whether to ignore end-of-line style differences.
     pub fn with_ignore_eol_style(mut self, ignore: bool) -> Self {
         self.ignore_eol_style = ignore;
         self
     }
 
+    /// Sets whether to show C function names in context.
     pub fn with_show_c_function(mut self, show: bool) -> Self {
         self.show_c_function = show;
         self
@@ -112,10 +116,12 @@ pub struct FileOptions {
 }
 
 impl FileOptions {
+    /// Creates new file options with default values.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Sets whether to ignore whitespace changes.
     pub fn with_ignore_whitespace(mut self, ignore: bool) -> Self {
         self.ignore_space = if ignore {
             IgnoreSpace::Change
@@ -125,11 +131,13 @@ impl FileOptions {
         self
     }
 
+    /// Sets whether to ignore end-of-line style differences.
     pub fn with_ignore_eol_style(mut self, ignore: bool) -> Self {
         self.ignore_eol_style = ignore;
         self
     }
 
+    /// Sets whether to show C function names in context.
     pub fn with_show_c_function(mut self, show: bool) -> Self {
         self.show_c_function = show;
         self

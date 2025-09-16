@@ -28,9 +28,13 @@ impl From<subversion_sys::svn_wc_conflict_kind_t> for ConflictKind {
 /// The action that caused a conflict
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConflictAction {
+    /// Edit action on the item.
     Edit,
+    /// Add action on the item.
     Add,
+    /// Delete action on the item.
     Delete,
+    /// Replace action on the item.
     Replace,
 }
 
@@ -49,14 +53,23 @@ impl From<subversion_sys::svn_wc_conflict_action_t> for ConflictAction {
 /// The reason for a conflict
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConflictReason {
+    /// Item was edited.
     Edited,
+    /// Item was obstructed.
     Obstructed,
+    /// Item was deleted.
     Deleted,
+    /// Item is missing.
     Missing,
+    /// Item is unversioned.
     Unversioned,
+    /// Item was added.
     Added,
+    /// Item was replaced.
     Replaced,
+    /// Item was moved away.
     MovedAway,
+    /// Item was moved here.
     MovedHere,
 }
 
@@ -227,6 +240,7 @@ pub enum ConflictChoice {
 }
 
 impl ConflictChoice {
+    /// Converts the conflict choice to its raw SVN representation.
     pub fn to_raw(&self) -> subversion_sys::svn_wc_conflict_choice_t {
         match self {
             ConflictChoice::Undefined => -1, // svn_wc_conflict_choose_undefined

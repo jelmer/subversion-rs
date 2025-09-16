@@ -33,10 +33,12 @@ impl<'pool> BStr<'pool> {
         Self::from_bytes(s.as_bytes(), pool)
     }
 
+    /// Gets the raw pointer to the SVN string.
     pub fn as_ptr(&self) -> *const svn_string_t {
         self.ptr
     }
 
+    /// Gets a mutable raw pointer to the SVN string.
     pub fn as_mut_ptr(&mut self) -> *mut svn_string_t {
         self.ptr as *mut svn_string_t
     }
@@ -80,6 +82,7 @@ impl<'pool> From<&str> for BStr<'pool> {
 }
 
 // For backwards compatibility, keep the old String name as an alias
+/// Type alias for BStr for backwards compatibility.
 pub type String<'pool> = BStr<'pool>;
 
 // BStr can be used directly as values in the new APR hash API

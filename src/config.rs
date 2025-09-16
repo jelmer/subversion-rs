@@ -7,71 +7,123 @@ use std::ptr;
 #[derive(Debug, Clone)]
 pub enum ConfigOption<'a> {
     // Auth section
+    /// Whether to store passwords.
     StorePasswords(bool),
+    /// Whether to store plaintext passwords.
     StorePlaintextPasswords(bool),
+    /// Whether to store authentication credentials.
     StoreAuthCreds(bool),
+    /// Whether to store SSL client certificate passphrases.
     StoreSslClientCertPP(bool),
+    /// Whether to store SSL client certificate passphrases in plaintext.
     StoreSslClientCertPPPlaintext(bool),
+    /// Password store types to use.
     PasswordStores(&'a str),
+    /// KWallet wallet name.
     KwalletWallet(&'a str),
+    /// KWallet SVN application name.
     KwalletSvnApplicationName(&'a str),
+    /// Whether to prompt for SSL client certificate file.
     SslClientCertFilePrompt(bool),
 
     // Helpers section
+    /// Editor command.
     EditorCmd(&'a str),
+    /// Diff command.
     DiffCmd(&'a str),
+    /// Three-way diff command.
     Diff3Cmd(&'a str),
+    /// Diff file extensions.
     DiffExtensions(&'a str),
+    /// Merge tool command.
     MergeToolCmd(&'a str),
 
     // Miscellany section
+    /// Global ignore patterns.
     GlobalIgnores(&'a str),
+    /// Log message encoding.
     LogEncoding(&'a str),
+    /// Whether to use commit times for timestamps.
     UseCommitTimes(bool),
+    /// Whether to avoid unlocking files.
     NoUnlock(bool),
+    /// MIME types file path.
     MimeTypesFile(&'a str),
+    /// Preserved conflict file extension.
     PreservedConflictFileExt(&'a str),
+    /// Whether to enable automatic properties.
     EnableAutoProps(bool),
+    /// Whether to handle conflicts interactively.
     InteractiveConflicts(bool),
+    /// Memory cache size.
     MemoryCacheSize(i64),
+    /// Whether to ignore content type in diffs.
     DiffIgnoreContentType(bool),
 
     // Working copy section
+    /// Whether to use exclusive locking.
     ExclusiveLocking(bool),
+    /// Exclusive locking clients.
     ExclusiveLockingClients(&'a str),
+    /// Busy timeout value.
     BusyTimeout(i64),
 
     // Proxy section (from servers file)
+    /// HTTP proxy host.
     HttpProxy(&'a str),
+    /// HTTP proxy port.
     HttpProxyPort(i64),
+    /// HTTP proxy username.
     HttpProxyUsername(&'a str),
+    /// HTTP proxy password.
     HttpProxyPassword(&'a str),
+    /// HTTP proxy exceptions.
     HttpProxyExceptions(&'a str),
+    /// HTTP timeout value.
     HttpTimeout(i64),
+    /// Whether to use HTTP compression.
     HttpCompression(bool),
+    /// Maximum HTTP connections.
     HttpMaxConnections(i64),
+    /// Whether to use chunked HTTP requests.
     HttpChunkedRequests(bool),
 
     // SSL section (from servers file)
+    /// SSL certificate authority files.
     SslAuthorityFiles(&'a str),
+    /// Whether to trust the default CA.
     SslTrustDefaultCa(bool),
+    /// SSL client certificate file.
     SslClientCertFile(&'a str),
+    /// SSL client certificate password.
     SslClientCertPassword(&'a str),
 
     // Generic string/int/bool options for sections not covered above
+    /// Generic string configuration option.
     String {
+        /// Configuration section name.
         section: &'a str,
+        /// Option name.
         option: &'a str,
+        /// String value.
         value: &'a str,
     },
+    /// Generic integer configuration option.
     Int {
+        /// Configuration section name.
         section: &'a str,
+        /// Option name.
         option: &'a str,
+        /// Integer value.
         value: i64,
     },
+    /// Generic boolean configuration option.
     Bool {
+        /// Configuration section name.
         section: &'a str,
+        /// Option name.
         option: &'a str,
+        /// Boolean value.
         value: bool,
     },
 }
@@ -447,10 +499,12 @@ impl Config {
         Ok(())
     }
 
+    /// Returns a raw pointer to the configuration.
     pub fn as_ptr(&self) -> *const subversion_sys::svn_config_t {
         self.ptr
     }
 
+    /// Returns a mutable raw pointer to the configuration.
     pub fn as_mut_ptr(&mut self) -> *mut subversion_sys::svn_config_t {
         self.ptr
     }
@@ -477,13 +531,18 @@ impl ConfigHash {
 /// Configuration value returned from get operations
 #[derive(Debug, Clone, PartialEq)]
 pub enum ConfigValue {
+    /// String configuration value.
     String(String),
+    /// Integer configuration value.
     Int(i64),
+    /// Boolean configuration value.
     Bool(bool),
+    /// No value present.
     None,
 }
 
 impl ConfigValue {
+    /// Returns the value as a string if it is one.
     pub fn as_string(&self) -> Option<&str> {
         match self {
             ConfigValue::String(s) => Some(s),
@@ -491,6 +550,7 @@ impl ConfigValue {
         }
     }
 
+    /// Returns the value as an integer if it is one.
     pub fn as_int(&self) -> Option<i64> {
         match self {
             ConfigValue::Int(i) => Some(*i),
@@ -498,6 +558,7 @@ impl ConfigValue {
         }
     }
 
+    /// Returns the value as a boolean if it is one.
     pub fn as_bool(&self) -> Option<bool> {
         match self {
             ConfigValue::Bool(b) => Some(*b),

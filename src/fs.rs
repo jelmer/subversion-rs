@@ -6,26 +6,32 @@ pub struct FsPathChange {
 }
 
 impl FsPathChange {
+    /// Creates an FsPathChange from a raw pointer.
     pub fn from_raw(ptr: *mut subversion_sys::svn_fs_path_change2_t) -> Self {
         Self { ptr }
     }
 
+    /// Gets the kind of change for this path.
     pub fn change_kind(&self) -> crate::FsPathChangeKind {
         unsafe { (*self.ptr).change_kind.into() }
     }
 
+    /// Gets the node kind (file, directory, etc.).
     pub fn node_kind(&self) -> crate::NodeKind {
         unsafe { (*self.ptr).node_kind.into() }
     }
 
+    /// Checks if the text content was modified.
     pub fn text_modified(&self) -> bool {
         unsafe { (*self.ptr).text_mod != 0 }
     }
 
+    /// Checks if properties were modified.
     pub fn props_modified(&self) -> bool {
         unsafe { (*self.ptr).prop_mod != 0 }
     }
 
+    /// Gets the path this was copied from, if any.
     pub fn copyfrom_path(&self) -> Option<String> {
         unsafe {
             if (*self.ptr).copyfrom_path.is_null() {
@@ -40,6 +46,7 @@ impl FsPathChange {
         }
     }
 
+    /// Gets the revision this was copied from, if any.
     pub fn copyfrom_rev(&self) -> Option<Revnum> {
         unsafe {
             let rev = (*self.ptr).copyfrom_rev;
@@ -59,14 +66,17 @@ pub struct FsDirEntry {
 }
 
 impl FsDirEntry {
+    /// Creates an FsDirEntry from a raw pointer.
     pub fn from_raw(ptr: *mut subversion_sys::svn_fs_dirent_t) -> Self {
         Self { ptr }
     }
 
+    /// Gets the entry name.
     pub fn name(&self) -> &str {
         unsafe { std::ffi::CStr::from_ptr((*self.ptr).name).to_str().unwrap() }
     }
 
+    /// Gets the entry ID as bytes.
     pub fn id(&self) -> Option<Vec<u8>> {
         unsafe {
             if (*self.ptr).id.is_null() {
@@ -88,6 +98,7 @@ impl FsDirEntry {
         }
     }
 
+    /// Gets the node kind (file, directory, etc.).
     pub fn kind(&self) -> crate::NodeKind {
         unsafe { (*self.ptr).kind.into() }
     }
@@ -130,6 +141,7 @@ impl Fs {
         Self { fs_ptr, pool }
     }
 
+    /// Creates a new filesystem at the specified path.
     pub fn create(path: &std::path::Path) -> Result<Fs, Error> {
         let pool = apr::Pool::new();
         let path_str = path
@@ -155,6 +167,7 @@ impl Fs {
         }
     }
 
+    /// Opens an existing filesystem at the specified path.
     pub fn open(path: &std::path::Path) -> Result<Fs, Error> {
         let pool = apr::Pool::new();
         let path_str = path
@@ -180,6 +193,7 @@ impl Fs {
         }
     }
 
+    /// Gets the path to the filesystem.
     pub fn path(&self) -> std::path::PathBuf {
         unsafe {
             with_tmp_pool(|pool| {
@@ -192,6 +206,7 @@ impl Fs {
         }
     }
 
+    /// Gets the youngest (most recent) revision in the filesystem.
     pub fn youngest_revision(&self) -> Result<Revnum, Error> {
         unsafe {
             with_tmp_pool(|pool| {
@@ -207,6 +222,7 @@ impl Fs {
         }
     }
 
+    /// Gets the property list for a revision.
     pub fn revision_proplist(
         &self,
         rev: Revnum,
@@ -234,6 +250,7 @@ impl Fs {
         Ok(revprops)
     }
 
+    /// Gets the root of a specific revision.
     pub fn revision_root(&self, rev: Revnum) -> Result<Root, Error> {
         unsafe {
             let pool = apr::Pool::new();
@@ -252,6 +269,7 @@ impl Fs {
         }
     }
 
+    /// Gets the UUID of the filesystem.
     pub fn get_uuid(&self) -> Result<String, Error> {
         unsafe {
             with_tmp_pool(|pool| {
@@ -266,6 +284,7 @@ impl Fs {
         }
     }
 
+    /// Sets the UUID of the filesystem.
     pub fn set_uuid(&mut self, uuid: &str) -> Result<(), Error> {
         unsafe {
             let uuid = std::ffi::CString::new(uuid).unwrap();
@@ -279,6 +298,7 @@ impl Fs {
         }
     }
 
+    /// Unlocks a path in the filesystem.
     pub fn unlock(
         &mut self,
         path: &std::path::Path,
@@ -301,6 +321,7 @@ impl Fs {
     }
 }
 
+/// Gets the filesystem type for a repository at the given path.
 pub fn fs_type(path: &std::path::Path) -> Result<String, Error> {
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     unsafe {
@@ -314,6 +335,7 @@ pub fn fs_type(path: &std::path::Path) -> Result<String, Error> {
     }
 }
 
+/// Deletes a filesystem at the given path.
 pub fn delete_fs(path: &std::path::Path) -> Result<(), Error> {
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     unsafe {
@@ -325,6 +347,7 @@ pub fn delete_fs(path: &std::path::Path) -> Result<(), Error> {
 }
 
 #[allow(dead_code)]
+/// Represents a filesystem root at a specific revision.
 pub struct Root {
     ptr: *mut subversion_sys::svn_fs_root_t,
     pool: apr::Pool, // Keep pool alive for root lifetime
@@ -339,10 +362,12 @@ impl Drop for Root {
 }
 
 impl Root {
+    /// Gets the raw pointer to the root.
     pub fn as_ptr(&self) -> *const subversion_sys::svn_fs_root_t {
         self.ptr
     }
 
+    /// Gets the mutable raw pointer to the root.
     pub fn as_mut_ptr(&mut self) -> *mut subversion_sys::svn_fs_root_t {
         self.ptr
     }
@@ -455,7 +480,7 @@ impl Root {
             svn_result(err)?;
 
             let result = if !props.is_null() {
-                let prop_hash = unsafe { crate::props::PropHash::from_ptr(props) };
+                let prop_hash = crate::props::PropHash::from_ptr(props);
                 prop_hash.to_hashmap()
             } else {
                 std::collections::HashMap::new()
@@ -478,7 +503,7 @@ impl Root {
             if changed_paths.is_null() {
                 Ok(std::collections::HashMap::new())
             } else {
-                let hash = unsafe { crate::hash::PathChangeHash::from_ptr(changed_paths) };
+                let hash = crate::hash::PathChangeHash::from_ptr(changed_paths);
                 Ok(hash.to_hashmap())
             }
         })
@@ -519,7 +544,7 @@ impl Root {
             if entries.is_null() {
                 Ok(std::collections::HashMap::new())
             } else {
-                let hash = unsafe { crate::hash::FsDirentHash::from_ptr(entries) };
+                let hash = crate::hash::FsDirentHash::from_ptr(entries);
                 Ok(hash.to_hashmap())
             }
         })

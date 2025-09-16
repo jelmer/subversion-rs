@@ -1,10 +1,12 @@
 use subversion_sys::svn_error_t;
 
 // Errors are a bit special; they own their own pool, so don't need to use PooledPtr
+/// Represents a Subversion error.
 pub struct Error(*mut svn_error_t);
 unsafe impl Send for Error {}
 
 impl Error {
+    /// Creates a new error with the given status, optional child error, and message.
     pub fn new(status: apr::Status, child: Option<Error>, msg: &str) -> Self {
         let msg = std::ffi::CString::new(msg).unwrap();
         let child = child
@@ -14,22 +16,27 @@ impl Error {
         Self(err)
     }
 
+    /// Creates a new error from a string message.
     pub fn from_str(msg: &str) -> Self {
         Self::new(apr::Status::from(1), None, msg)
     }
 
+    /// Gets the APR error status code.
     pub fn apr_err(&self) -> apr::Status {
         unsafe { (*self.0).apr_err }.into()
     }
 
+    /// Gets the mutable raw pointer to the error.
     pub fn as_mut_ptr(&mut self) -> *mut svn_error_t {
         self.0
     }
 
+    /// Gets the raw pointer to the error.
     pub fn as_ptr(&self) -> *const svn_error_t {
         self.0
     }
 
+    /// Creates an error from a raw SVN error pointer, or Ok if null.
     pub fn from_raw(err: *mut svn_error_t) -> Result<(), Self> {
         if err.is_null() {
             Ok(())
@@ -38,10 +45,12 @@ impl Error {
         }
     }
 
+    /// Gets the line number where the error occurred.
     pub fn line(&self) -> i64 {
         unsafe { (*self.0).line }
     }
 
+    /// Gets the file name where the error occurred.
     pub fn file(&self) -> Option<&str> {
         unsafe {
             let file = (*self.0).file;
@@ -53,10 +62,12 @@ impl Error {
         }
     }
 
+    /// Gets the file and line location where the error occurred.
     pub fn location(&self) -> Option<(&str, i64)> {
         self.file().map(|f| (f, self.line()))
     }
 
+    /// Gets the child error, if any.
     pub fn child(&self) -> Option<Self> {
         unsafe {
             let child = (*self.0).child;
@@ -68,6 +79,7 @@ impl Error {
         }
     }
 
+    /// Gets the error message.
     pub fn message(&self) -> Option<&str> {
         unsafe {
             let message = (*self.0).message;
@@ -79,6 +91,7 @@ impl Error {
         }
     }
 
+    /// Finds an error in the chain with the given status code.
     pub fn find_cause(&self, status: apr::Status) -> Option<Error> {
         unsafe {
             let err = subversion_sys::svn_error_find_cause(self.0, status as i32);
@@ -90,22 +103,26 @@ impl Error {
         }
     }
 
+    /// Removes tracing information from the error.
     pub fn purge_tracing(&self) -> Self {
         unsafe { Self(subversion_sys::svn_error_purge_tracing(self.0)) }
     }
 
+    /// Detaches the error, returning the raw pointer and preventing cleanup.
     pub unsafe fn detach(&mut self) -> *mut svn_error_t {
         let err = self.0;
         self.0 = std::ptr::null_mut();
         err
     }
 
+    /// Converts the error into a raw pointer, consuming self without cleanup.
     pub unsafe fn into_raw(self) -> *mut svn_error_t {
         let err = self.0;
         std::mem::forget(self);
         err
     }
 
+    /// Gets the best available error message from the error chain.
     pub fn best_message(&self) -> String {
         let mut buf = [0; 1024];
         unsafe {
@@ -140,6 +157,7 @@ impl Error {
     }
 }
 
+/// Gets the symbolic name for an error status code.
 pub fn symbolic_name(status: apr::Status) -> Option<&'static str> {
     unsafe {
         let name = subversion_sys::svn_error_symbolic_name(status as i32);
@@ -151,6 +169,7 @@ pub fn symbolic_name(status: apr::Status) -> Option<&'static str> {
     }
 }
 
+/// Gets a human-readable error string for a status code.
 pub fn strerror(status: apr::Status) -> Option<&'static str> {
     let mut buf = [0; 1024];
     unsafe {
