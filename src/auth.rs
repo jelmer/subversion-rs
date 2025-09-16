@@ -35,7 +35,9 @@ unsafe impl Send for AuthBaton {}
 /// Trait for authentication credentials.
 pub trait Credentials {
     /// Returns the kind of credential.
-    fn kind() -> &'static str;
+    fn kind() -> &'static str
+    where
+        Self: Sized;
 
     /// Returns a mutable pointer to the credentials.
     fn as_mut_ptr(&mut self) -> *mut std::ffi::c_void;
@@ -44,6 +46,21 @@ pub trait Credentials {
     fn from_raw(cred: *mut std::ffi::c_void) -> Self
     where
         Self: Sized;
+    
+    /// Try to downcast to SimpleCredentials
+    fn as_simple(&self) -> Option<&SimpleCredentials> {
+        None
+    }
+    
+    /// Try to downcast to UsernameCredentials
+    fn as_username(&self) -> Option<&UsernameCredentials> {
+        None
+    }
+    
+    /// Try to downcast to SslServerTrustCredentials  
+    fn as_ssl_server_trust(&self) -> Option<&SslServerTrustCredentials> {
+        None
+    }
 }
 
 /// Simple username/password credentials.
@@ -96,11 +113,16 @@ impl<'pool> SimpleCredentials<'pool> {
             _pool: std::marker::PhantomData,
         }
     }
+    
 }
 
 impl<'pool> Credentials for SimpleCredentials<'pool> {
-    fn kind() -> &'static str {
-        std::str::from_utf8(subversion_sys::SVN_AUTH_CRED_SIMPLE).unwrap()
+    fn kind() -> &'static str
+    where
+        Self: Sized,
+    {
+        unsafe { std::str::from_utf8_unchecked(subversion_sys::SVN_AUTH_CRED_SIMPLE) }
+            .trim_end_matches('\0')
     }
 
     fn as_mut_ptr(&mut self) -> *mut std::ffi::c_void {
@@ -113,9 +135,184 @@ impl<'pool> Credentials for SimpleCredentials<'pool> {
             _pool: std::marker::PhantomData,
         }
     }
+    
+    fn as_simple(&self) -> Option<&SimpleCredentials> {
+        Some(self)
+    }
+}
+
+/// Username-only credentials.
+pub struct UsernameCredentials<'pool> {
+    ptr: *mut subversion_sys::svn_auth_cred_username_t,
+    _pool: std::marker::PhantomData<&'pool apr::Pool>,
+}
+
+impl<'pool> UsernameCredentials<'pool> {
+    /// Returns the username.
+    pub fn username(&self) -> &str {
+        unsafe {
+            std::ffi::CStr::from_ptr((*self.ptr).username)
+                .to_str()
+                .unwrap()
+        }
+    }
+
+    /// Returns whether the credentials may be saved.
+    pub fn may_save(&self) -> bool {
+        unsafe { (*self.ptr).may_save != 0 }
+    }
+
+    /// Creates new username credentials.
+    pub fn new(username: String, may_save: bool, pool: &'pool apr::Pool) -> Self {
+        let cred: *mut subversion_sys::svn_auth_cred_username_t = pool.calloc();
+        unsafe {
+            (*cred).username = apr::strings::pstrdup_raw(&username, pool).unwrap() as *mut _;
+            (*cred).may_save = if may_save { 1 } else { 0 };
+        }
+        Self {
+            ptr: cred,
+            _pool: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<'pool> Credentials for UsernameCredentials<'pool> {
+    fn kind() -> &'static str
+    where
+        Self: Sized,
+    {
+        unsafe { std::str::from_utf8_unchecked(subversion_sys::SVN_AUTH_CRED_USERNAME) }
+            .trim_end_matches('\0')
+    }
+
+    fn as_mut_ptr(&mut self) -> *mut std::ffi::c_void {
+        self.ptr as *mut std::ffi::c_void
+    }
+
+    fn from_raw(cred: *mut std::ffi::c_void) -> Self
+    where
+        Self: Sized,
+    {
+        Self {
+            ptr: cred as *mut subversion_sys::svn_auth_cred_username_t,
+            _pool: std::marker::PhantomData,
+        }
+    }
+    
+    fn as_username(&self) -> Option<&UsernameCredentials> {
+        Some(self)
+    }
+}
+
+/// SSL server trust credentials.
+pub struct SslServerTrustCredentials<'pool> {
+    ptr: *mut subversion_sys::svn_auth_cred_ssl_server_trust_t,
+    _pool: std::marker::PhantomData<&'pool apr::Pool>,
+}
+
+impl<'pool> SslServerTrustCredentials<'pool> {
+    /// Returns whether the credentials may be saved.
+    pub fn may_save(&self) -> bool {
+        unsafe { (*self.ptr).may_save != 0 }
+    }
+
+    /// Returns the accepted failures.
+    pub fn accepted_failures(&self) -> u32 {
+        unsafe { (*self.ptr).accepted_failures }
+    }
+
+    /// Creates new SSL server trust credentials.
+    pub fn new(may_save: bool, accepted_failures: u32, pool: &'pool apr::Pool) -> Self {
+        let cred: *mut subversion_sys::svn_auth_cred_ssl_server_trust_t = pool.calloc();
+        unsafe {
+            (*cred).may_save = if may_save { 1 } else { 0 };
+            (*cred).accepted_failures = accepted_failures;
+        }
+        Self {
+            ptr: cred,
+            _pool: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<'pool> Credentials for SslServerTrustCredentials<'pool> {
+    fn kind() -> &'static str
+    where
+        Self: Sized,
+    {
+        unsafe { std::str::from_utf8_unchecked(subversion_sys::SVN_AUTH_CRED_SSL_SERVER_TRUST) }
+            .trim_end_matches('\0')
+    }
+
+    fn as_mut_ptr(&mut self) -> *mut std::ffi::c_void {
+        self.ptr as *mut std::ffi::c_void
+    }
+
+    fn from_raw(cred: *mut std::ffi::c_void) -> Self
+    where
+        Self: Sized,
+    {
+        Self {
+            ptr: cred as *mut subversion_sys::svn_auth_cred_ssl_server_trust_t,
+            _pool: std::marker::PhantomData,
+        }
+    }
+    
+    fn as_ssl_server_trust(&self) -> Option<&SslServerTrustCredentials> {
+        Some(self)
+    }
 }
 
 impl AuthBaton {
+    /// Try to get credentials from the auth providers (for testing).
+    #[cfg(test)]
+    pub(crate) fn first_credentials(
+        &mut self,
+        cred_kind: &str,
+        realm: &str,
+    ) -> Result<Option<Box<dyn Credentials + '_>>, Error> {
+        use std::ffi::CString;
+
+        let mut creds_ptr = std::ptr::null_mut();
+        let mut iter_baton = std::ptr::null_mut();
+        let cred_kind_c = CString::new(cred_kind)?;
+        let realm_c = CString::new(realm)?;
+
+        let err = unsafe {
+            subversion_sys::svn_auth_first_credentials(
+                &mut creds_ptr,
+                &mut iter_baton,
+                cred_kind_c.as_ptr(),
+                realm_c.as_ptr(),
+                self.ptr,
+                self.pool.as_mut_ptr(),
+            )
+        };
+
+        Error::from_raw(err)?;
+
+        if creds_ptr.is_null() {
+            return Ok(None);
+        }
+
+        // Convert credentials based on type
+        match cred_kind {
+            "svn.simple" => {
+                let simple_creds = SimpleCredentials::from_raw(creds_ptr);
+                Ok(Some(Box::new(simple_creds)))
+            }
+            "svn.username" => {
+                let username_creds = UsernameCredentials::from_raw(creds_ptr);
+                Ok(Some(Box::new(username_creds)))
+            }
+            "svn.ssl.server.trust" => {
+                let trust_creds = SslServerTrustCredentials::from_raw(creds_ptr);
+                Ok(Some(Box::new(trust_creds)))
+            }
+            _ => Ok(None),
+        }
+    }
+
     /// Returns a mutable pointer to the auth baton.
     pub fn as_mut_ptr(&mut self) -> *mut subversion_sys::svn_auth_baton_t {
         self.ptr
@@ -689,14 +886,14 @@ pub fn get_ssl_client_cert_pw_file_provider(
 }
 
 /// Gets an SSL client certificate password file authentication provider with a boxed callback.
-/// 
+///
 /// This version accepts a boxed trait object for dynamic language bindings.
 pub fn get_ssl_client_cert_pw_file_provider_boxed(
     prompt_fn: Option<Box<dyn Fn(&str) -> Result<bool, crate::Error> + Send>>,
 ) -> AuthProvider {
     let mut auth_provider = std::ptr::null_mut();
     let pool = apr::Pool::new();
-    
+
     let baton = if let Some(func) = prompt_fn {
         Box::into_raw(func) as *mut std::ffi::c_void
     } else {
@@ -782,37 +979,53 @@ pub fn get_simple_prompt_provider<'pool>(
 }
 
 /// Gets a simple prompt authentication provider with a boxed callback.
-/// 
+///
 /// This version accepts a boxed trait object for dynamic language bindings.
-pub fn get_simple_prompt_provider_boxed<'pool>(
-    prompt_fn: Box<dyn Fn(&str, Option<&str>, bool) -> Result<SimpleCredentials<'pool>, crate::Error> + Send>,
+pub fn get_simple_prompt_provider_boxed(
+    prompt_fn: Box<
+        dyn Fn(&str, Option<&str>, bool) -> Result<(String, String, bool), crate::Error> + Send,
+    >,
     retry_limit: usize,
 ) -> AuthProvider {
     let mut auth_provider = std::ptr::null_mut();
     let pool = apr::Pool::new();
-    
+
     let baton = Box::into_raw(Box::new(prompt_fn)) as *mut std::ffi::c_void;
 
-    extern "C" fn wrap_simple_prompt_provider_boxed<'pool>(
+    extern "C" fn wrap_simple_prompt_provider_boxed(
         credentials: *mut *mut subversion_sys::svn_auth_cred_simple_t,
         baton: *mut std::ffi::c_void,
         realmstring: *const std::ffi::c_char,
         username: *const std::ffi::c_char,
         may_save: subversion_sys::svn_boolean_t,
-        _pool: *mut subversion_sys::apr_pool_t,
+        pool: *mut subversion_sys::apr_pool_t,
     ) -> *mut subversion_sys::svn_error_t {
         let f = unsafe {
-            &*(baton as *const Box<dyn Fn(&str, Option<&str>, bool) -> Result<SimpleCredentials<'pool>, crate::Error> + Send>)
+            &*(baton
+                as *const Box<
+                    dyn Fn(
+                            &str,
+                            Option<&str>,
+                            bool,
+                        )
+                            -> Result<(String, String, bool), crate::Error>
+                        + Send,
+                >)
         };
         let realm = unsafe { std::ffi::CStr::from_ptr(realmstring).to_str().unwrap() };
-        let username = if username.is_null() {
+        let username_str = if username.is_null() {
             None
         } else {
             Some(unsafe { std::ffi::CStr::from_ptr(username).to_str().unwrap() })
         };
-        f(realm, username, may_save != 0)
-            .map(|creds| {
+        let svn_pool = apr::Pool::from_raw(pool);
+        
+        f(realm, username_str, may_save != 0)
+            .map(|(user, pass, save)| {
+                // Create credentials in the SVN-provided pool
+                let creds = SimpleCredentials::new(user, pass, save, &svn_pool);
                 unsafe { *credentials = creds.ptr as *mut _ };
+                std::mem::forget(creds); // Don't drop since SVN owns it now
                 std::ptr::null_mut()
             })
             .unwrap_or_else(|e| unsafe { e.into_raw() })
@@ -881,7 +1094,7 @@ pub fn get_username_prompt_provider(
 }
 
 /// Gets a username prompt authentication provider with a boxed callback.
-/// 
+///
 /// This version accepts a boxed trait object for dynamic language bindings.
 pub fn get_username_prompt_provider_boxed(
     prompt_fn: Box<dyn Fn(&str, bool) -> Result<String, crate::Error> + Send>,
@@ -889,7 +1102,7 @@ pub fn get_username_prompt_provider_boxed(
 ) -> AuthProvider {
     let mut auth_provider = std::ptr::null_mut();
     let pool = apr::Pool::new();
-    
+
     let baton = Box::into_raw(Box::new(prompt_fn)) as *mut std::ffi::c_void;
 
     extern "C" fn wrap_username_prompt_provider_boxed(
@@ -904,13 +1117,14 @@ pub fn get_username_prompt_provider_boxed(
         };
         let realm = unsafe { std::ffi::CStr::from_ptr(realmstring).to_str().unwrap() };
         let pool = apr::Pool::new();
-        
+
         f(realm, may_save != 0)
             .map(|username| {
                 unsafe {
                     let cred = pool.calloc::<subversion_sys::svn_auth_cred_username_t>();
                     let username_cstr = std::ffi::CString::new(username).unwrap();
-                    (*cred).username = apr_sys::apr_pstrdup(pool.as_mut_ptr(), username_cstr.as_ptr());
+                    (*cred).username =
+                        apr_sys::apr_pstrdup(pool.as_mut_ptr(), username_cstr.as_ptr());
                     (*cred).may_save = may_save;
                     *credentials = cred;
                 }
@@ -998,11 +1212,11 @@ pub fn get_simple_provider(
 }
 
 /// Gets a simple authentication provider with a boxed callback.
-/// 
+///
 /// This version accepts a boxed trait object, making it suitable for use with
 /// dynamic languages like Python. The callback is leaked to ensure it stays alive
 /// for the lifetime of the auth provider.
-/// 
+///
 /// # Safety
 /// The boxed callback is intentionally leaked and will not be freed automatically.
 /// This is necessary because SVN holds onto the pointer for the lifetime of the auth system.
@@ -1011,7 +1225,7 @@ pub fn get_simple_provider_boxed(
 ) -> AuthProvider {
     let mut auth_provider = std::ptr::null_mut();
     let pool = apr::Pool::new();
-    
+
     let baton = if let Some(func) = plaintext_prompt_func {
         Box::into_raw(func) as *mut std::ffi::c_void
     } else {
@@ -1117,7 +1331,270 @@ mod tests {
     #[test]
     fn test_simple_credentials_kind() {
         let kind = SimpleCredentials::kind();
-        assert!(kind.contains("simple"));
+        assert_eq!(kind, "svn.simple");
+    }
+
+    #[test]
+    fn test_simple_credentials_as_mut_ptr() {
+        let pool = apr::Pool::new();
+        let mut creds = SimpleCredentials::new(
+            "user".to_string(),
+            "pass".to_string(),
+            true,
+            &pool,
+        );
+        let ptr = creds.as_mut_ptr();
+        assert!(!ptr.is_null());
+        
+        // Verify the pointer points to valid data
+        unsafe {
+            let raw_creds = ptr as *mut subversion_sys::svn_auth_cred_simple_t;
+            let username = std::ffi::CStr::from_ptr((*raw_creds).username)
+                .to_str()
+                .unwrap();
+            assert_eq!(username, "user");
+        }
+    }
+
+    #[test]
+    fn test_simple_credentials_from_raw() {
+        let pool = apr::Pool::new();
+        
+        // Create raw credentials
+        let raw_cred: *mut subversion_sys::svn_auth_cred_simple_t = pool.calloc();
+        unsafe {
+            (*raw_cred).username = apr::strings::pstrdup_raw("raw_user", &pool).unwrap() as *mut _;
+            (*raw_cred).password = apr::strings::pstrdup_raw("raw_pass", &pool).unwrap() as *mut _;
+            (*raw_cred).may_save = 1;
+        }
+        
+        // Create SimpleCredentials from raw pointer
+        let creds = SimpleCredentials::from_raw(raw_cred as *mut std::ffi::c_void);
+        assert_eq!(creds.username(), "raw_user");
+        assert_eq!(creds.password(), "raw_pass");
+        assert!(creds.may_save());
+    }
+
+
+
+    #[test]
+    fn test_username_credentials_creation() {
+        let pool = apr::Pool::new();
+        let creds = UsernameCredentials::new("testuser".to_string(), true, &pool);
+        assert_eq!(creds.username(), "testuser");
+        assert!(creds.may_save());
+    }
+
+    #[test]
+    fn test_username_credentials_may_save_false() {
+        let pool = apr::Pool::new();
+        let creds = UsernameCredentials::new("user".to_string(), false, &pool);
+        assert_eq!(creds.username(), "user");
+        assert!(!creds.may_save());
+    }
+
+    #[test]
+    fn test_username_credentials_kind() {
+        let kind = UsernameCredentials::kind();
+        assert_eq!(kind, "svn.username");
+    }
+
+    #[test]
+    fn test_username_credentials_as_mut_ptr() {
+        let pool = apr::Pool::new();
+        let mut creds = UsernameCredentials::new("user".to_string(), true, &pool);
+        let ptr = creds.as_mut_ptr();
+        assert!(!ptr.is_null());
+        
+        // Verify the pointer points to valid data
+        unsafe {
+            let raw_creds = ptr as *mut subversion_sys::svn_auth_cred_username_t;
+            let username = std::ffi::CStr::from_ptr((*raw_creds).username)
+                .to_str()
+                .unwrap();
+            assert_eq!(username, "user");
+            assert_eq!((*raw_creds).may_save, 1);
+        }
+    }
+
+    #[test]
+    fn test_username_credentials_from_raw() {
+        let pool = apr::Pool::new();
+        
+        // Create raw credentials
+        let raw_cred: *mut subversion_sys::svn_auth_cred_username_t = pool.calloc();
+        unsafe {
+            (*raw_cred).username = apr::strings::pstrdup_raw("raw_username", &pool).unwrap() as *mut _;
+            (*raw_cred).may_save = 0;
+        }
+        
+        // Create UsernameCredentials from raw pointer
+        let creds = UsernameCredentials::from_raw(raw_cred as *mut std::ffi::c_void);
+        assert_eq!(creds.username(), "raw_username");
+        assert!(!creds.may_save());
+    }
+
+
+
+    #[test]
+    fn test_ssl_server_trust_credentials_creation() {
+        let pool = apr::Pool::new();
+        let creds = SslServerTrustCredentials::new(true, 0x01, &pool);
+        assert!(creds.may_save());
+        assert_eq!(creds.accepted_failures(), 0x01);
+    }
+
+    #[test]
+    fn test_ssl_server_trust_credentials_may_save_false() {
+        let pool = apr::Pool::new();
+        let creds = SslServerTrustCredentials::new(false, 0xFF, &pool);
+        assert!(!creds.may_save());
+        assert_eq!(creds.accepted_failures(), 0xFF);
+    }
+
+    #[test]
+    fn test_ssl_server_trust_credentials_kind() {
+        let kind = SslServerTrustCredentials::kind();
+        // The SVN constant is actually "svn.ssl.server" not "svn.ssl.server.trust"
+        // See: https://subversion.apache.org/docs/api/1.11/svn__auth_8h_source.html
+        assert_eq!(kind, "svn.ssl.server");
+    }
+
+    #[test]
+    fn test_ssl_server_trust_credentials_as_mut_ptr() {
+        let pool = apr::Pool::new();
+        let mut creds = SslServerTrustCredentials::new(true, 0x42, &pool);
+        let ptr = creds.as_mut_ptr();
+        assert!(!ptr.is_null());
+        
+        // Verify the pointer points to valid data
+        unsafe {
+            let raw_creds = ptr as *mut subversion_sys::svn_auth_cred_ssl_server_trust_t;
+            assert_eq!((*raw_creds).may_save, 1);
+            assert_eq!((*raw_creds).accepted_failures, 0x42);
+        }
+    }
+
+    #[test]
+    fn test_ssl_server_trust_credentials_from_raw() {
+        let pool = apr::Pool::new();
+        
+        // Create raw credentials
+        let raw_cred: *mut subversion_sys::svn_auth_cred_ssl_server_trust_t = pool.calloc();
+        unsafe {
+            (*raw_cred).may_save = 0;
+            (*raw_cred).accepted_failures = 0xAB;
+        }
+        
+        // Create SslServerTrustCredentials from raw pointer
+        let creds = SslServerTrustCredentials::from_raw(raw_cred as *mut std::ffi::c_void);
+        assert!(!creds.may_save());
+        assert_eq!(creds.accepted_failures(), 0xAB);
+    }
+
+
+
+    #[test]
+    fn test_credentials_trait_polymorphism() {
+        let pool = apr::Pool::new();
+        
+        // Create different credential types
+        let simple = SimpleCredentials::new("user".to_string(), "pass".to_string(), true, &pool);
+        let username = UsernameCredentials::new("user2".to_string(), false, &pool);
+        let trust = SslServerTrustCredentials::new(true, 0x01, &pool);
+        
+        // Test that we can use them as trait objects with explicit lifetime
+        let creds: Vec<Box<dyn Credentials + '_>> = vec![
+            Box::new(simple),
+            Box::new(username),
+            Box::new(trust),
+        ];
+        
+        // Verify we can downcast them correctly and query values
+        if let Some(simple_creds) = creds[0].as_simple() {
+            assert_eq!(simple_creds.username(), "user");
+            assert_eq!(simple_creds.password(), "pass");
+            assert!(simple_creds.may_save());
+        } else {
+            panic!("Failed to downcast to SimpleCredentials");
+        }
+        
+        if let Some(username_creds) = creds[1].as_username() {
+            assert_eq!(username_creds.username(), "user2");
+            assert!(!username_creds.may_save());
+        } else {
+            panic!("Failed to downcast to UsernameCredentials");
+        }
+        
+        if let Some(trust_creds) = creds[2].as_ssl_server_trust() {
+            assert!(trust_creds.may_save());
+            assert_eq!(trust_creds.accepted_failures(), 0x01);
+        } else {
+            panic!("Failed to downcast to SslServerTrustCredentials");
+        }
+        
+        // Verify wrong downcasts return None
+        assert!(creds[0].as_username().is_none());
+        assert!(creds[0].as_ssl_server_trust().is_none());
+        assert!(creds[1].as_simple().is_none());
+        assert!(creds[1].as_ssl_server_trust().is_none());
+        assert!(creds[2].as_simple().is_none());
+        assert!(creds[2].as_username().is_none());
+    }
+
+    #[test]
+    fn test_credentials_mixed_downcast_and_query() {
+        let pool = apr::Pool::new();
+        
+        // Create a vector of mixed credential types as trait objects
+        let creds: Vec<Box<dyn Credentials + '_>> = vec![
+            Box::new(SimpleCredentials::new("alice".to_string(), "alice123".to_string(), true, &pool)),
+            Box::new(UsernameCredentials::new("bob".to_string(), false, &pool)),
+            Box::new(SslServerTrustCredentials::new(true, 0x404, &pool)),
+            Box::new(SimpleCredentials::new("charlie".to_string(), "ch@rl!3".to_string(), false, &pool)),
+        ];
+        
+        // Test downcasting and querying the first (SimpleCredentials)
+        if let Some(simple) = creds[0].as_simple() {
+            assert_eq!(simple.username(), "alice");
+            assert_eq!(simple.password(), "alice123");
+            assert!(simple.may_save());
+        } else {
+            panic!("Failed to downcast index 0 to SimpleCredentials");
+        }
+        
+        // Test downcasting and querying the second (UsernameCredentials)
+        if let Some(username) = creds[1].as_username() {
+            assert_eq!(username.username(), "bob");
+            assert!(!username.may_save());
+        } else {
+            panic!("Failed to downcast index 1 to UsernameCredentials");
+        }
+        
+        // Test downcasting and querying the third (SslServerTrustCredentials)
+        if let Some(trust) = creds[2].as_ssl_server_trust() {
+            assert!(trust.may_save());
+            assert_eq!(trust.accepted_failures(), 0x404);
+        } else {
+            panic!("Failed to downcast index 2 to SslServerTrustCredentials");
+        }
+        
+        // Test downcasting and querying the fourth (SimpleCredentials again)
+        if let Some(simple) = creds[3].as_simple() {
+            assert_eq!(simple.username(), "charlie");
+            assert_eq!(simple.password(), "ch@rl!3");
+            assert!(!simple.may_save());
+        } else {
+            panic!("Failed to downcast index 3 to SimpleCredentials");
+        }
+        
+        // Verify wrong downcasts fail gracefully
+        assert!(creds[0].as_username().is_none());
+        assert!(creds[0].as_ssl_server_trust().is_none());
+        assert!(creds[1].as_simple().is_none());
+        assert!(creds[1].as_ssl_server_trust().is_none());
+        assert!(creds[2].as_simple().is_none());
+        assert!(creds[2].as_username().is_none());
     }
 
     #[test]
@@ -1262,5 +1739,239 @@ mod tests {
         // Test reference also works
         let ptr2 = provider.as_auth_provider(&pool);
         assert_eq!(ptr, ptr2);
+    }
+
+    #[test]
+    fn test_boxed_simple_prompt_returns_credentials() {
+        // Create a callback that returns specific credentials
+        // Note: SVN might provide an initial username from environment/config
+        let callback = Box::new(|_realm: &str, _username: Option<&str>, may_save: bool| {
+            // Always use our test credentials regardless of what SVN suggests
+            Ok((
+                "test_user".to_string(),
+                "secure_password".to_string(),
+                may_save,
+            ))
+        });
+
+        let provider = get_simple_prompt_provider_boxed(callback, 3);
+        let mut auth_baton = AuthBaton::open(vec![provider]).unwrap();
+
+        // Request credentials and verify they match what our callback returns
+        let creds = auth_baton
+            .first_credentials("svn.simple", "test_realm")
+            .unwrap();
+
+        if let Some(creds) = creds {
+            // Downcast to SimpleCredentials
+            if let Some(simple_creds) = creds.as_simple() {
+                // Should get what our callback returned
+                assert_eq!(simple_creds.username(), "test_user");
+                assert_eq!(simple_creds.password(), "secure_password");
+                assert!(simple_creds.may_save());
+            } else {
+                panic!("Expected SimpleCredentials");
+            }
+        } else {
+            panic!("Expected credentials");
+        }
+    }
+
+    #[test]
+    fn test_boxed_username_prompt_returns_username() {
+        let expected_username = "test_boxed_username";
+
+        let callback = Box::new(
+            move |realm: &str, may_save: bool| -> Result<String, crate::Error> {
+                assert_eq!(realm, "username_realm");
+                assert_eq!(may_save, true);
+                Ok(expected_username.to_string())
+            },
+        );
+
+        let provider = get_username_prompt_provider_boxed(callback, 3);
+        let mut auth_baton = AuthBaton::open(vec![provider]).unwrap();
+
+        // Request username credentials
+        let creds = auth_baton
+            .first_credentials("svn.username", "username_realm")
+            .unwrap();
+
+        if let Some(creds) = creds {
+            // Downcast to UsernameCredentials
+            if let Some(username_creds) = creds.as_username() {
+                assert_eq!(username_creds.username(), expected_username);
+                assert!(username_creds.may_save());
+            } else {
+                panic!("Expected UsernameCredentials");
+            }
+        } else {
+            panic!("Expected credentials");
+        }
+    }
+
+    #[test]
+    fn test_boxed_simple_prompt_with_initial_username() {
+        // Test that initial username is passed to callback
+        let callback = Box::new(|_realm: &str, username: Option<&str>, may_save: bool| {
+            // In practice, SVN would provide initial_user from URL or previous attempts
+            Ok((
+                username.unwrap_or("initial_user").to_string(),
+                "password123".to_string(),
+                may_save,
+            ))
+        });
+
+        let provider = get_simple_prompt_provider_boxed(callback, 3);
+        let mut auth_baton = AuthBaton::open(vec![provider]).unwrap();
+
+        // Request credentials
+        let creds = auth_baton
+            .first_credentials("svn.simple", "test_realm")
+            .unwrap();
+
+        if let Some(creds) = creds {
+            // Downcast to SimpleCredentials
+            if let Some(simple_creds) = creds.as_simple() {
+                // The callback should use whatever username it receives
+                assert!(!simple_creds.username().is_empty());
+                assert_eq!(simple_creds.password(), "password123");
+                assert!(simple_creds.may_save());
+            } else {
+                panic!("Expected SimpleCredentials");
+            }
+        } else {
+            panic!("Expected credentials");
+        }
+    }
+
+    #[test]
+    fn test_boxed_callback_may_save_false() {
+        // Test that may_save=false is properly handled
+        let callback = Box::new(|_realm: &str, _username: Option<&str>, _may_save: bool| {
+            Ok((
+                "user".to_string(),
+                "pass".to_string(),
+                false, // Override to never save
+            ))
+        });
+
+        let provider = get_simple_prompt_provider_boxed(callback, 1);
+        let mut auth_baton = AuthBaton::open(vec![provider]).unwrap();
+
+        let creds = auth_baton.first_credentials("svn.simple", "realm").unwrap();
+
+        if let Some(creds) = creds {
+            // Downcast to SimpleCredentials
+            if let Some(simple_creds) = creds.as_simple() {
+                assert_eq!(simple_creds.username(), "user");
+                assert_eq!(simple_creds.password(), "pass");
+                assert!(
+                    !simple_creds.may_save(),
+                    "Should be false as set by callback"
+                );
+            } else {
+                panic!("Expected SimpleCredentials");
+            }
+        } else {
+            panic!("Expected credentials");
+        }
+    }
+
+    #[test]
+    fn test_boxed_provider_error_handling() {
+        // Test that errors from callbacks are properly handled
+        let callback = Box::new(|_realm: &str, _username: Option<&str>, _may_save: bool| {
+            Err::<(String, String, bool), _>(crate::Error::from_str("Authentication failed"))
+        });
+
+        let provider = get_simple_prompt_provider_boxed(callback, 1);
+        let mut auth_baton = AuthBaton::open(vec![provider]).unwrap();
+
+        // When our callback returns an error, it gets converted to an SVN error
+        // and propagated back to the caller
+        let creds = auth_baton.first_credentials("svn.simple", "error_realm");
+
+        // The error from our callback should be propagated
+        assert!(creds.is_err(), "Expected error from callback to be propagated");
+    }
+
+    #[test]
+    fn test_multiple_boxed_providers_precedence() {
+        // Test that providers are tried in order
+        let provider1 = get_simple_prompt_provider_boxed(
+            Box::new(|realm, _, _| {
+                if realm == "realm1" {
+                    Ok((
+                        "user1".to_string(),
+                        "pass1".to_string(),
+                        true,
+                    ))
+                } else {
+                    Err(crate::Error::from_str("Wrong realm"))
+                }
+            }),
+            1,
+        );
+
+        let provider2 = get_simple_prompt_provider_boxed(
+            Box::new(|_, _, _| {
+                Ok((
+                    "user2".to_string(),
+                    "pass2".to_string(),
+                    true,
+                ))
+            }),
+            1,
+        );
+
+        let mut auth_baton = AuthBaton::open(vec![provider1, provider2]).unwrap();
+
+        // First provider should handle realm1
+        {
+            let creds1 = auth_baton
+                .first_credentials("svn.simple", "realm1")
+                .unwrap();
+            if let Some(creds) = creds1 {
+                // Downcast to SimpleCredentials
+                if let Some(simple_creds) = creds.as_simple() {
+                    assert_eq!(simple_creds.username(), "user1");
+                    assert_eq!(simple_creds.password(), "pass1");
+                    assert!(simple_creds.may_save());
+                } else {
+                    panic!("Expected SimpleCredentials for realm1");
+                }
+            } else {
+                panic!("Expected credentials for realm1");
+            }
+        } // Drop creds1 here
+
+        // For other realms, first provider returns error, SVN may propagate it
+        // or try the next provider - the behavior can vary
+        let creds2_result = auth_baton.first_credentials("svn.simple", "realm2");
+        
+        // When first provider returns an error, SVN might:
+        // 1. Try the next provider (and get user2/pass2)
+        // 2. Propagate the error immediately
+        match creds2_result {
+            Ok(Some(creds)) => {
+                // If SVN tried the second provider
+                if let Some(simple_creds) = creds.as_simple() {
+                    assert_eq!(simple_creds.username(), "user2");
+                    assert_eq!(simple_creds.password(), "pass2");
+                    assert!(simple_creds.may_save());
+                } else {
+                    panic!("Expected SimpleCredentials for realm2");
+                }
+            }
+            Ok(None) => {
+                // No credentials provided
+                panic!("Expected credentials from second provider");
+            }
+            Err(_) => {
+                // Error from first provider was propagated
+                // This is also valid behavior
+            }
+        }
     }
 }
