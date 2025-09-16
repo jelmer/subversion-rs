@@ -46,17 +46,17 @@ pub trait Credentials {
     fn from_raw(cred: *mut std::ffi::c_void) -> Self
     where
         Self: Sized;
-    
+
     /// Try to downcast to SimpleCredentials
     fn as_simple(&self) -> Option<&SimpleCredentials> {
         None
     }
-    
+
     /// Try to downcast to UsernameCredentials
     fn as_username(&self) -> Option<&UsernameCredentials> {
         None
     }
-    
+
     /// Try to downcast to SslServerTrustCredentials  
     fn as_ssl_server_trust(&self) -> Option<&SslServerTrustCredentials> {
         None
@@ -113,7 +113,6 @@ impl<'pool> SimpleCredentials<'pool> {
             _pool: std::marker::PhantomData,
         }
     }
-    
 }
 
 impl<'pool> Credentials for SimpleCredentials<'pool> {
@@ -135,7 +134,7 @@ impl<'pool> Credentials for SimpleCredentials<'pool> {
             _pool: std::marker::PhantomData,
         }
     }
-    
+
     fn as_simple(&self) -> Option<&SimpleCredentials> {
         Some(self)
     }
@@ -198,7 +197,7 @@ impl<'pool> Credentials for UsernameCredentials<'pool> {
             _pool: std::marker::PhantomData,
         }
     }
-    
+
     fn as_username(&self) -> Option<&UsernameCredentials> {
         Some(self)
     }
@@ -257,7 +256,7 @@ impl<'pool> Credentials for SslServerTrustCredentials<'pool> {
             _pool: std::marker::PhantomData,
         }
     }
-    
+
     fn as_ssl_server_trust(&self) -> Option<&SslServerTrustCredentials> {
         Some(self)
     }
@@ -1003,12 +1002,7 @@ pub fn get_simple_prompt_provider_boxed(
         let f = unsafe {
             &*(baton
                 as *const Box<
-                    dyn Fn(
-                            &str,
-                            Option<&str>,
-                            bool,
-                        )
-                            -> Result<(String, String, bool), crate::Error>
+                    dyn Fn(&str, Option<&str>, bool) -> Result<(String, String, bool), crate::Error>
                         + Send,
                 >)
         };
@@ -1019,7 +1013,7 @@ pub fn get_simple_prompt_provider_boxed(
             Some(unsafe { std::ffi::CStr::from_ptr(username).to_str().unwrap() })
         };
         let svn_pool = apr::Pool::from_raw(pool);
-        
+
         f(realm, username_str, may_save != 0)
             .map(|(user, pass, save)| {
                 // Create credentials in the SVN-provided pool
@@ -1337,15 +1331,10 @@ mod tests {
     #[test]
     fn test_simple_credentials_as_mut_ptr() {
         let pool = apr::Pool::new();
-        let mut creds = SimpleCredentials::new(
-            "user".to_string(),
-            "pass".to_string(),
-            true,
-            &pool,
-        );
+        let mut creds = SimpleCredentials::new("user".to_string(), "pass".to_string(), true, &pool);
         let ptr = creds.as_mut_ptr();
         assert!(!ptr.is_null());
-        
+
         // Verify the pointer points to valid data
         unsafe {
             let raw_creds = ptr as *mut subversion_sys::svn_auth_cred_simple_t;
@@ -1359,7 +1348,7 @@ mod tests {
     #[test]
     fn test_simple_credentials_from_raw() {
         let pool = apr::Pool::new();
-        
+
         // Create raw credentials
         let raw_cred: *mut subversion_sys::svn_auth_cred_simple_t = pool.calloc();
         unsafe {
@@ -1367,15 +1356,13 @@ mod tests {
             (*raw_cred).password = apr::strings::pstrdup_raw("raw_pass", &pool).unwrap() as *mut _;
             (*raw_cred).may_save = 1;
         }
-        
+
         // Create SimpleCredentials from raw pointer
         let creds = SimpleCredentials::from_raw(raw_cred as *mut std::ffi::c_void);
         assert_eq!(creds.username(), "raw_user");
         assert_eq!(creds.password(), "raw_pass");
         assert!(creds.may_save());
     }
-
-
 
     #[test]
     fn test_username_credentials_creation() {
@@ -1405,7 +1392,7 @@ mod tests {
         let mut creds = UsernameCredentials::new("user".to_string(), true, &pool);
         let ptr = creds.as_mut_ptr();
         assert!(!ptr.is_null());
-        
+
         // Verify the pointer points to valid data
         unsafe {
             let raw_creds = ptr as *mut subversion_sys::svn_auth_cred_username_t;
@@ -1420,21 +1407,20 @@ mod tests {
     #[test]
     fn test_username_credentials_from_raw() {
         let pool = apr::Pool::new();
-        
+
         // Create raw credentials
         let raw_cred: *mut subversion_sys::svn_auth_cred_username_t = pool.calloc();
         unsafe {
-            (*raw_cred).username = apr::strings::pstrdup_raw("raw_username", &pool).unwrap() as *mut _;
+            (*raw_cred).username =
+                apr::strings::pstrdup_raw("raw_username", &pool).unwrap() as *mut _;
             (*raw_cred).may_save = 0;
         }
-        
+
         // Create UsernameCredentials from raw pointer
         let creds = UsernameCredentials::from_raw(raw_cred as *mut std::ffi::c_void);
         assert_eq!(creds.username(), "raw_username");
         assert!(!creds.may_save());
     }
-
-
 
     #[test]
     fn test_ssl_server_trust_credentials_creation() {
@@ -1466,7 +1452,7 @@ mod tests {
         let mut creds = SslServerTrustCredentials::new(true, 0x42, &pool);
         let ptr = creds.as_mut_ptr();
         assert!(!ptr.is_null());
-        
+
         // Verify the pointer points to valid data
         unsafe {
             let raw_creds = ptr as *mut subversion_sys::svn_auth_cred_ssl_server_trust_t;
@@ -1478,38 +1464,33 @@ mod tests {
     #[test]
     fn test_ssl_server_trust_credentials_from_raw() {
         let pool = apr::Pool::new();
-        
+
         // Create raw credentials
         let raw_cred: *mut subversion_sys::svn_auth_cred_ssl_server_trust_t = pool.calloc();
         unsafe {
             (*raw_cred).may_save = 0;
             (*raw_cred).accepted_failures = 0xAB;
         }
-        
+
         // Create SslServerTrustCredentials from raw pointer
         let creds = SslServerTrustCredentials::from_raw(raw_cred as *mut std::ffi::c_void);
         assert!(!creds.may_save());
         assert_eq!(creds.accepted_failures(), 0xAB);
     }
 
-
-
     #[test]
     fn test_credentials_trait_polymorphism() {
         let pool = apr::Pool::new();
-        
+
         // Create different credential types
         let simple = SimpleCredentials::new("user".to_string(), "pass".to_string(), true, &pool);
         let username = UsernameCredentials::new("user2".to_string(), false, &pool);
         let trust = SslServerTrustCredentials::new(true, 0x01, &pool);
-        
+
         // Test that we can use them as trait objects with explicit lifetime
-        let creds: Vec<Box<dyn Credentials + '_>> = vec![
-            Box::new(simple),
-            Box::new(username),
-            Box::new(trust),
-        ];
-        
+        let creds: Vec<Box<dyn Credentials + '_>> =
+            vec![Box::new(simple), Box::new(username), Box::new(trust)];
+
         // Verify we can downcast them correctly and query values
         if let Some(simple_creds) = creds[0].as_simple() {
             assert_eq!(simple_creds.username(), "user");
@@ -1518,21 +1499,21 @@ mod tests {
         } else {
             panic!("Failed to downcast to SimpleCredentials");
         }
-        
+
         if let Some(username_creds) = creds[1].as_username() {
             assert_eq!(username_creds.username(), "user2");
             assert!(!username_creds.may_save());
         } else {
             panic!("Failed to downcast to UsernameCredentials");
         }
-        
+
         if let Some(trust_creds) = creds[2].as_ssl_server_trust() {
             assert!(trust_creds.may_save());
             assert_eq!(trust_creds.accepted_failures(), 0x01);
         } else {
             panic!("Failed to downcast to SslServerTrustCredentials");
         }
-        
+
         // Verify wrong downcasts return None
         assert!(creds[0].as_username().is_none());
         assert!(creds[0].as_ssl_server_trust().is_none());
@@ -1545,15 +1526,25 @@ mod tests {
     #[test]
     fn test_credentials_mixed_downcast_and_query() {
         let pool = apr::Pool::new();
-        
+
         // Create a vector of mixed credential types as trait objects
         let creds: Vec<Box<dyn Credentials + '_>> = vec![
-            Box::new(SimpleCredentials::new("alice".to_string(), "alice123".to_string(), true, &pool)),
+            Box::new(SimpleCredentials::new(
+                "alice".to_string(),
+                "alice123".to_string(),
+                true,
+                &pool,
+            )),
             Box::new(UsernameCredentials::new("bob".to_string(), false, &pool)),
             Box::new(SslServerTrustCredentials::new(true, 0x404, &pool)),
-            Box::new(SimpleCredentials::new("charlie".to_string(), "ch@rl!3".to_string(), false, &pool)),
+            Box::new(SimpleCredentials::new(
+                "charlie".to_string(),
+                "ch@rl!3".to_string(),
+                false,
+                &pool,
+            )),
         ];
-        
+
         // Test downcasting and querying the first (SimpleCredentials)
         if let Some(simple) = creds[0].as_simple() {
             assert_eq!(simple.username(), "alice");
@@ -1562,7 +1553,7 @@ mod tests {
         } else {
             panic!("Failed to downcast index 0 to SimpleCredentials");
         }
-        
+
         // Test downcasting and querying the second (UsernameCredentials)
         if let Some(username) = creds[1].as_username() {
             assert_eq!(username.username(), "bob");
@@ -1570,7 +1561,7 @@ mod tests {
         } else {
             panic!("Failed to downcast index 1 to UsernameCredentials");
         }
-        
+
         // Test downcasting and querying the third (SslServerTrustCredentials)
         if let Some(trust) = creds[2].as_ssl_server_trust() {
             assert!(trust.may_save());
@@ -1578,7 +1569,7 @@ mod tests {
         } else {
             panic!("Failed to downcast index 2 to SslServerTrustCredentials");
         }
-        
+
         // Test downcasting and querying the fourth (SimpleCredentials again)
         if let Some(simple) = creds[3].as_simple() {
             assert_eq!(simple.username(), "charlie");
@@ -1587,7 +1578,7 @@ mod tests {
         } else {
             panic!("Failed to downcast index 3 to SimpleCredentials");
         }
-        
+
         // Verify wrong downcasts fail gracefully
         assert!(creds[0].as_username().is_none());
         assert!(creds[0].as_ssl_server_trust().is_none());
@@ -1893,7 +1884,10 @@ mod tests {
         let creds = auth_baton.first_credentials("svn.simple", "error_realm");
 
         // The error from our callback should be propagated
-        assert!(creds.is_err(), "Expected error from callback to be propagated");
+        assert!(
+            creds.is_err(),
+            "Expected error from callback to be propagated"
+        );
     }
 
     #[test]
@@ -1902,11 +1896,7 @@ mod tests {
         let provider1 = get_simple_prompt_provider_boxed(
             Box::new(|realm, _, _| {
                 if realm == "realm1" {
-                    Ok((
-                        "user1".to_string(),
-                        "pass1".to_string(),
-                        true,
-                    ))
+                    Ok(("user1".to_string(), "pass1".to_string(), true))
                 } else {
                     Err(crate::Error::from_str("Wrong realm"))
                 }
@@ -1915,13 +1905,7 @@ mod tests {
         );
 
         let provider2 = get_simple_prompt_provider_boxed(
-            Box::new(|_, _, _| {
-                Ok((
-                    "user2".to_string(),
-                    "pass2".to_string(),
-                    true,
-                ))
-            }),
+            Box::new(|_, _, _| Ok(("user2".to_string(), "pass2".to_string(), true))),
             1,
         );
 
@@ -1949,7 +1933,7 @@ mod tests {
         // For other realms, first provider returns error, SVN may propagate it
         // or try the next provider - the behavior can vary
         let creds2_result = auth_baton.first_credentials("svn.simple", "realm2");
-        
+
         // When first provider returns an error, SVN might:
         // 1. Try the next provider (and get user2/pass2)
         // 2. Propagate the error immediately

@@ -54,7 +54,8 @@ impl VersionExtended {
     /// Get the extended version information for the current library
     pub fn get(verbose: bool) -> Self {
         unsafe {
-            let ptr = subversion_sys::svn_version_extended(verbose as i32, apr::Pool::new().as_mut_ptr());
+            let ptr =
+                subversion_sys::svn_version_extended(verbose as i32, apr::Pool::new().as_mut_ptr());
             VersionExtended(ptr)
         }
     }
@@ -102,7 +103,11 @@ impl VersionExtended {
             if copyright_ptr.is_null() {
                 None
             } else {
-                Some(std::ffi::CStr::from_ptr(copyright_ptr).to_str().unwrap_or(""))
+                Some(
+                    std::ffi::CStr::from_ptr(copyright_ptr)
+                        .to_str()
+                        .unwrap_or(""),
+                )
             }
         }
     }
@@ -143,7 +148,7 @@ mod tests {
     #[test]
     fn test_version_extended() {
         let ext = VersionExtended::get(false);
-        
+
         // These might return None depending on build configuration
         let _build_date = ext.build_date();
         let _build_time = ext.build_time();
@@ -151,17 +156,17 @@ mod tests {
         let _copyright = ext.copyright();
         let _runtime_host = ext.runtime_host();
         let _runtime_osname = ext.runtime_osname();
-        
+
         // Just verify they don't crash
     }
 
     #[test]
     fn test_version_extended_verbose() {
         let ext = VersionExtended::get(true);
-        
+
         // Verbose mode might provide more information
         let _copyright = ext.copyright();
-        
+
         // At least copyright should usually be available
         // but we don't assert since it depends on the build
     }

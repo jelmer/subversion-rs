@@ -502,9 +502,9 @@ impl Fs {
     /// Get filesystem information
     pub fn info(&self) -> Result<FsInfo, Error> {
         let pool = apr::Pool::new();
-        
+
         let mut info_ptr: *const subversion_sys::svn_fs_info_placeholder_t = std::ptr::null();
-        
+
         let ret = unsafe {
             subversion_sys::svn_fs_info(
                 &mut info_ptr,
@@ -523,7 +523,7 @@ impl Fs {
         // Parse the info structure from svn_fs_info_placeholder_t
         unsafe {
             let info = &*info_ptr;
-            
+
             Ok(FsInfo {
                 fs_type: if info.fs_type.is_null() {
                     None
@@ -531,7 +531,7 @@ impl Fs {
                     Some(
                         std::ffi::CStr::from_ptr(info.fs_type)
                             .to_string_lossy()
-                            .into_owned()
+                            .into_owned(),
                     )
                 },
             })
@@ -573,11 +573,11 @@ pub fn pack(
 ) -> Result<(), Error> {
     let path_cstr = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     let pool = apr::Pool::new();
-    
+
     // Create notify callback wrapper
     let notify_baton = notify.map(|f| Box::into_raw(Box::new(f)) as *mut std::ffi::c_void);
     let cancel_baton = cancel.map(|f| Box::into_raw(Box::new(f)) as *mut std::ffi::c_void);
-    
+
     extern "C" fn notify_wrapper(
         baton: *mut std::ffi::c_void,
         shard: i64,
@@ -590,19 +590,17 @@ pub fn pack(
         }
         std::ptr::null_mut()
     }
-    
+
     extern "C" fn cancel_wrapper(baton: *mut std::ffi::c_void) -> *mut subversion_sys::svn_error_t {
         if !baton.is_null() {
             let cancel = unsafe { &*(baton as *const Box<dyn Fn() -> bool + Send>) };
             if cancel() {
-                return unsafe {
-                    Error::from_str("Operation cancelled").into_raw()
-                };
+                return unsafe { Error::from_str("Operation cancelled").into_raw() };
             }
         }
         std::ptr::null_mut()
     }
-    
+
     let err = unsafe {
         subversion_sys::svn_fs_pack(
             path_cstr.as_ptr(),
@@ -613,7 +611,7 @@ pub fn pack(
             pool.as_mut_ptr(),
         )
     };
-    
+
     // Clean up callbacks
     if let Some(baton) = notify_baton {
         unsafe {
@@ -625,7 +623,7 @@ pub fn pack(
             let _ = Box::from_raw(baton as *mut Box<dyn Fn() -> bool + Send>);
         }
     }
-    
+
     svn_result(err)?;
     Ok(())
 }
@@ -640,14 +638,14 @@ pub fn verify(
 ) -> Result<(), Error> {
     let path_cstr = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     let pool = apr::Pool::new();
-    
+
     let start_rev = start.map(|r| r.0).unwrap_or(0);
     let end_rev = end.map(|r| r.0).unwrap_or(-1); // SVN_INVALID_REVNUM means HEAD
-    
+
     // Create callback wrappers
     let notify_baton = notify.map(|f| Box::into_raw(Box::new(f)) as *mut std::ffi::c_void);
     let cancel_baton = cancel.map(|f| Box::into_raw(Box::new(f)) as *mut std::ffi::c_void);
-    
+
     extern "C" fn notify_wrapper(
         revision: subversion_sys::svn_revnum_t,
         baton: *mut std::ffi::c_void,
@@ -658,19 +656,17 @@ pub fn verify(
             notify(Revnum(revision), "Verifying");
         }
     }
-    
+
     extern "C" fn cancel_wrapper(baton: *mut std::ffi::c_void) -> *mut subversion_sys::svn_error_t {
         if !baton.is_null() {
             let cancel = unsafe { &*(baton as *const Box<dyn Fn() -> bool + Send>) };
             if cancel() {
-                return unsafe {
-                    Error::from_str("Operation cancelled").into_raw()
-                };
+                return unsafe { Error::from_str("Operation cancelled").into_raw() };
             }
         }
         std::ptr::null_mut()
     }
-    
+
     let err = unsafe {
         subversion_sys::svn_fs_verify(
             path_cstr.as_ptr(),
@@ -684,7 +680,7 @@ pub fn verify(
             pool.as_mut_ptr(),
         )
     };
-    
+
     // Clean up callbacks
     if let Some(baton) = notify_baton {
         unsafe {
@@ -696,7 +692,7 @@ pub fn verify(
             let _ = Box::from_raw(baton as *mut Box<dyn Fn() -> bool + Send>);
         }
     }
-    
+
     svn_result(err)?;
     Ok(())
 }
@@ -713,11 +709,11 @@ pub fn hotcopy(
     let src_cstr = std::ffi::CString::new(src_path.to_str().unwrap()).unwrap();
     let dst_cstr = std::ffi::CString::new(dst_path.to_str().unwrap()).unwrap();
     let pool = apr::Pool::new();
-    
+
     // Create callback wrappers
     let notify_baton = notify.map(|f| Box::into_raw(Box::new(f)) as *mut std::ffi::c_void);
     let cancel_baton = cancel.map(|f| Box::into_raw(Box::new(f)) as *mut std::ffi::c_void);
-    
+
     extern "C" fn notify_wrapper(
         baton: *mut std::ffi::c_void,
         start_revision: subversion_sys::svn_revnum_t,
@@ -726,22 +722,23 @@ pub fn hotcopy(
     ) {
         if !baton.is_null() {
             let notify = unsafe { &*(baton as *const Box<dyn Fn(&str) + Send>) };
-            notify(&format!("Hotcopy revisions {} to {}", start_revision, end_revision));
+            notify(&format!(
+                "Hotcopy revisions {} to {}",
+                start_revision, end_revision
+            ));
         }
     }
-    
+
     extern "C" fn cancel_wrapper(baton: *mut std::ffi::c_void) -> *mut subversion_sys::svn_error_t {
         if !baton.is_null() {
             let cancel = unsafe { &*(baton as *const Box<dyn Fn() -> bool + Send>) };
             if cancel() {
-                return unsafe {
-                    Error::from_str("Operation cancelled").into_raw()
-                };
+                return unsafe { Error::from_str("Operation cancelled").into_raw() };
             }
         }
         std::ptr::null_mut()
     }
-    
+
     let err = unsafe {
         subversion_sys::svn_fs_hotcopy3(
             src_cstr.as_ptr(),
@@ -755,7 +752,7 @@ pub fn hotcopy(
             pool.as_mut_ptr(),
         )
     };
-    
+
     // Clean up callbacks
     if let Some(baton) = notify_baton {
         unsafe {
@@ -767,11 +764,10 @@ pub fn hotcopy(
             let _ = Box::from_raw(baton as *mut Box<dyn Fn() -> bool + Send>);
         }
     }
-    
+
     svn_result(err)?;
     Ok(())
 }
-
 
 /// Recover a filesystem at the given path.
 pub fn recover(
@@ -780,21 +776,19 @@ pub fn recover(
 ) -> Result<(), Error> {
     let path_cstr = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     let pool = apr::Pool::new();
-    
+
     let cancel_baton = cancel.map(|f| Box::into_raw(Box::new(f)) as *mut std::ffi::c_void);
-    
+
     extern "C" fn cancel_wrapper(baton: *mut std::ffi::c_void) -> *mut subversion_sys::svn_error_t {
         if !baton.is_null() {
             let cancel = unsafe { &*(baton as *const Box<dyn Fn() -> bool + Send>) };
             if cancel() {
-                return unsafe {
-                    Error::from_str("Operation cancelled").into_raw()
-                };
+                return unsafe { Error::from_str("Operation cancelled").into_raw() };
             }
         }
         std::ptr::null_mut()
     }
-    
+
     let err = unsafe {
         subversion_sys::svn_fs_recover(
             path_cstr.as_ptr(),
@@ -803,14 +797,14 @@ pub fn recover(
             pool.as_mut_ptr(),
         )
     };
-    
+
     // Clean up callback
     if let Some(baton) = cancel_baton {
         unsafe {
             let _ = Box::from_raw(baton as *mut Box<dyn Fn() -> bool + Send>);
         }
     }
-    
+
     svn_result(err)?;
     Ok(())
 }
@@ -1341,7 +1335,7 @@ impl Transaction {
     pub fn change_prop_bytes(&self, name: &str, value: Option<&[u8]>) -> Result<(), Error> {
         let pool = apr::Pool::new();
         let name_cstr = std::ffi::CString::new(name)?;
-        
+
         let value_ptr = value
             .map(|val| crate::svn_string_helpers::svn_string_ncreate(val, &pool))
             .unwrap_or(std::ptr::null_mut());
@@ -1377,10 +1371,7 @@ impl Transaction {
                 Ok(None)
             } else {
                 let svn_str = &*value_ptr;
-                let slice = std::slice::from_raw_parts(
-                    svn_str.data as *const u8,
-                    svn_str.len,
-                );
+                let slice = std::slice::from_raw_parts(svn_str.data as *const u8, svn_str.len);
                 Ok(Some(slice.to_vec()))
             }
         }
@@ -1392,11 +1383,8 @@ impl Transaction {
         let mut props_ptr = std::ptr::null_mut();
 
         unsafe {
-            let err = subversion_sys::svn_fs_txn_proplist(
-                &mut props_ptr,
-                self.ptr,
-                pool.as_mut_ptr(),
-            );
+            let err =
+                subversion_sys::svn_fs_txn_proplist(&mut props_ptr, self.ptr, pool.as_mut_ptr());
             Error::from_raw(err)?;
 
             let mut props = std::collections::HashMap::new();
@@ -2716,34 +2704,32 @@ mod tests {
     fn test_fs_pack() {
         let dir = tempdir().unwrap();
         let fs_path = dir.path().join("test-fs");
-        
+
         // Create a filesystem
         Fs::create(&fs_path).unwrap();
-        
+
         // Pack should work on an empty repository
         let result = pack(
-            &fs_path,
-            None,  // No notify callback
-            None,  // No cancel callback
+            &fs_path, None, // No notify callback
+            None, // No cancel callback
         );
         assert!(result.is_ok(), "Pack should succeed on new repository");
     }
 
-    #[test] 
+    #[test]
     fn test_fs_verify() {
         let dir = tempdir().unwrap();
         let fs_path = dir.path().join("test-fs");
-        
+
         // Create a filesystem
         Fs::create(&fs_path).unwrap();
-        
+
         // Verify should succeed on a valid repository
         let result = verify(
-            &fs_path,
-            None,  // No start revision
-            None,  // No end revision  
-            None,  // No notify callback
-            None,  // No cancel callback
+            &fs_path, None, // No start revision
+            None, // No end revision
+            None, // No notify callback
+            None, // No cancel callback
         );
         assert!(result.is_ok(), "Verify should succeed on valid repository");
     }
@@ -2754,34 +2740,35 @@ mod tests {
         let src_path = src_dir.path().join("src-fs");
         let dst_dir = tempdir().unwrap();
         let dst_path = dst_dir.path().join("backup");
-        
+
         // Create source filesystem
         Fs::create(&src_path).unwrap();
-        
+
         // Hotcopy to destination
         let result = hotcopy(
-            &src_path,
-            &dst_path,
-            false,  // Not incremental
-            false,  // Don't clean logs
-            None,   // No notify callback
-            None,   // No cancel callback
+            &src_path, &dst_path, false, // Not incremental
+            false, // Don't clean logs
+            None,  // No notify callback
+            None,  // No cancel callback
         );
         assert!(result.is_ok(), "Hotcopy should succeed");
-        
+
         // Verify destination is a valid filesystem
         let dst_fs = Fs::open(&dst_path);
-        assert!(dst_fs.is_ok(), "Hotcopy destination should be valid filesystem");
+        assert!(
+            dst_fs.is_ok(),
+            "Hotcopy destination should be valid filesystem"
+        );
     }
 
     #[test]
     fn test_fs_recover() {
         let dir = tempdir().unwrap();
         let fs_path = dir.path().join("test-fs");
-        
+
         // Create a filesystem
         Fs::create(&fs_path).unwrap();
-        
+
         // Recover should work on repository
         let result = recover(&fs_path, None);
         assert!(result.is_ok(), "Recover should succeed");
@@ -2791,18 +2778,18 @@ mod tests {
     fn test_fs_freeze() {
         let dir = tempdir().unwrap();
         let fs_path = dir.path().join("test-fs");
-        
+
         // Create and open filesystem
         Fs::create(&fs_path).unwrap();
         let mut fs = Fs::open(&fs_path).unwrap();
-        
+
         // Test freeze with a simple callback
         let mut callback_called = false;
         let result = fs.freeze(|| {
             callback_called = true;
             Ok(())
         });
-        
+
         assert!(result.is_ok(), "Freeze should succeed");
         assert!(callback_called, "Freeze callback should be called");
     }
@@ -2811,16 +2798,14 @@ mod tests {
     fn test_fs_freeze_with_error() {
         let dir = tempdir().unwrap();
         let fs_path = dir.path().join("test-fs");
-        
+
         // Create and open filesystem
         Fs::create(&fs_path).unwrap();
         let mut fs = Fs::open(&fs_path).unwrap();
-        
+
         // Test freeze with callback that returns error
-        let result = fs.freeze(|| {
-            Err(Error::from_str("Test error from freeze callback"))
-        });
-        
+        let result = fs.freeze(|| Err(Error::from_str("Test error from freeze callback")));
+
         assert!(result.is_err(), "Freeze should propagate callback error");
         let err_msg = result.unwrap_err().to_string();
         assert!(err_msg.contains("Test error from freeze callback"));
@@ -2830,15 +2815,15 @@ mod tests {
     fn test_fs_info() {
         let dir = tempdir().unwrap();
         let fs_path = dir.path().join("test-fs");
-        
+
         // Create and open filesystem
         Fs::create(&fs_path).unwrap();
         let fs = Fs::open(&fs_path).unwrap();
-        
+
         // Get filesystem info
         let result = fs.info();
         assert!(result.is_ok(), "Info should succeed");
-        
+
         let info = result.unwrap();
         // fs_type might be None or Some depending on implementation
         if let Some(fs_type) = &info.fs_type {
@@ -2854,10 +2839,10 @@ mod tests {
     fn test_pack_with_callbacks() {
         let dir = tempdir().unwrap();
         let fs_path = dir.path().join("test-fs");
-        
+
         // Create a filesystem
         Fs::create(&fs_path).unwrap();
-        
+
         // Test with notify callback
         // Just test that we can pass a callback - we can't easily check if it was called
         let result = pack(
@@ -2874,10 +2859,10 @@ mod tests {
     fn test_verify_with_callbacks() {
         let dir = tempdir().unwrap();
         let fs_path = dir.path().join("test-fs");
-        
+
         // Create a filesystem
         Fs::create(&fs_path).unwrap();
-        
+
         // Test with cancel callback that doesn't cancel
         let result = verify(
             &fs_path,
@@ -2887,7 +2872,7 @@ mod tests {
             Some(Box::new(|| false)), // Don't cancel
         );
         assert!(result.is_ok(), "Verify with cancel callback should succeed");
-        
+
         // Test with cancel callback that cancels immediately
         let result = verify(
             &fs_path,
@@ -2910,21 +2895,18 @@ mod tests {
         let src_path = src_dir.path().join("src-fs");
         let dst_dir = tempdir().unwrap();
         let dst_path = dst_dir.path().join("backup");
-        
+
         // Create source filesystem
         Fs::create(&src_path).unwrap();
-        
+
         // First hotcopy
         hotcopy(&src_path, &dst_path, false, false, None, None).unwrap();
-        
+
         // Incremental hotcopy (should also work)
         let result = hotcopy(
-            &src_path,
-            &dst_path,
-            true,   // Incremental
-            false,  // Don't clean logs
-            None,
-            None,
+            &src_path, &dst_path, true,  // Incremental
+            false, // Don't clean logs
+            None, None,
         );
         // Incremental hotcopy might fail if there's nothing new to copy
         // or succeed if it can do an incremental update
