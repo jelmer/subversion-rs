@@ -688,6 +688,40 @@ pub fn get_ssl_client_cert_pw_file_provider(
     }
 }
 
+/// Gets an SSL client certificate password file authentication provider with a boxed callback.
+/// 
+/// This version accepts a boxed trait object for dynamic language bindings.
+pub fn get_ssl_client_cert_pw_file_provider_boxed(
+    prompt_fn: Option<Box<dyn Fn(&str) -> Result<bool, crate::Error> + Send>>,
+) -> AuthProvider {
+    let mut auth_provider = std::ptr::null_mut();
+    let pool = apr::Pool::new();
+    
+    let baton = if let Some(func) = prompt_fn {
+        Box::into_raw(func) as *mut std::ffi::c_void
+    } else {
+        std::ptr::null_mut()
+    };
+
+    unsafe {
+        subversion_sys::svn_auth_get_ssl_client_cert_pw_file_provider2(
+            &mut auth_provider,
+            if !baton.is_null() {
+                Some(wrap_plaintext_passphrase_prompt_boxed)
+            } else {
+                None
+            },
+            baton,
+            pool.as_mut_ptr(),
+        );
+    }
+    AuthProvider {
+        ptr: auth_provider,
+        pool,
+        _phantom: PhantomData,
+    }
+}
+
 /// Gets a simple prompt authentication provider.
 pub fn get_simple_prompt_provider<'pool>(
     prompt_fn: &impl Fn(
@@ -747,6 +781,59 @@ pub fn get_simple_prompt_provider<'pool>(
     }
 }
 
+/// Gets a simple prompt authentication provider with a boxed callback.
+/// 
+/// This version accepts a boxed trait object for dynamic language bindings.
+pub fn get_simple_prompt_provider_boxed<'pool>(
+    prompt_fn: Box<dyn Fn(&str, Option<&str>, bool) -> Result<SimpleCredentials<'pool>, crate::Error> + Send>,
+    retry_limit: usize,
+) -> AuthProvider {
+    let mut auth_provider = std::ptr::null_mut();
+    let pool = apr::Pool::new();
+    
+    let baton = Box::into_raw(Box::new(prompt_fn)) as *mut std::ffi::c_void;
+
+    extern "C" fn wrap_simple_prompt_provider_boxed<'pool>(
+        credentials: *mut *mut subversion_sys::svn_auth_cred_simple_t,
+        baton: *mut std::ffi::c_void,
+        realmstring: *const std::ffi::c_char,
+        username: *const std::ffi::c_char,
+        may_save: subversion_sys::svn_boolean_t,
+        _pool: *mut subversion_sys::apr_pool_t,
+    ) -> *mut subversion_sys::svn_error_t {
+        let f = unsafe {
+            &*(baton as *const Box<dyn Fn(&str, Option<&str>, bool) -> Result<SimpleCredentials<'pool>, crate::Error> + Send>)
+        };
+        let realm = unsafe { std::ffi::CStr::from_ptr(realmstring).to_str().unwrap() };
+        let username = if username.is_null() {
+            None
+        } else {
+            Some(unsafe { std::ffi::CStr::from_ptr(username).to_str().unwrap() })
+        };
+        f(realm, username, may_save != 0)
+            .map(|creds| {
+                unsafe { *credentials = creds.ptr as *mut _ };
+                std::ptr::null_mut()
+            })
+            .unwrap_or_else(|e| unsafe { e.into_raw() })
+    }
+
+    unsafe {
+        subversion_sys::svn_auth_get_simple_prompt_provider(
+            &mut auth_provider,
+            Some(wrap_simple_prompt_provider_boxed),
+            baton,
+            retry_limit.try_into().unwrap(),
+            pool.as_mut_ptr(),
+        );
+    }
+    AuthProvider {
+        ptr: auth_provider,
+        pool,
+        _phantom: PhantomData,
+    }
+}
+
 /// Gets a username prompt authentication provider.
 pub fn get_username_prompt_provider(
     prompt_fn: &impl Fn(&str, bool) -> Result<String, crate::Error>,
@@ -793,6 +880,77 @@ pub fn get_username_prompt_provider(
     }
 }
 
+/// Gets a username prompt authentication provider with a boxed callback.
+/// 
+/// This version accepts a boxed trait object for dynamic language bindings.
+pub fn get_username_prompt_provider_boxed(
+    prompt_fn: Box<dyn Fn(&str, bool) -> Result<String, crate::Error> + Send>,
+    retry_limit: usize,
+) -> AuthProvider {
+    let mut auth_provider = std::ptr::null_mut();
+    let pool = apr::Pool::new();
+    
+    let baton = Box::into_raw(Box::new(prompt_fn)) as *mut std::ffi::c_void;
+
+    extern "C" fn wrap_username_prompt_provider_boxed(
+        credentials: *mut *mut subversion_sys::svn_auth_cred_username_t,
+        baton: *mut std::ffi::c_void,
+        realmstring: *const std::ffi::c_char,
+        may_save: subversion_sys::svn_boolean_t,
+        _pool: *mut subversion_sys::apr_pool_t,
+    ) -> *mut subversion_sys::svn_error_t {
+        let f = unsafe {
+            &*(baton as *const Box<dyn Fn(&str, bool) -> Result<String, crate::Error> + Send>)
+        };
+        let realm = unsafe { std::ffi::CStr::from_ptr(realmstring).to_str().unwrap() };
+        let pool = apr::Pool::new();
+        
+        f(realm, may_save != 0)
+            .map(|username| {
+                unsafe {
+                    let cred = pool.calloc::<subversion_sys::svn_auth_cred_username_t>();
+                    let username_cstr = std::ffi::CString::new(username).unwrap();
+                    (*cred).username = apr_sys::apr_pstrdup(pool.as_mut_ptr(), username_cstr.as_ptr());
+                    (*cred).may_save = may_save;
+                    *credentials = cred;
+                }
+                std::ptr::null_mut()
+            })
+            .unwrap_or_else(|e| unsafe { e.into_raw() })
+    }
+
+    unsafe {
+        subversion_sys::svn_auth_get_username_prompt_provider(
+            &mut auth_provider,
+            Some(wrap_username_prompt_provider_boxed),
+            baton,
+            retry_limit.try_into().unwrap(),
+            pool.as_mut_ptr(),
+        );
+    }
+    AuthProvider {
+        ptr: auth_provider,
+        pool,
+        _phantom: PhantomData,
+    }
+}
+
+extern "C" fn wrap_plaintext_passphrase_prompt_boxed(
+    may_save_plaintext: *mut subversion_sys::svn_boolean_t,
+    realmstring: *const std::ffi::c_char,
+    baton: *mut std::ffi::c_void,
+    _pool: *mut subversion_sys::apr_pool_t,
+) -> *mut subversion_sys::svn_error_t {
+    let f = unsafe { &*(baton as *const Box<dyn Fn(&str) -> Result<bool, crate::Error> + Send>) };
+    let realm = unsafe { std::ffi::CStr::from_ptr(realmstring).to_str().unwrap() };
+    f(realm)
+        .map(|b| {
+            unsafe { *may_save_plaintext = if b { 1 } else { 0 } };
+            std::ptr::null_mut()
+        })
+        .unwrap_or_else(|e| unsafe { e.into_raw() })
+}
+
 extern "C" fn wrap_plaintext_passphrase_prompt(
     may_save_plaintext: *mut subversion_sys::svn_boolean_t,
     realmstring: *const std::ffi::c_char,
@@ -829,6 +987,46 @@ pub fn get_simple_provider(
             } else {
                 std::ptr::null_mut()
             },
+            pool.as_mut_ptr(),
+        );
+    }
+    AuthProvider {
+        ptr: auth_provider,
+        pool,
+        _phantom: PhantomData,
+    }
+}
+
+/// Gets a simple authentication provider with a boxed callback.
+/// 
+/// This version accepts a boxed trait object, making it suitable for use with
+/// dynamic languages like Python. The callback is leaked to ensure it stays alive
+/// for the lifetime of the auth provider.
+/// 
+/// # Safety
+/// The boxed callback is intentionally leaked and will not be freed automatically.
+/// This is necessary because SVN holds onto the pointer for the lifetime of the auth system.
+pub fn get_simple_provider_boxed(
+    plaintext_prompt_func: Option<Box<dyn Fn(&str) -> Result<bool, crate::Error> + Send>>,
+) -> AuthProvider {
+    let mut auth_provider = std::ptr::null_mut();
+    let pool = apr::Pool::new();
+    
+    let baton = if let Some(func) = plaintext_prompt_func {
+        Box::into_raw(func) as *mut std::ffi::c_void
+    } else {
+        std::ptr::null_mut()
+    };
+
+    unsafe {
+        subversion_sys::svn_auth_get_simple_provider2(
+            &mut auth_provider,
+            if !baton.is_null() {
+                Some(wrap_plaintext_passphrase_prompt_boxed)
+            } else {
+                None
+            },
+            baton,
             pool.as_mut_ptr(),
         );
     }
