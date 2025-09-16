@@ -310,15 +310,17 @@ impl Fs {
         steal_lock: bool,
     ) -> Result<crate::Lock<'static>, Error> {
         let path_cstr = std::ffi::CString::new(path).unwrap();
-        
+
         let token_cstr = token.map(|t| std::ffi::CString::new(t).unwrap());
         let token_ptr = token_cstr.as_ref().map_or(std::ptr::null(), |t| t.as_ptr());
-        
+
         let comment_cstr = comment.map(|c| std::ffi::CString::new(c).unwrap());
-        let comment_ptr = comment_cstr.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
-        
+        let comment_ptr = comment_cstr
+            .as_ref()
+            .map_or(std::ptr::null(), |c| c.as_ptr());
+
         let mut lock_ptr: *mut subversion_sys::svn_lock_t = std::ptr::null_mut();
-        
+
         let ret = unsafe {
             subversion_sys::svn_fs_lock(
                 &mut lock_ptr,
@@ -333,23 +335,18 @@ impl Fs {
                 self.pool.as_mut_ptr(),
             )
         };
-        
+
         svn_result(ret)?;
-        
+
         // The lock is allocated in the fs pool, so it should be valid for the lifetime of the fs
         Ok(crate::Lock::from_raw(lock_ptr))
     }
-    
+
     /// Unlock a path in the filesystem
-    pub fn unlock(
-        &mut self,
-        path: &str,
-        token: &str,
-        break_lock: bool,
-    ) -> Result<(), Error> {
+    pub fn unlock(&mut self, path: &str, token: &str, break_lock: bool) -> Result<(), Error> {
         let path_cstr = std::ffi::CString::new(path).unwrap();
         let token_cstr = std::ffi::CString::new(token).unwrap();
-        
+
         let ret = unsafe {
             subversion_sys::svn_fs_unlock(
                 self.fs_ptr,
@@ -359,15 +356,15 @@ impl Fs {
                 apr::Pool::new().as_mut_ptr(),
             )
         };
-        
+
         svn_result(ret)
     }
-    
+
     /// Get lock information for a path
     pub fn get_lock(&self, path: &str) -> Result<Option<crate::Lock<'static>>, Error> {
         let path_cstr = std::ffi::CString::new(path).unwrap();
         let mut lock_ptr: *mut subversion_sys::svn_lock_t = std::ptr::null_mut();
-        
+
         let ret = unsafe {
             subversion_sys::svn_fs_get_lock(
                 &mut lock_ptr,
@@ -376,9 +373,9 @@ impl Fs {
                 self.pool.as_mut_ptr(),
             )
         };
-        
+
         svn_result(ret)?;
-        
+
         if lock_ptr.is_null() {
             Ok(None)
         } else {
@@ -386,13 +383,13 @@ impl Fs {
             Ok(Some(crate::Lock::from_raw(lock_ptr)))
         }
     }
-    
+
     /// Set the access context for the filesystem with a username
     pub fn set_access(&mut self, username: &str) -> Result<(), Error> {
         let username_cstr = std::ffi::CString::new(username).unwrap();
-        
+
         let mut access_ctx: *mut subversion_sys::svn_fs_access_t = std::ptr::null_mut();
-        
+
         let ret = unsafe {
             subversion_sys::svn_fs_create_access(
                 &mut access_ctx,
@@ -400,16 +397,14 @@ impl Fs {
                 self.pool.as_mut_ptr(),
             )
         };
-        
+
         svn_result(ret)?;
-        
-        let ret = unsafe {
-            subversion_sys::svn_fs_set_access(self.fs_ptr, access_ctx)
-        };
-        
+
+        let ret = unsafe { subversion_sys::svn_fs_set_access(self.fs_ptr, access_ctx) };
+
         svn_result(ret)
     }
-    
+
     /// Get locks under a path
     pub fn get_locks(
         &self,
@@ -418,10 +413,10 @@ impl Fs {
     ) -> Result<Vec<crate::Lock<'static>>, Error> {
         let pool = apr::Pool::new();
         let path_cstr = std::ffi::CString::new(path).unwrap();
-        
+
         let mut locks = Vec::new();
         let locks_ptr = &mut locks as *mut Vec<crate::Lock<'static>> as *mut std::ffi::c_void;
-        
+
         extern "C" fn lock_callback(
             baton: *mut std::ffi::c_void,
             lock: *mut subversion_sys::svn_lock_t,
@@ -435,7 +430,7 @@ impl Fs {
             }
             std::ptr::null_mut()
         }
-        
+
         let ret = unsafe {
             subversion_sys::svn_fs_get_locks2(
                 self.fs_ptr,
@@ -446,7 +441,7 @@ impl Fs {
                 pool.as_mut_ptr(),
             )
         };
-        
+
         svn_result(ret)?;
         Ok(locks)
     }
@@ -2092,24 +2087,24 @@ mod tests {
             }
         }
     }
-    
+
     #[test]
     fn test_fs_lock_unlock() {
         let dir = tempdir().unwrap();
         let fs_path = dir.path().join("test-fs");
-        
+
         let mut fs = Fs::create(&fs_path).unwrap();
-        
+
         // Set a username for lock operations
         fs.set_access("testuser").unwrap();
-        
+
         // Create a transaction to add a file
         let mut txn = fs.begin_txn(crate::Revnum(0)).unwrap();
         let mut root = txn.root().unwrap();
         root.make_file("test.txt").unwrap();
         root.set_file_contents("test.txt", b"test content").unwrap();
         let rev = txn.commit().unwrap();
-        
+
         // Test locking a file
         let lock = fs.lock(
             "test.txt",
@@ -2120,15 +2115,15 @@ mod tests {
             rev,
             false, // Don't steal lock
         );
-        
+
         assert!(lock.is_ok(), "Failed to lock file: {:?}", lock.err());
         let lock = lock.unwrap();
-        
+
         // Verify the lock was created (SVN adds leading slash)
         assert_eq!(lock.path(), "/test.txt");
         assert!(!lock.token().is_empty());
         assert_eq!(lock.comment(), "Test lock comment");
-        
+
         // Get the lock info
         let lock_info = fs.get_lock("test.txt");
         assert!(lock_info.is_ok());
@@ -2137,45 +2132,51 @@ mod tests {
         let lock_info = lock_info.unwrap();
         assert_eq!(lock_info.path(), "/test.txt");
         assert_eq!(lock_info.token(), lock.token());
-        
+
         // Unlock the file
         let unlock_result = fs.unlock("test.txt", lock.token(), false);
-        assert!(unlock_result.is_ok(), "Failed to unlock: {:?}", unlock_result.err());
-        
+        assert!(
+            unlock_result.is_ok(),
+            "Failed to unlock: {:?}",
+            unlock_result.err()
+        );
+
         // Verify the lock is gone
         let lock_info = fs.get_lock("test.txt");
         assert!(lock_info.is_ok());
         assert!(lock_info.unwrap().is_none());
     }
-    
+
     #[test]
     fn test_fs_lock_steal() {
         let dir = tempdir().unwrap();
         let fs_path = dir.path().join("test-fs");
-        
+
         let mut fs = Fs::create(&fs_path).unwrap();
-        
+
         // Set a username for lock operations
         fs.set_access("testuser").unwrap();
-        
+
         // Create a file
         let mut txn = fs.begin_txn(crate::Revnum(0)).unwrap();
         let mut root = txn.root().unwrap();
         root.make_file("locked.txt").unwrap();
         root.set_file_contents("locked.txt", b"content").unwrap();
         let rev = txn.commit().unwrap();
-        
+
         // Lock the file
-        let lock1 = fs.lock(
-            "locked.txt",
-            None,
-            Some("First lock"),
-            false,
-            None,
-            rev,
-            false,
-        ).unwrap();
-        
+        let lock1 = fs
+            .lock(
+                "locked.txt",
+                None,
+                Some("First lock"),
+                false,
+                None,
+                rev,
+                false,
+            )
+            .unwrap();
+
         // Try to lock again without stealing (should fail)
         let lock2 = fs.lock(
             "locked.txt",
@@ -2186,8 +2187,11 @@ mod tests {
             rev,
             false, // Don't steal
         );
-        assert!(lock2.is_err(), "Should not be able to lock already locked file");
-        
+        assert!(
+            lock2.is_err(),
+            "Should not be able to lock already locked file"
+        );
+
         // Now steal the lock
         let lock3 = fs.lock(
             "locked.txt",
@@ -2200,22 +2204,22 @@ mod tests {
         );
         assert!(lock3.is_ok(), "Should be able to steal lock");
         let lock3 = lock3.unwrap();
-        
+
         // The stolen lock should have updated comment
         // Note: SVN may reuse the same token when stealing
         assert_eq!(lock3.comment(), "Stolen lock");
     }
-    
+
     #[test]
     fn test_fs_get_locks() {
         let dir = tempdir().unwrap();
         let fs_path = dir.path().join("test-fs");
-        
+
         let mut fs = Fs::create(&fs_path).unwrap();
-        
+
         // Set a username for lock operations
         fs.set_access("testuser").unwrap();
-        
+
         // Create multiple files in a directory structure
         let mut txn = fs.begin_txn(crate::Revnum(0)).unwrap();
         let mut root = txn.root().unwrap();
@@ -2225,25 +2229,56 @@ mod tests {
         root.make_dir("dir1/subdir").unwrap();
         root.make_file("dir1/subdir/file3.txt").unwrap();
         let rev = txn.commit().unwrap();
-        
+
         // Lock multiple files
-        fs.lock("dir1/file1.txt", None, Some("Lock 1"), false, None, rev, false).unwrap();
-        fs.lock("dir1/file2.txt", None, Some("Lock 2"), false, None, rev, false).unwrap();
-        fs.lock("dir1/subdir/file3.txt", None, Some("Lock 3"), false, None, rev, false).unwrap();
-        
+        fs.lock(
+            "dir1/file1.txt",
+            None,
+            Some("Lock 1"),
+            false,
+            None,
+            rev,
+            false,
+        )
+        .unwrap();
+        fs.lock(
+            "dir1/file2.txt",
+            None,
+            Some("Lock 2"),
+            false,
+            None,
+            rev,
+            false,
+        )
+        .unwrap();
+        fs.lock(
+            "dir1/subdir/file3.txt",
+            None,
+            Some("Lock 3"),
+            false,
+            None,
+            rev,
+            false,
+        )
+        .unwrap();
+
         // Get all locks under dir1 with infinity depth
         let locks = fs.get_locks("dir1", crate::Depth::Infinity);
         assert!(locks.is_ok(), "Failed to get locks: {:?}", locks.err());
         let locks = locks.unwrap();
         assert_eq!(locks.len(), 3, "Should find 3 locks");
-        
+
         // Get locks with immediates depth (only direct children)
         let locks_immediate = fs.get_locks("dir1", crate::Depth::Immediates);
         assert!(locks_immediate.is_ok());
         let locks_immediate = locks_immediate.unwrap();
         // Should get file1.txt and file2.txt but not file3.txt
-        assert_eq!(locks_immediate.len(), 2, "Should find 2 locks at immediate depth");
-        
+        assert_eq!(
+            locks_immediate.len(),
+            2,
+            "Should find 2 locks at immediate depth"
+        );
+
         // Get locks with files depth
         let locks_files = fs.get_locks("dir1", crate::Depth::Files);
         assert!(locks_files.is_ok());

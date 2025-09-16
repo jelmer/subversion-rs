@@ -1034,6 +1034,258 @@ pub(crate) static WRAP_EDITOR: subversion_sys::svn_delta_editor_t =
         apply_textdelta_stream: None, // TODO
     };
 
+/// Txdelta stream for generating delta windows
+pub struct TxDeltaStream {
+    ptr: *mut subversion_sys::svn_txdelta_stream_t,
+    _pool: apr::Pool,
+}
+
+impl TxDeltaStream {
+    /// Create a new txdelta stream between source and target
+    pub fn new(source: &mut crate::io::Stream, target: &mut crate::io::Stream) -> Self {
+        let pool = apr::Pool::new();
+
+        let mut stream_ptr: *mut subversion_sys::svn_txdelta_stream_t = std::ptr::null_mut();
+
+        unsafe {
+            subversion_sys::svn_txdelta(
+                &mut stream_ptr,
+                source.as_mut_ptr(),
+                target.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            );
+        }
+
+        Self {
+            ptr: stream_ptr,
+            _pool: pool,
+        }
+    }
+
+    /// Get the next window from the stream
+    pub fn next_window(&mut self) -> Result<Option<TxDeltaWindow>, crate::Error> {
+        let mut window_ptr: *mut subversion_sys::svn_txdelta_window_t = std::ptr::null_mut();
+
+        let ret = unsafe {
+            subversion_sys::svn_txdelta_next_window(
+                &mut window_ptr,
+                self.ptr,
+                self._pool.as_mut_ptr(),
+            )
+        };
+
+        crate::svn_result(ret)?;
+
+        if window_ptr.is_null() {
+            Ok(None)
+        } else {
+            // Create a new TxDeltaWindow
+            let mut window = TxDeltaWindow::new();
+            window.ptr = window_ptr;
+            Ok(Some(window))
+        }
+    }
+
+    /// Get the MD5 digest of the target data
+    pub fn md5_digest(&self) -> Vec<u8> {
+        let digest_ptr = unsafe { subversion_sys::svn_txdelta_md5_digest(self.ptr) };
+
+        if digest_ptr.is_null() {
+            Vec::new()
+        } else {
+            let mut digest = Vec::with_capacity(16);
+            unsafe {
+                for i in 0..16 {
+                    digest.push(*digest_ptr.add(i));
+                }
+            }
+            digest
+        }
+    }
+}
+
+/// Create a txdelta between source and target streams
+pub fn txdelta(source: &mut crate::io::Stream, target: &mut crate::io::Stream) -> TxDeltaStream {
+    let pool = apr::Pool::new();
+
+    let mut stream_ptr: *mut subversion_sys::svn_txdelta_stream_t = std::ptr::null_mut();
+
+    unsafe {
+        subversion_sys::svn_txdelta(
+            &mut stream_ptr,
+            source.as_mut_ptr(),
+            target.as_mut_ptr(),
+            pool.as_mut_ptr(),
+        );
+    }
+
+    TxDeltaStream {
+        ptr: stream_ptr,
+        _pool: pool,
+    }
+}
+
+/// Create a txdelta between source and target streams with checksums
+pub fn txdelta2(
+    source: &mut crate::io::Stream,
+    target: &mut crate::io::Stream,
+    calculate_checksum: bool,
+) -> TxDeltaStream {
+    let pool = apr::Pool::new();
+
+    let mut stream_ptr: *mut subversion_sys::svn_txdelta_stream_t = std::ptr::null_mut();
+
+    unsafe {
+        subversion_sys::svn_txdelta2(
+            &mut stream_ptr,
+            source.as_mut_ptr(),
+            target.as_mut_ptr(),
+            calculate_checksum as i32,
+            pool.as_mut_ptr(),
+        );
+    }
+
+    TxDeltaStream {
+        ptr: stream_ptr,
+        _pool: pool,
+    }
+}
+
+/// Send a string through a delta handler
+pub fn send_string(
+    string: &str,
+    handler: subversion_sys::svn_txdelta_window_handler_t,
+    handler_baton: *mut std::ffi::c_void,
+) -> Result<(), crate::Error> {
+    let pool = apr::Pool::new();
+
+    let svn_string = unsafe {
+        subversion_sys::svn_string_ncreate(
+            string.as_ptr() as *const i8,
+            string.len(),
+            pool.as_mut_ptr(),
+        )
+    };
+
+    let ret = unsafe {
+        subversion_sys::svn_txdelta_send_string(
+            svn_string,
+            handler,
+            handler_baton,
+            pool.as_mut_ptr(),
+        )
+    };
+
+    crate::svn_result(ret)
+}
+
+/// Send a stream through a delta handler
+pub fn send_stream(
+    stream: &mut crate::io::Stream,
+    handler: subversion_sys::svn_txdelta_window_handler_t,
+    handler_baton: *mut std::ffi::c_void,
+    digest: Option<&mut [u8; 16]>,
+) -> Result<(), crate::Error> {
+    let pool = apr::Pool::new();
+
+    let digest_ptr = digest.map_or(std::ptr::null_mut(), |d| d.as_mut_ptr());
+
+    let ret = unsafe {
+        subversion_sys::svn_txdelta_send_stream(
+            stream.as_mut_ptr(),
+            handler,
+            handler_baton,
+            digest_ptr,
+            pool.as_mut_ptr(),
+        )
+    };
+
+    crate::svn_result(ret)
+}
+
+/// Send a txdelta stream through a delta handler
+pub fn send_txstream(
+    txstream: &mut TxDeltaStream,
+    handler: subversion_sys::svn_txdelta_window_handler_t,
+    handler_baton: *mut std::ffi::c_void,
+) -> Result<(), crate::Error> {
+    let pool = apr::Pool::new();
+
+    let ret = unsafe {
+        subversion_sys::svn_txdelta_send_txstream(
+            txstream.ptr,
+            handler,
+            handler_baton,
+            pool.as_mut_ptr(),
+        )
+    };
+
+    crate::svn_result(ret)
+}
+
+/// Apply a delta, returning the resulting stream and handler
+pub fn apply(
+    source: &mut crate::io::Stream,
+    target: &mut crate::io::Stream,
+) -> Result<
+    (
+        subversion_sys::svn_txdelta_window_handler_t,
+        *mut std::ffi::c_void,
+    ),
+    crate::Error,
+> {
+    let pool = apr::Pool::new();
+
+    let mut handler: subversion_sys::svn_txdelta_window_handler_t = None;
+    let mut handler_baton: *mut std::ffi::c_void = std::ptr::null_mut();
+
+    unsafe {
+        subversion_sys::svn_txdelta_apply(
+            source.as_mut_ptr(),
+            target.as_mut_ptr(),
+            std::ptr::null_mut(), // result_digest
+            std::ptr::null_mut(), // error_info
+            pool.as_mut_ptr(),
+            &mut handler,
+            &mut handler_baton,
+        );
+    }
+
+    // svn_txdelta_apply doesn't return an error directly
+    Ok((handler, handler_baton))
+}
+
+/// Parse svndiff data from a stream
+pub fn parse_svndiff(
+    svndiff_stream: &crate::io::Stream,
+    handler: subversion_sys::svn_txdelta_window_handler_t,
+    handler_baton: *mut std::ffi::c_void,
+) -> Result<crate::io::Stream, crate::Error> {
+    let pool = apr::Pool::new();
+
+    let stream_ptr = unsafe {
+        subversion_sys::svn_txdelta_parse_svndiff(
+            handler,
+            handler_baton,
+            1, // error_on_early_close
+            pool.as_mut_ptr(),
+        )
+    };
+
+    if stream_ptr.is_null() {
+        return Err(crate::Error::from_raw(unsafe {
+            subversion_sys::svn_error_create(
+                subversion_sys::svn_errno_t_SVN_ERR_DELTA_MD5_CHECKSUM_ABSENT as i32,
+                std::ptr::null_mut(),
+                b"Failed to create svndiff parser\0".as_ptr() as *const i8,
+            )
+        })
+        .unwrap_err());
+    }
+
+    Ok(crate::io::Stream::from_ptr(stream_ptr, pool))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1325,5 +1577,103 @@ mod tests {
 
         let operations = editor.operations.borrow();
         assert_eq!(*operations, vec!["set_target_revision(Some(42))"]);
+    }
+
+    #[test]
+    fn test_txdelta_stream() {
+        // Create source and target streams from strings
+        let source_data = "Hello, world!";
+        let target_data = "Hello, Rust world!";
+
+        let mut source_buf = crate::io::StringBuf::from_str(source_data);
+        let mut target_buf = crate::io::StringBuf::from_str(target_data);
+        let mut source_stream = crate::io::Stream::from_stringbuf(&mut source_buf);
+        let mut target_stream = crate::io::Stream::from_stringbuf(&mut target_buf);
+
+        // Create a txdelta stream
+        let mut txstream = TxDeltaStream::new(&mut source_stream, &mut target_stream);
+
+        // Get windows from the stream
+        let mut window_count = 0;
+        while let Ok(Some(_window)) = txstream.next_window() {
+            window_count += 1;
+            // Safety check to prevent infinite loop
+            if window_count > 100 {
+                panic!("Too many windows!");
+            }
+        }
+
+        // We should have gotten at least one window
+        assert!(
+            window_count > 0,
+            "Should have gotten at least one delta window"
+        );
+    }
+
+    #[test]
+    fn test_txdelta_functions() {
+        // Test txdelta function
+        let source_data = "Original content";
+        let target_data = "Modified content";
+
+        let mut source_buf = crate::io::StringBuf::from_str(source_data);
+        let mut target_buf = crate::io::StringBuf::from_str(target_data);
+        let mut source_stream = crate::io::Stream::from_stringbuf(&mut source_buf);
+        let mut target_stream = crate::io::Stream::from_stringbuf(&mut target_buf);
+
+        let mut txstream = txdelta(&mut source_stream, &mut target_stream);
+
+        // Should be able to get at least one window
+        let window = txstream.next_window();
+        assert!(window.is_ok(), "Failed to get window: {:?}", window.err());
+    }
+
+    #[test]
+    fn test_txdelta2_with_checksum() {
+        // Test txdelta2 with checksum calculation
+        let source_data = "Source data";
+        let target_data = "Target data";
+
+        let mut source_buf = crate::io::StringBuf::from_str(source_data);
+        let mut target_buf = crate::io::StringBuf::from_str(target_data);
+        let mut source_stream = crate::io::Stream::from_stringbuf(&mut source_buf);
+        let mut target_stream = crate::io::Stream::from_stringbuf(&mut target_buf);
+
+        let mut txstream = txdelta2(&mut source_stream, &mut target_stream, true);
+
+        // Process all windows until we get NULL (end of stream)
+        loop {
+            let window = txstream.next_window().unwrap();
+            if window.is_none() {
+                break;
+            }
+        }
+
+        // Now get the MD5 digest after processing all windows
+        let digest = txstream.md5_digest();
+        let expected_digest = [
+            0x4a, 0xa8, 0x53, 0x7f, 0x53, 0xf3, 0x29, 0x99, 0x13, 0x78, 0x90, 0x52, 0xa9, 0x2c,
+            0xd0, 0x73,
+        ];
+        assert_eq!(digest, expected_digest, "MD5 digest mismatch");
+    }
+
+    #[test]
+    fn test_apply_delta() {
+        // Test applying a delta
+        let source_data = "Source content";
+        let target_data = "";
+
+        let mut source_buf = crate::io::StringBuf::from_str(source_data);
+        let mut target_buf = crate::io::StringBuf::from_str(target_data);
+        let mut source_stream = crate::io::Stream::from_stringbuf(&mut source_buf);
+        let mut target_stream = crate::io::Stream::from_stringbuf(&mut target_buf);
+
+        // Apply should give us a handler and baton
+        let result = apply(&mut source_stream, &mut target_stream);
+        assert!(result.is_ok(), "Failed to apply delta: {:?}", result.err());
+
+        let (handler, _baton) = result.unwrap();
+        assert!(handler.is_some(), "Handler should not be None");
     }
 }
