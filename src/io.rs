@@ -58,7 +58,7 @@ impl From<subversion_sys::svn_io_file_del_t> for FileDel {
 /// Stream mark with RAII cleanup
 pub struct Mark {
     ptr: *mut subversion_sys::svn_stream_mark_t,
-    pool: apr::Pool,
+    _pool: apr::Pool,
     _phantom: PhantomData<*mut ()>, // !Send + !Sync
 }
 
@@ -85,7 +85,7 @@ impl Mark {
     ) -> Self {
         Self {
             ptr,
-            pool,
+            _pool: pool,
             _phantom: PhantomData,
         }
     }
@@ -94,7 +94,7 @@ impl Mark {
 /// String buffer for stream operations
 pub struct StringBuf {
     ptr: *mut subversion_sys::svn_stringbuf_t,
-    pool: apr::Pool,
+    _pool: apr::Pool,
     _phantom: PhantomData<*mut ()>, // !Send + !Sync
 }
 
@@ -117,7 +117,7 @@ impl StringBuf {
         let ptr = unsafe { subversion_sys::svn_stringbuf_create_empty(pool.as_mut_ptr()) };
         Self {
             ptr,
-            pool,
+            _pool: pool,
             _phantom: PhantomData,
         }
     }
@@ -129,7 +129,7 @@ impl StringBuf {
         let ptr = unsafe { subversion_sys::svn_stringbuf_create(cstr.as_ptr(), pool.as_mut_ptr()) };
         Self {
             ptr,
-            pool,
+            _pool: pool,
             _phantom: PhantomData,
         }
     }
@@ -165,7 +165,7 @@ impl StringBuf {
 /// Stream handle with RAII cleanup
 pub struct Stream {
     ptr: *mut subversion_sys::svn_stream_t,
-    pool: apr::Pool,
+    _pool: apr::Pool,
     backend: Option<*mut std::ffi::c_void>, // Boxed backend for manual cleanup (not used by from_backend)
     _phantom: PhantomData<*mut ()>,         // !Send + !Sync
 }
@@ -191,7 +191,7 @@ impl Stream {
         let stream = unsafe { subversion_sys::svn_stream_empty(pool.as_mut_ptr()) };
         Self {
             ptr: stream,
-            pool,
+            _pool: pool,
             backend: None,
             _phantom: PhantomData,
         }
@@ -203,7 +203,7 @@ impl Stream {
         let stream = unsafe { subversion_sys::svn_stream_buffered(pool.as_mut_ptr()) };
         Self {
             ptr: stream,
-            pool,
+            _pool: pool,
             backend: None,
             _phantom: PhantomData,
         }
@@ -217,7 +217,7 @@ impl Stream {
         };
         Self {
             ptr: stream,
-            pool,
+            _pool: pool,
             backend: None,
             _phantom: PhantomData,
         }
@@ -227,7 +227,7 @@ impl Stream {
     pub fn from_ptr(ptr: *mut subversion_sys::svn_stream_t, pool: apr::Pool) -> Self {
         Self {
             ptr,
-            pool,
+            _pool: pool,
             backend: None,
             _phantom: PhantomData,
         }
@@ -240,7 +240,7 @@ impl Stream {
         let stream = unsafe { subversion_sys::svn_stream_create(baton_ptr, pool.as_mut_ptr()) };
         Self {
             ptr: stream,
-            pool,
+            _pool: pool,
             backend: Some(baton_ptr),
             _phantom: PhantomData,
         }
@@ -430,7 +430,7 @@ impl Stream {
 
         Ok(Self {
             ptr: stream,
-            pool,
+            _pool: pool,
             backend: None, // Backend is managed by close_trampoline, not by Drop
             _phantom: PhantomData,
         })
@@ -442,7 +442,7 @@ impl Stream {
         let stream = unsafe { subversion_sys::svn_stream_disown(self.ptr, pool.as_mut_ptr()) };
         Self {
             ptr: stream,
-            pool,
+            _pool: pool,
             backend: None, // Disowned streams don't own backends
             _phantom: PhantomData,
         }
@@ -456,7 +456,7 @@ impl Stream {
         };
         Self {
             ptr: stream,
-            pool,
+            _pool: pool,
             backend: None,
             _phantom: PhantomData,
         }
@@ -479,7 +479,7 @@ impl Stream {
     ) -> Self {
         Self {
             ptr,
-            pool,
+            _pool: pool,
             backend: None,
             _phantom: PhantomData,
         }
@@ -505,7 +505,7 @@ impl Stream {
 
         Ok(Self {
             ptr: stream,
-            pool,
+            _pool: pool,
             backend: None,
             _phantom: PhantomData,
         })
@@ -531,7 +531,7 @@ impl Stream {
 
         Ok(Self {
             ptr: stream,
-            pool,
+            _pool: pool,
             backend: None,
             _phantom: PhantomData,
         })
@@ -573,7 +573,7 @@ impl Stream {
         svn_result(err)?;
         Ok(Self {
             ptr: stream,
-            pool,
+            _pool: pool,
             backend: None,
             _phantom: PhantomData,
         })
@@ -587,7 +587,7 @@ impl Stream {
         svn_result(err)?;
         Ok(Self {
             ptr: stream,
-            pool,
+            _pool: pool,
             backend: None,
             _phantom: PhantomData,
         })
@@ -601,7 +601,7 @@ impl Stream {
         svn_result(err)?;
         Ok(Self {
             ptr: stream,
-            pool,
+            _pool: pool,
             backend: None,
             _phantom: PhantomData,
         })
@@ -645,7 +645,7 @@ impl Stream {
         let stream = unsafe { subversion_sys::svn_stream_compressed(self.ptr, pool.as_mut_ptr()) };
         Self {
             ptr: stream,
-            pool,
+            _pool: pool,
             backend: None,
             _phantom: PhantomData,
         }
@@ -1064,7 +1064,7 @@ impl Stream {
         Self {
             backend: None,
             ptr: stream,
-            pool,
+            _pool: pool,
             _phantom: PhantomData,
         }
     }
@@ -1109,7 +1109,7 @@ pub fn tee(out1: &mut Stream, out2: &mut Stream) -> Result<Stream, Error> {
     let stream = unsafe { subversion_sys::svn_stream_tee(out1.ptr, out2.ptr, pool.as_mut_ptr()) };
     Ok(Stream {
         ptr: stream,
-        pool,
+        _pool: pool,
         backend: None,
         _phantom: PhantomData,
     })
@@ -1159,7 +1159,7 @@ impl From<&[u8]> for Stream {
         let stream = unsafe { subversion_sys::svn_stream_from_string(svn_str, pool.as_mut_ptr()) };
         Self {
             ptr: stream,
-            pool,
+            _pool: pool,
             backend: None,
             _phantom: PhantomData,
         }
@@ -1241,7 +1241,7 @@ pub fn wrap_write(write: &mut dyn std::io::Write) -> Result<Stream, Error> {
 
     Ok(Stream {
         ptr: stream,
-        pool,
+        _pool: pool,
         backend: None,
         _phantom: PhantomData,
     })

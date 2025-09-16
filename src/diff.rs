@@ -42,6 +42,7 @@ pub struct DiffHunk {
 }
 
 impl DiffHunk {
+    #[allow(dead_code)]
     unsafe fn from_raw(ptr: *mut subversion_sys::svn_diff_hunk_t) -> Self {
         Self { ptr }
     }
@@ -80,12 +81,12 @@ impl DiffHunk {
 /// A diff between two files
 pub struct Diff {
     ptr: *mut subversion_sys::svn_diff_t,
-    pool: apr::Pool,
+    _pool: apr::Pool,
 }
 
 impl Diff {
     unsafe fn from_raw(ptr: *mut subversion_sys::svn_diff_t, pool: apr::Pool) -> Self {
-        Self { ptr, pool }
+        Self { ptr, _pool: pool }
     }
 
     /// Check if the diff contains any changes

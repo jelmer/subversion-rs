@@ -737,7 +737,7 @@ impl Root {
 
             Ok(NodeHistory {
                 ptr: history,
-                pool: apr::Pool::new(),
+                _pool: apr::Pool::new(),
             })
         })
     }
@@ -789,7 +789,7 @@ impl Root {
 /// Represents the history of a node in the filesystem
 pub struct NodeHistory {
     ptr: *mut subversion_sys::svn_fs_history_t,
-    pool: apr::Pool,
+    _pool: apr::Pool,
 }
 
 impl NodeHistory {
@@ -880,7 +880,7 @@ impl NodeId {
 /// Transaction handle with RAII cleanup
 pub struct Transaction {
     ptr: *mut subversion_sys::svn_fs_txn_t,
-    pool: apr::Pool,
+    _pool: apr::Pool,
     _phantom: std::marker::PhantomData<*mut ()>, // !Send + !Sync
 }
 
@@ -898,7 +898,7 @@ impl Transaction {
     ) -> Self {
         Self {
             ptr,
-            pool,
+            _pool: pool,
             _phantom: std::marker::PhantomData,
         }
     }
@@ -1196,7 +1196,7 @@ impl Fs {
             Error::from_raw(err)?;
             Ok(Transaction {
                 ptr: txn_ptr,
-                pool,
+                _pool: pool,
                 _phantom: std::marker::PhantomData,
             })
         }
@@ -1217,7 +1217,7 @@ impl Fs {
             Error::from_raw(err)?;
             Ok(Transaction {
                 ptr: txn_ptr,
-                pool,
+                _pool: pool,
                 _phantom: std::marker::PhantomData,
             })
         }
@@ -2165,7 +2165,7 @@ mod tests {
         let rev = txn.commit().unwrap();
 
         // Lock the file
-        let lock1 = fs
+        let _lock1 = fs
             .lock(
                 "locked.txt",
                 None,

@@ -4401,7 +4401,8 @@ impl Conflict {
             let mut prop_conflicts = Vec::new();
             if !props_conflicted.is_null() {
                 // Property conflicts array contains property names
-                let array = apr::tables::TypedArray::<*const std::ffi::c_char>::from_ptr(props_conflicted);
+                let array =
+                    apr::tables::TypedArray::<*const std::ffi::c_char>::from_ptr(props_conflicted);
                 for cstr_ptr in array.iter() {
                     let cstr = std::ffi::CStr::from_ptr(cstr_ptr);
                     let propname = cstr.to_string_lossy().into_owned();
@@ -4460,7 +4461,6 @@ mod tests {
         // let dirent = crate::dirent::Dirent::from(repo_path.as_c_str());
         // let url = dirent.canonicalize().to_file_url().unwrap();
         let url_str = format!("file://{}", repo_path.to_str().unwrap());
-        let pool = apr::Pool::new();
         let url = crate::uri::Uri::new(&url_str).unwrap();
         let revnum = ctx
             .checkout(
@@ -4490,7 +4490,6 @@ mod tests {
         // Check out working copy
         let mut ctx = Context::new().unwrap();
         let url_str = format!("file://{}", repo_path.to_str().unwrap());
-        let pool = apr::Pool::new();
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         ctx.checkout(
@@ -4549,7 +4548,6 @@ mod tests {
         // Check out working copy
         let mut ctx = Context::new().unwrap();
         let url_str = format!("file://{}", repo_path.to_str().unwrap());
-        let pool = apr::Pool::new();
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         ctx.checkout(
@@ -4592,7 +4590,6 @@ mod tests {
         // Check out working copy
         let mut ctx = Context::new().unwrap();
         let url_str = format!("file://{}", repo_path.to_str().unwrap());
-        let pool = apr::Pool::new();
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         ctx.checkout(
@@ -4851,7 +4848,6 @@ mod tests {
         // Check out working copy
         let mut ctx = Context::new().unwrap();
         let url_str = format!("file://{}", repo_path.to_str().unwrap());
-        let pool = apr::Pool::new();
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         ctx.checkout(
@@ -4898,7 +4894,6 @@ mod tests {
         // Check out working copy
         let mut ctx = Context::new().unwrap();
         let url_str = format!("file://{}", repo_path.to_str().unwrap());
-        let pool = apr::Pool::new();
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         ctx.checkout(
@@ -4957,7 +4952,6 @@ mod tests {
         // Check out working copy
         let mut ctx = Context::new().unwrap();
         let url_str = format!("file://{}", repo_path.to_str().unwrap());
-        let pool = apr::Pool::new();
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         ctx.checkout(
@@ -5020,7 +5014,7 @@ mod tests {
                 | subversion_sys::SVN_DIRENT_LAST_AUTHOR,
             false, // fetch_locks
             false, // include_externals
-            &mut |path, dirent, _lock| {
+            &mut |path, _dirent, _lock| {
                 entries.push(path.to_string());
                 Ok(())
             },
@@ -5068,7 +5062,6 @@ mod tests {
         // Check out working copy
         let mut ctx = Context::new().unwrap();
         let url_str = format!("file://{}", repo_path.to_str().unwrap());
-        let pool = apr::Pool::new();
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         ctx.checkout(
@@ -5148,7 +5141,6 @@ mod tests {
         // Check out working copy
         let mut ctx = Context::new().unwrap();
         let url_str = format!("file://{}", repo_path.to_str().unwrap());
-        let pool = apr::Pool::new();
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         ctx.checkout(
@@ -5255,7 +5247,6 @@ mod tests {
         // Check out working copy and make a commit
         let mut ctx = Context::new().unwrap();
         let url_str = format!("file://{}", repo_path.to_str().unwrap());
-        let pool = apr::Pool::new();
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         ctx.checkout(
@@ -5337,7 +5328,6 @@ mod tests {
         // Check out working copy
         let mut ctx = Context::new().unwrap();
         let url_str = format!("file://{}", repo_path.to_str().unwrap());
-        let pool = apr::Pool::new();
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         ctx.checkout(
@@ -5381,7 +5371,6 @@ mod tests {
         // Check out working copy
         let mut ctx = Context::new().unwrap();
         let url_str = format!("file://{}", repo_path.to_str().unwrap());
-        let pool = apr::Pool::new();
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         ctx.checkout(

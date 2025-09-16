@@ -82,7 +82,7 @@ unsafe impl Send for Dirent {}
 /// Repository access session handle with automatic cleanup.
 pub struct Session<'a> {
     ptr: *mut svn_ra_session_t,
-    pool: apr::Pool,
+    _pool: apr::Pool,
     // Keep a reference to callbacks to ensure they outlive the session
     _callbacks: Option<&'a mut Callbacks>,
     _phantom: PhantomData<*mut ()>, // !Send + !Sync
@@ -208,7 +208,7 @@ impl<'a> Session<'a> {
     pub(crate) unsafe fn from_ptr_and_pool(ptr: *mut svn_ra_session_t, pool: apr::Pool) -> Self {
         Self {
             ptr,
-            pool,
+            _pool: pool,
             _callbacks: None,
             _phantom: PhantomData,
         }
@@ -271,7 +271,7 @@ impl<'a> Session<'a> {
         Ok((
             Session {
                 ptr: session,
-                pool,
+                _pool: pool,
                 _callbacks: callbacks,
                 _phantom: PhantomData,
             },
@@ -706,7 +706,7 @@ impl<'a> Session<'a> {
         Ok(Box::new(WrapReporter {
             reporter,
             baton: report_baton,
-            pool,
+            _pool: pool,
             _phantom: PhantomData,
         }) as Box<dyn Reporter + Send>)
     }
@@ -748,7 +748,7 @@ impl<'a> Session<'a> {
         Ok(Box::new(WrapReporter {
             reporter,
             baton: report_baton,
-            pool,
+            _pool: pool,
             _phantom: PhantomData,
         }) as Box<dyn Reporter + Send>)
     }
@@ -971,7 +971,7 @@ impl<'a> Session<'a> {
         Ok(Box::new(WrapReporter {
             reporter,
             baton: report_baton,
-            pool,
+            _pool: pool,
             _phantom: PhantomData,
         }) as Box<dyn Reporter + Send>)
     }
@@ -1695,7 +1695,7 @@ impl<'a> Session<'a> {
         Ok(Box::new(WrapReporter {
             reporter,
             baton: report_baton,
-            pool,
+            _pool: pool,
             _phantom: PhantomData,
         }))
     }
@@ -1807,7 +1807,7 @@ pub fn modules() -> Result<String, Error> {
 pub struct WrapReporter {
     reporter: *const subversion_sys::svn_ra_reporter3_t,
     baton: *mut std::ffi::c_void,
-    pool: apr::Pool,
+    _pool: apr::Pool,
     _phantom: PhantomData<*mut ()>,
 }
 
@@ -1943,7 +1943,7 @@ pub trait Reporter {
 /// RA callbacks with RAII cleanup
 pub struct Callbacks {
     ptr: *mut subversion_sys::svn_ra_callbacks2_t,
-    pool: apr::Pool,
+    _pool: apr::Pool,
     // Keep auth_baton alive for the lifetime of the callbacks, pinned to ensure stable address
     auth_baton: Option<std::pin::Pin<Box<crate::auth::AuthBaton>>>,
     _phantom: PhantomData<*mut ()>,
@@ -1972,7 +1972,7 @@ impl Callbacks {
         }
         Ok(Callbacks {
             ptr: callbacks,
-            pool,
+            _pool: pool,
             auth_baton: None,
             _phantom: PhantomData,
         })
@@ -2200,7 +2200,7 @@ mod tests {
             (*lock_raw).expiration_date = 0;
         }
 
-        let lock = unsafe { Lock::from_raw(lock_raw) };
+        let lock = Lock::from_raw(lock_raw);
         assert_eq!(lock.path(), "/test/path");
         assert_eq!(lock.token(), "lock-token");
         assert_eq!(lock.owner(), "test-owner");
@@ -2223,7 +2223,7 @@ mod tests {
                 apr::strings::pstrdup_raw("author", &pool).unwrap() as *const _;
         }
 
-        let dirent = unsafe { Dirent::from_raw(dirent_raw) };
+        let dirent = Dirent::from_raw(dirent_raw);
         // These methods would need to be implemented on Dirent
         let _ = dirent; // Just use it to avoid unused variable warning
     }
@@ -2240,7 +2240,7 @@ mod tests {
                 apr::strings::pstrdup_raw("/trunk/src", &pool).unwrap() as *const _;
         }
 
-        let segment = unsafe { LocationSegment::from_raw(segment_raw) };
+        let segment = LocationSegment::from_raw(segment_raw);
         let range = segment.range();
         assert_eq!(range.start, crate::Revnum(20)); // Note: range is end..start
         assert_eq!(range.end, crate::Revnum(10));

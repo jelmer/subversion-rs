@@ -1255,18 +1255,54 @@ pub fn apply(
     Ok((handler, handler_baton))
 }
 
-/// Parse svndiff data from a stream
-pub fn parse_svndiff(
-    svndiff_stream: &crate::io::Stream,
-    handler: subversion_sys::svn_txdelta_window_handler_t,
-    handler_baton: *mut std::ffi::c_void,
-) -> Result<crate::io::Stream, crate::Error> {
+/// Create a stream that parses svndiff data
+///
+/// Returns a writable stream. When svndiff data is written to this stream,
+/// it will be parsed and the provided handler will be called for each delta window.
+/// 
+/// The handler must outlive the returned stream.
+pub fn parse_svndiff<'a, F>(
+    handler: &'a mut F,
+) -> Result<crate::io::Stream, crate::Error> 
+where
+    F: FnMut(&mut TxDeltaWindow) -> Result<(), crate::Error>,
+{
     let pool = apr::Pool::new();
+
+    // Get a raw pointer to the handler
+    let handler_ptr = handler as *mut F as *mut std::ffi::c_void;
+
+    // Create a C-compatible wrapper function
+    extern "C" fn window_handler_wrapper<F>(
+        window: *mut subversion_sys::svn_txdelta_window_t,
+        baton: *mut std::ffi::c_void,
+    ) -> *mut subversion_sys::svn_error_t
+    where
+        F: FnMut(&mut TxDeltaWindow) -> Result<(), crate::Error>,
+    {
+        unsafe {
+            let handler = &mut *(baton as *mut F);
+            
+            if window.is_null() {
+                // NULL window means end of stream
+                return std::ptr::null_mut();
+            }
+            
+            // Wrap the window
+            let mut tx_window = TxDeltaWindow::new();
+            tx_window.ptr = window;
+            
+            match handler(&mut tx_window) {
+                Ok(()) => std::ptr::null_mut(),
+                Err(err) => err.as_ptr() as *mut subversion_sys::svn_error_t,
+            }
+        }
+    }
 
     let stream_ptr = unsafe {
         subversion_sys::svn_txdelta_parse_svndiff(
-            handler,
-            handler_baton,
+            Some(window_handler_wrapper::<F>),
+            handler_ptr,
             1, // error_on_early_close
             pool.as_mut_ptr(),
         )

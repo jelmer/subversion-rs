@@ -1328,7 +1328,7 @@ extern "C" fn wrap_notify_func(
 /// Represents a queue of committed items
 pub struct CommittedQueue {
     ptr: *mut subversion_sys::svn_wc_committed_queue_t,
-    pool: apr::Pool,
+    _pool: apr::Pool,
 }
 
 impl Default for CommittedQueue {
@@ -1342,7 +1342,7 @@ impl CommittedQueue {
     pub fn new() -> Self {
         let pool = apr::Pool::new();
         let ptr = unsafe { subversion_sys::svn_wc_committed_queue_create(pool.as_mut_ptr()) };
-        Self { ptr, pool }
+        Self { ptr, _pool: pool }
     }
 
     fn as_mut_ptr(&mut self) -> *mut subversion_sys::svn_wc_committed_queue_t {
@@ -1413,11 +1413,7 @@ pub fn cleanup(
 
 /// Get the working copy revision status
 /// Add a path to version control
-pub fn add(
-    ctx: &mut Context,
-    path: &std::path::Path,
-    force: bool,
-) -> Result<(), Error> {
+pub fn add(ctx: &mut Context, path: &std::path::Path, force: bool) -> Result<(), Error> {
     let path_str = path.to_string_lossy();
     let path_cstr = std::ffi::CString::new(path_str.as_ref())?;
 

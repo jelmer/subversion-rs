@@ -71,7 +71,7 @@ impl From<AuthzAccess> for subversion_sys::svn_repos_authz_access_t {
 /// Authorization data structure
 pub struct Authz {
     ptr: *mut subversion_sys::svn_authz_t,
-    pool: apr::Pool,
+    _pool: apr::Pool,
 }
 
 impl Authz {
@@ -109,7 +109,7 @@ impl Authz {
 
         Ok(Authz {
             ptr: authz_ptr,
-            pool,
+            _pool: pool,
         })
     }
 
@@ -169,7 +169,7 @@ pub fn find_root_path(path: &std::path::Path) -> Option<std::path::PathBuf> {
 /// Repository handle with RAII cleanup
 pub struct Repos {
     ptr: *mut svn_repos_t,
-    pool: apr::Pool,
+    _pool: apr::Pool,
     _phantom: PhantomData<*mut ()>, // !Send + !Sync
 }
 
@@ -242,7 +242,7 @@ impl Repos {
             svn_result(ret)?;
             Ok(Repos {
                 ptr: repos,
-                pool,
+                _pool: pool,
                 _phantom: PhantomData,
             })
         }
@@ -259,7 +259,7 @@ impl Repos {
             svn_result(ret)?;
             Ok(Repos {
                 ptr: repos,
-                pool,
+                _pool: pool,
                 _phantom: PhantomData,
             })
         }
