@@ -1965,6 +1965,30 @@ impl Repos {
             .into_owned();
         std::path::PathBuf::from(path)
     }
+
+    /// Begin a transaction for update
+    pub fn begin_txn_for_update(
+        &self,
+        revnum: Revnum,
+        author: &str,
+    ) -> Result<crate::fs::Transaction, Error> {
+        let pool = apr::Pool::new();
+        let mut txn_ptr = std::ptr::null_mut();
+        let author_cstr = std::ffi::CString::new(author)?;
+
+        let ret = unsafe {
+            subversion_sys::svn_repos_fs_begin_txn_for_update(
+                &mut txn_ptr,
+                self.ptr,
+                revnum.0,
+                author_cstr.as_ptr(),
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(ret)?;
+
+        Ok(unsafe { crate::fs::Transaction::from_ptr_and_pool(txn_ptr, pool) })
+    }
 }
 
 #[cfg(test)]

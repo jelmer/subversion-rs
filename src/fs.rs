@@ -1253,6 +1253,11 @@ impl Transaction {
         }
     }
 
+    /// Get the underlying SVN transaction pointer
+    pub(crate) fn as_ptr(&self) -> *mut subversion_sys::svn_fs_txn_t {
+        self.ptr
+    }
+
     /// Get the transaction name
     pub fn name(&self) -> Result<String, Error> {
         with_tmp_pool(|pool| unsafe {
@@ -1329,6 +1334,77 @@ impl Transaction {
             let err = subversion_sys::svn_fs_abort_txn(self.ptr, pool.as_mut_ptr());
             Error::from_raw(err)?;
             Ok(())
+        }
+    }
+
+    /// Change a transaction property (binary-safe version)
+    pub fn change_prop_bytes(&self, name: &str, value: Option<&[u8]>) -> Result<(), Error> {
+        let pool = apr::Pool::new();
+        let name_cstr = std::ffi::CString::new(name)?;
+        
+        let value_ptr = value
+            .map(|val| crate::svn_string_helpers::svn_string_ncreate(val, &pool))
+            .unwrap_or(std::ptr::null_mut());
+
+        unsafe {
+            let err = subversion_sys::svn_fs_change_txn_prop(
+                self.ptr,
+                name_cstr.as_ptr(),
+                value_ptr,
+                pool.as_mut_ptr(),
+            );
+            Error::from_raw(err)?;
+        }
+        Ok(())
+    }
+
+    /// Get a transaction property
+    pub fn prop(&self, name: &str) -> Result<Option<Vec<u8>>, Error> {
+        let pool = apr::Pool::new();
+        let name_cstr = std::ffi::CString::new(name)?;
+        let mut value_ptr = std::ptr::null_mut();
+
+        unsafe {
+            let err = subversion_sys::svn_fs_txn_prop(
+                &mut value_ptr,
+                self.ptr,
+                name_cstr.as_ptr(),
+                pool.as_mut_ptr(),
+            );
+            Error::from_raw(err)?;
+
+            if value_ptr.is_null() {
+                Ok(None)
+            } else {
+                let svn_str = &*value_ptr;
+                let slice = std::slice::from_raw_parts(
+                    svn_str.data as *const u8,
+                    svn_str.len,
+                );
+                Ok(Some(slice.to_vec()))
+            }
+        }
+    }
+
+    /// Get all transaction properties
+    pub fn proplist(&self) -> Result<std::collections::HashMap<String, Vec<u8>>, Error> {
+        let pool = apr::Pool::new();
+        let mut props_ptr = std::ptr::null_mut();
+
+        unsafe {
+            let err = subversion_sys::svn_fs_txn_proplist(
+                &mut props_ptr,
+                self.ptr,
+                pool.as_mut_ptr(),
+            );
+            Error::from_raw(err)?;
+
+            let mut props = std::collections::HashMap::new();
+            if !props_ptr.is_null() {
+                let prop_hash = crate::props::PropHash::from_ptr(props_ptr);
+                props = prop_hash.to_hashmap();
+            }
+            Ok(props)
         }
     }
 }
