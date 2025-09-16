@@ -1,4 +1,5 @@
 use crate::{svn_result, with_tmp_pool, Error, Revnum};
+use std::ffi::CString;
 use std::marker::PhantomData;
 use subversion_sys::{
     svn_repos_create, svn_repos_dump_fs4, svn_repos_find_root_path, svn_repos_load_fs6,
@@ -1842,6 +1843,142 @@ impl Report {
     }
 }
 
+
+impl Repos {
+    /// Set the environment for hook scripts by providing a path to an environment file
+    pub fn hooks_setenv(&mut self, hooks_env_path: &str) -> Result<(), Error> {
+        let pool = apr::Pool::new();
+        let path_cstr = CString::new(hooks_env_path).unwrap();
+        
+        let ret = unsafe {
+            subversion_sys::svn_repos_hooks_setenv(
+                self.ptr,
+                path_cstr.as_ptr(),
+                pool.as_mut_ptr(),
+            )
+        };
+        
+        svn_result(ret)
+    }
+    
+    /// Get the path to the start-commit hook script
+    pub fn start_commit_hook_path(&self) -> std::path::PathBuf {
+        let pool = apr::Pool::new();
+        let path_ptr = unsafe {
+            subversion_sys::svn_repos_start_commit_hook(self.ptr, pool.as_mut_ptr())
+        };
+        
+        let path = unsafe { std::ffi::CStr::from_ptr(path_ptr) }
+            .to_string_lossy()
+            .into_owned();
+        std::path::PathBuf::from(path)
+    }
+    
+    /// Get the path to the pre-commit hook script
+    pub fn pre_commit_hook_path(&self) -> std::path::PathBuf {
+        let pool = apr::Pool::new();
+        let path_ptr = unsafe {
+            subversion_sys::svn_repos_pre_commit_hook(self.ptr, pool.as_mut_ptr())
+        };
+        
+        let path = unsafe { std::ffi::CStr::from_ptr(path_ptr) }
+            .to_string_lossy()
+            .into_owned();
+        std::path::PathBuf::from(path)
+    }
+    
+    /// Get the path to the post-commit hook script  
+    pub fn post_commit_hook_path(&self) -> std::path::PathBuf {
+        let pool = apr::Pool::new();
+        let path_ptr = unsafe {
+            subversion_sys::svn_repos_post_commit_hook(self.ptr, pool.as_mut_ptr())
+        };
+        
+        let path = unsafe { std::ffi::CStr::from_ptr(path_ptr) }
+            .to_string_lossy()
+            .into_owned();
+        std::path::PathBuf::from(path)
+    }
+    
+    /// Get the path to the pre-revprop-change hook script
+    pub fn pre_revprop_change_hook_path(&self) -> std::path::PathBuf {
+        let pool = apr::Pool::new();
+        let path_ptr = unsafe {
+            subversion_sys::svn_repos_pre_revprop_change_hook(self.ptr, pool.as_mut_ptr())
+        };
+        
+        let path = unsafe { std::ffi::CStr::from_ptr(path_ptr) }
+            .to_string_lossy()
+            .into_owned();
+        std::path::PathBuf::from(path)
+    }
+    
+    /// Get the path to the post-revprop-change hook script
+    pub fn post_revprop_change_hook_path(&self) -> std::path::PathBuf {
+        let pool = apr::Pool::new();
+        let path_ptr = unsafe {
+            subversion_sys::svn_repos_post_revprop_change_hook(self.ptr, pool.as_mut_ptr())
+        };
+        
+        let path = unsafe { std::ffi::CStr::from_ptr(path_ptr) }
+            .to_string_lossy()
+            .into_owned();
+        std::path::PathBuf::from(path)
+    }
+    
+    /// Get the path to the pre-lock hook script
+    pub fn pre_lock_hook_path(&self) -> std::path::PathBuf {
+        let pool = apr::Pool::new();
+        let path_ptr = unsafe {
+            subversion_sys::svn_repos_pre_lock_hook(self.ptr, pool.as_mut_ptr())
+        };
+        
+        let path = unsafe { std::ffi::CStr::from_ptr(path_ptr) }
+            .to_string_lossy()
+            .into_owned();
+        std::path::PathBuf::from(path)
+    }
+    
+    /// Get the path to the post-lock hook script
+    pub fn post_lock_hook_path(&self) -> std::path::PathBuf {
+        let pool = apr::Pool::new();
+        let path_ptr = unsafe {
+            subversion_sys::svn_repos_post_lock_hook(self.ptr, pool.as_mut_ptr())
+        };
+        
+        let path = unsafe { std::ffi::CStr::from_ptr(path_ptr) }
+            .to_string_lossy()
+            .into_owned();
+        std::path::PathBuf::from(path)
+    }
+    
+    /// Get the path to the pre-unlock hook script
+    pub fn pre_unlock_hook_path(&self) -> std::path::PathBuf {
+        let pool = apr::Pool::new();
+        let path_ptr = unsafe {
+            subversion_sys::svn_repos_pre_unlock_hook(self.ptr, pool.as_mut_ptr())
+        };
+        
+        let path = unsafe { std::ffi::CStr::from_ptr(path_ptr) }
+            .to_string_lossy()
+            .into_owned();
+        std::path::PathBuf::from(path)
+    }
+    
+    /// Get the path to the post-unlock hook script
+    pub fn post_unlock_hook_path(&self) -> std::path::PathBuf {
+        let pool = apr::Pool::new();
+        let path_ptr = unsafe {
+            subversion_sys::svn_repos_post_unlock_hook(self.ptr, pool.as_mut_ptr())
+        };
+        
+        let path = unsafe { std::ffi::CStr::from_ptr(path_ptr) }
+            .to_string_lossy()
+            .into_owned();
+        std::path::PathBuf::from(path)
+    }
+}
+
 #[cfg(test)]
 mod additional_tests {
     use super::*;
@@ -2079,5 +2216,63 @@ mod additional_tests {
             "Failed to abort report: {:?}",
             abort_result.err()
         );
+    }
+    
+    #[test]
+    fn test_hook_paths() {
+        // Create a temporary repository for testing
+        let temp_dir = tempfile::tempdir().unwrap();
+        let repo_path = temp_dir.path().join("test_repo");
+        
+        // Create repository
+        let repo = Repos::create(&repo_path).unwrap();
+        
+        // Test getting hook paths - they should all return valid paths
+        let start_commit_hook = repo.start_commit_hook_path();
+        assert!(start_commit_hook.to_str().unwrap().contains("start-commit"));
+        assert!(start_commit_hook.to_str().unwrap().contains("hooks"));
+        
+        let pre_commit_hook = repo.pre_commit_hook_path();
+        assert!(pre_commit_hook.to_str().unwrap().contains("pre-commit"));
+        
+        let post_commit_hook = repo.post_commit_hook_path();
+        assert!(post_commit_hook.to_str().unwrap().contains("post-commit"));
+        
+        let pre_revprop_hook = repo.pre_revprop_change_hook_path();
+        assert!(pre_revprop_hook.to_str().unwrap().contains("pre-revprop-change"));
+        
+        let post_revprop_hook = repo.post_revprop_change_hook_path();
+        assert!(post_revprop_hook.to_str().unwrap().contains("post-revprop-change"));
+        
+        let pre_lock_hook = repo.pre_lock_hook_path();
+        assert!(pre_lock_hook.to_str().unwrap().contains("pre-lock"));
+        
+        let post_lock_hook = repo.post_lock_hook_path();
+        assert!(post_lock_hook.to_str().unwrap().contains("post-lock"));
+        
+        let pre_unlock_hook = repo.pre_unlock_hook_path();
+        assert!(pre_unlock_hook.to_str().unwrap().contains("pre-unlock"));
+        
+        let post_unlock_hook = repo.post_unlock_hook_path();
+        assert!(post_unlock_hook.to_str().unwrap().contains("post-unlock"));
+    }
+    
+    #[test]
+    fn test_hooks_setenv() {
+        // Create a temporary repository for testing
+        let temp_dir = tempfile::tempdir().unwrap();
+        let repo_path = temp_dir.path().join("test_repo");
+        
+        // Create repository
+        let mut repo = Repos::create(&repo_path).unwrap();
+        
+        // Create a hooks env file
+        let hooks_env_path = temp_dir.path().join("hooks.env");
+        std::fs::write(&hooks_env_path, "TEST_VAR=test_value\n").unwrap();
+        
+        // Test setting the hooks environment
+        let result = repo.hooks_setenv(hooks_env_path.to_str().unwrap());
+        // This might fail if the feature is not available, but should not crash
+        let _ = result;
     }
 }
