@@ -1259,11 +1259,9 @@ pub fn apply(
 ///
 /// Returns a writable stream. When svndiff data is written to this stream,
 /// it will be parsed and the provided handler will be called for each delta window.
-/// 
+///
 /// The handler must outlive the returned stream.
-pub fn parse_svndiff<'a, F>(
-    handler: &'a mut F,
-) -> Result<crate::io::Stream, crate::Error> 
+pub fn parse_svndiff<'a, F>(handler: &'a mut F) -> Result<crate::io::Stream, crate::Error>
 where
     F: FnMut(&mut TxDeltaWindow) -> Result<(), crate::Error>,
 {
@@ -1282,16 +1280,16 @@ where
     {
         unsafe {
             let handler = &mut *(baton as *mut F);
-            
+
             if window.is_null() {
                 // NULL window means end of stream
                 return std::ptr::null_mut();
             }
-            
+
             // Wrap the window
             let mut tx_window = TxDeltaWindow::new();
             tx_window.ptr = window;
-            
+
             match handler(&mut tx_window) {
                 Ok(()) => std::ptr::null_mut(),
                 Err(err) => err.as_ptr() as *mut subversion_sys::svn_error_t,

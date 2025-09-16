@@ -445,6 +445,98 @@ impl Fs {
         svn_result(ret)?;
         Ok(locks)
     }
+
+    /// Freeze the filesystem for the duration of a callback
+    pub fn freeze<F>(&mut self, freeze_func: F) -> Result<(), Error>
+    where
+        F: FnOnce() -> Result<(), Error>,
+    {
+        // We need to create a wrapper that can be passed to C
+        struct FreezeWrapper<F> {
+            func: F,
+            error: Option<Error>,
+        }
+
+        extern "C" fn freeze_callback<F>(
+            baton: *mut std::ffi::c_void,
+            _pool: *mut subversion_sys::apr_pool_t,
+        ) -> *mut subversion_sys::svn_error_t
+        where
+            F: FnOnce() -> Result<(), Error>,
+        {
+            unsafe {
+                let wrapper = &mut *(baton as *mut FreezeWrapper<F>);
+                // We need to take the function out since it's FnOnce
+                let func = std::ptr::read(&wrapper.func as *const F);
+                match func() {
+                    Ok(()) => std::ptr::null_mut(),
+                    Err(e) => {
+                        wrapper.error = Some(e.clone());
+                        e.into_raw()
+                    }
+                }
+            }
+        }
+
+        let mut wrapper = FreezeWrapper {
+            func: freeze_func,
+            error: None,
+        };
+
+        let ret = unsafe {
+            subversion_sys::svn_fs_freeze(
+                self.fs_ptr,
+                Some(freeze_callback::<F>),
+                &mut wrapper as *mut _ as *mut std::ffi::c_void,
+                self.pool.as_mut_ptr(),
+            )
+        };
+
+        if let Some(err) = wrapper.error {
+            return Err(err);
+        }
+
+        svn_result(ret)
+    }
+
+    /// Get filesystem information
+    pub fn info(&self) -> Result<FsInfo, Error> {
+        let pool = apr::Pool::new();
+        
+        let mut info_ptr: *const subversion_sys::svn_fs_info_placeholder_t = std::ptr::null();
+        
+        let ret = unsafe {
+            subversion_sys::svn_fs_info(
+                &mut info_ptr,
+                self.fs_ptr,
+                pool.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            )
+        };
+
+        svn_result(ret)?;
+
+        if info_ptr.is_null() {
+            return Err(Error::from_str("Failed to get filesystem info"));
+        }
+
+        // Parse the info structure from svn_fs_info_placeholder_t
+        unsafe {
+            let info = &*info_ptr;
+            
+            Ok(FsInfo {
+                fs_type: if info.fs_type.is_null() {
+                    None
+                } else {
+                    Some(
+                        std::ffi::CStr::from_ptr(info.fs_type)
+                            .to_string_lossy()
+                            .into_owned()
+                    )
+                },
+            })
+        }
+    }
 }
 
 /// Gets the filesystem type for a repository at the given path.
@@ -470,6 +562,264 @@ pub fn delete_fs(path: &std::path::Path) -> Result<(), Error> {
         svn_result(err)?;
         Ok(())
     }
+}
+
+/// Pack the filesystem at the given path.
+/// This compresses the filesystem storage to save space.
+pub fn pack(
+    path: &std::path::Path,
+    notify: Option<Box<dyn Fn(&str) + Send>>,
+    cancel: Option<Box<dyn Fn() -> bool + Send>>,
+) -> Result<(), Error> {
+    let path_cstr = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
+    let pool = apr::Pool::new();
+    
+    // Create notify callback wrapper
+    let notify_baton = notify.map(|f| Box::into_raw(Box::new(f)) as *mut std::ffi::c_void);
+    let cancel_baton = cancel.map(|f| Box::into_raw(Box::new(f)) as *mut std::ffi::c_void);
+    
+    extern "C" fn notify_wrapper(
+        baton: *mut std::ffi::c_void,
+        shard: i64,
+        _action: subversion_sys::svn_fs_pack_notify_action_t,
+        _pool: *mut apr_sys::apr_pool_t,
+    ) -> *mut subversion_sys::svn_error_t {
+        if !baton.is_null() {
+            let notify = unsafe { &*(baton as *const Box<dyn Fn(&str) + Send>) };
+            notify(&format!("Packing shard {}", shard));
+        }
+        std::ptr::null_mut()
+    }
+    
+    extern "C" fn cancel_wrapper(baton: *mut std::ffi::c_void) -> *mut subversion_sys::svn_error_t {
+        if !baton.is_null() {
+            let cancel = unsafe { &*(baton as *const Box<dyn Fn() -> bool + Send>) };
+            if cancel() {
+                return unsafe {
+                    Error::from_str("Operation cancelled").into_raw()
+                };
+            }
+        }
+        std::ptr::null_mut()
+    }
+    
+    let err = unsafe {
+        subversion_sys::svn_fs_pack(
+            path_cstr.as_ptr(),
+            notify_baton.map_or(None, |_| Some(notify_wrapper as _)),
+            notify_baton.unwrap_or(std::ptr::null_mut()),
+            cancel_baton.map_or(None, |_| Some(cancel_wrapper as _)),
+            cancel_baton.unwrap_or(std::ptr::null_mut()),
+            pool.as_mut_ptr(),
+        )
+    };
+    
+    // Clean up callbacks
+    if let Some(baton) = notify_baton {
+        unsafe {
+            let _ = Box::from_raw(baton as *mut Box<dyn Fn(&str) + Send>);
+        }
+    }
+    if let Some(baton) = cancel_baton {
+        unsafe {
+            let _ = Box::from_raw(baton as *mut Box<dyn Fn() -> bool + Send>);
+        }
+    }
+    
+    svn_result(err)?;
+    Ok(())
+}
+
+/// Verify the filesystem at the given path.
+pub fn verify(
+    path: &std::path::Path,
+    start: Option<Revnum>,
+    end: Option<Revnum>,
+    notify: Option<Box<dyn Fn(Revnum, &str) + Send>>,
+    cancel: Option<Box<dyn Fn() -> bool + Send>>,
+) -> Result<(), Error> {
+    let path_cstr = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
+    let pool = apr::Pool::new();
+    
+    let start_rev = start.map(|r| r.0).unwrap_or(0);
+    let end_rev = end.map(|r| r.0).unwrap_or(-1); // SVN_INVALID_REVNUM means HEAD
+    
+    // Create callback wrappers
+    let notify_baton = notify.map(|f| Box::into_raw(Box::new(f)) as *mut std::ffi::c_void);
+    let cancel_baton = cancel.map(|f| Box::into_raw(Box::new(f)) as *mut std::ffi::c_void);
+    
+    extern "C" fn notify_wrapper(
+        revision: subversion_sys::svn_revnum_t,
+        baton: *mut std::ffi::c_void,
+        _pool: *mut apr_sys::apr_pool_t,
+    ) {
+        if !baton.is_null() {
+            let notify = unsafe { &*(baton as *const Box<dyn Fn(Revnum, &str) + Send>) };
+            notify(Revnum(revision), "Verifying");
+        }
+    }
+    
+    extern "C" fn cancel_wrapper(baton: *mut std::ffi::c_void) -> *mut subversion_sys::svn_error_t {
+        if !baton.is_null() {
+            let cancel = unsafe { &*(baton as *const Box<dyn Fn() -> bool + Send>) };
+            if cancel() {
+                return unsafe {
+                    Error::from_str("Operation cancelled").into_raw()
+                };
+            }
+        }
+        std::ptr::null_mut()
+    }
+    
+    let err = unsafe {
+        subversion_sys::svn_fs_verify(
+            path_cstr.as_ptr(),
+            std::ptr::null_mut(), // config
+            start_rev,
+            end_rev,
+            notify_baton.map_or(None, |_| Some(notify_wrapper as _)),
+            notify_baton.unwrap_or(std::ptr::null_mut()),
+            cancel_baton.map_or(None, |_| Some(cancel_wrapper as _)),
+            cancel_baton.unwrap_or(std::ptr::null_mut()),
+            pool.as_mut_ptr(),
+        )
+    };
+    
+    // Clean up callbacks
+    if let Some(baton) = notify_baton {
+        unsafe {
+            let _ = Box::from_raw(baton as *mut Box<dyn Fn(Revnum, &str) + Send>);
+        }
+    }
+    if let Some(baton) = cancel_baton {
+        unsafe {
+            let _ = Box::from_raw(baton as *mut Box<dyn Fn() -> bool + Send>);
+        }
+    }
+    
+    svn_result(err)?;
+    Ok(())
+}
+
+/// Hotcopy a filesystem from src_path to dst_path.
+pub fn hotcopy(
+    src_path: &std::path::Path,
+    dst_path: &std::path::Path,
+    clean: bool,
+    incremental: bool,
+    notify: Option<Box<dyn Fn(&str) + Send>>,
+    cancel: Option<Box<dyn Fn() -> bool + Send>>,
+) -> Result<(), Error> {
+    let src_cstr = std::ffi::CString::new(src_path.to_str().unwrap()).unwrap();
+    let dst_cstr = std::ffi::CString::new(dst_path.to_str().unwrap()).unwrap();
+    let pool = apr::Pool::new();
+    
+    // Create callback wrappers
+    let notify_baton = notify.map(|f| Box::into_raw(Box::new(f)) as *mut std::ffi::c_void);
+    let cancel_baton = cancel.map(|f| Box::into_raw(Box::new(f)) as *mut std::ffi::c_void);
+    
+    extern "C" fn notify_wrapper(
+        baton: *mut std::ffi::c_void,
+        start_revision: subversion_sys::svn_revnum_t,
+        end_revision: subversion_sys::svn_revnum_t,
+        _pool: *mut apr_sys::apr_pool_t,
+    ) {
+        if !baton.is_null() {
+            let notify = unsafe { &*(baton as *const Box<dyn Fn(&str) + Send>) };
+            notify(&format!("Hotcopy revisions {} to {}", start_revision, end_revision));
+        }
+    }
+    
+    extern "C" fn cancel_wrapper(baton: *mut std::ffi::c_void) -> *mut subversion_sys::svn_error_t {
+        if !baton.is_null() {
+            let cancel = unsafe { &*(baton as *const Box<dyn Fn() -> bool + Send>) };
+            if cancel() {
+                return unsafe {
+                    Error::from_str("Operation cancelled").into_raw()
+                };
+            }
+        }
+        std::ptr::null_mut()
+    }
+    
+    let err = unsafe {
+        subversion_sys::svn_fs_hotcopy3(
+            src_cstr.as_ptr(),
+            dst_cstr.as_ptr(),
+            clean as i32,
+            incremental as i32,
+            notify_baton.map_or(None, |_| Some(notify_wrapper as _)),
+            notify_baton.unwrap_or(std::ptr::null_mut()),
+            cancel_baton.map_or(None, |_| Some(cancel_wrapper as _)),
+            cancel_baton.unwrap_or(std::ptr::null_mut()),
+            pool.as_mut_ptr(),
+        )
+    };
+    
+    // Clean up callbacks
+    if let Some(baton) = notify_baton {
+        unsafe {
+            let _ = Box::from_raw(baton as *mut Box<dyn Fn(&str) + Send>);
+        }
+    }
+    if let Some(baton) = cancel_baton {
+        unsafe {
+            let _ = Box::from_raw(baton as *mut Box<dyn Fn() -> bool + Send>);
+        }
+    }
+    
+    svn_result(err)?;
+    Ok(())
+}
+
+
+/// Recover a filesystem at the given path.
+pub fn recover(
+    path: &std::path::Path,
+    cancel: Option<Box<dyn Fn() -> bool + Send>>,
+) -> Result<(), Error> {
+    let path_cstr = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
+    let pool = apr::Pool::new();
+    
+    let cancel_baton = cancel.map(|f| Box::into_raw(Box::new(f)) as *mut std::ffi::c_void);
+    
+    extern "C" fn cancel_wrapper(baton: *mut std::ffi::c_void) -> *mut subversion_sys::svn_error_t {
+        if !baton.is_null() {
+            let cancel = unsafe { &*(baton as *const Box<dyn Fn() -> bool + Send>) };
+            if cancel() {
+                return unsafe {
+                    Error::from_str("Operation cancelled").into_raw()
+                };
+            }
+        }
+        std::ptr::null_mut()
+    }
+    
+    let err = unsafe {
+        subversion_sys::svn_fs_recover(
+            path_cstr.as_ptr(),
+            cancel_baton.map_or(None, |_| Some(cancel_wrapper as _)),
+            cancel_baton.unwrap_or(std::ptr::null_mut()),
+            pool.as_mut_ptr(),
+        )
+    };
+    
+    // Clean up callback
+    if let Some(baton) = cancel_baton {
+        unsafe {
+            let _ = Box::from_raw(baton as *mut Box<dyn Fn() -> bool + Send>);
+        }
+    }
+    
+    svn_result(err)?;
+    Ok(())
+}
+
+/// Information about a filesystem.
+#[derive(Debug, Clone)]
+pub struct FsInfo {
+    /// Filesystem type (fsfs, bdb, etc.)
+    pub fs_type: Option<String>,
 }
 
 #[allow(dead_code)]

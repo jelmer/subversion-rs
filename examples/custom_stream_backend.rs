@@ -101,7 +101,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut buffer = vec![0u8; 18];
     let bytes_read = stream.read(&mut buffer)?;
     println!("   Stream created with builder pattern");
-    println!("   Read {} bytes: {:?}", bytes_read, String::from_utf8_lossy(&buffer[..bytes_read]));
+    println!(
+        "   Read {} bytes: {:?}",
+        bytes_read,
+        String::from_utf8_lossy(&buffer[..bytes_read])
+    );
 
     // Example 5: Read-only and Write-only backends
     println!("\n5. Using specialized backends:");
