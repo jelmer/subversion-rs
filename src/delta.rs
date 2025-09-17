@@ -91,7 +91,7 @@ impl<'pool> Editor for WrapEditor<'pool> {
 pub struct WrapDirectoryEditor<'pool> {
     pub(crate) editor: *const subversion_sys::svn_delta_editor_t,
     pub(crate) baton: *mut std::ffi::c_void,
-    _pool: std::marker::PhantomData<&'pool apr::Pool>,
+    pub(crate) _pool: std::marker::PhantomData<&'pool apr::Pool>,
 }
 
 impl<'pool> DirectoryEditor for WrapDirectoryEditor<'pool> {

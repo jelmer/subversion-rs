@@ -498,6 +498,210 @@ pub fn is_adm_dir(name: &str) -> bool {
     result != 0
 }
 
+/// Crawl local changes in the working copy and report them to the repository
+pub fn crawl_revisions5(
+    wc_ctx: &mut Context,
+    local_abspath: &str,
+    reporter: &mut crate::ra::WrapReporter,
+    restore_files: bool,
+    depth: crate::Depth,
+    honor_depth_exclude: bool,
+    depth_compatibility_trick: bool,
+    use_commit_times: bool,
+) -> Result<(), crate::Error> {
+    let local_abspath_cstr = std::ffi::CString::new(local_abspath)?;
+
+    with_tmp_pool(|scratch_pool| {
+        let err = unsafe {
+            subversion_sys::svn_wc_crawl_revisions5(
+                wc_ctx.as_mut_ptr(),
+                local_abspath_cstr.as_ptr(),
+                reporter.as_ptr(),
+                reporter.as_baton(),
+                if restore_files { 1 } else { 0 },
+                depth.into(),
+                if honor_depth_exclude { 1 } else { 0 },
+                if depth_compatibility_trick { 1 } else { 0 },
+                if use_commit_times { 1 } else { 0 },
+                None,                 // notify_func
+                std::ptr::null_mut(), // notify_baton
+                None,                 // cancel_func
+                std::ptr::null_mut(), // cancel_baton
+                scratch_pool.as_mut_ptr(),
+            )
+        };
+
+        svn_result(err)
+    })
+}
+
+/// Get an editor for updating the working copy
+pub fn get_update_editor4(
+    wc_ctx: &mut Context,
+    anchor_abspath: &str,
+    target_basename: &str,
+    use_commit_times: bool,
+    depth: crate::Depth,
+    depth_is_sticky: bool,
+    allow_unver_obstructions: bool,
+    adds_as_modification: bool,
+    diff3_cmd: Option<&str>,
+    preserved_exts: &[&str],
+) -> Result<(UpdateEditor, crate::Revnum), crate::Error> {
+    let anchor_abspath_cstr = std::ffi::CString::new(anchor_abspath)?;
+    let target_basename_cstr = std::ffi::CString::new(target_basename)?;
+    let diff3_cmd_cstr = diff3_cmd.map(std::ffi::CString::new).transpose()?;
+
+    // Create preserved extensions array
+    let preserved_exts_cstrs: Vec<std::ffi::CString> = preserved_exts
+        .iter()
+        .map(|&s| std::ffi::CString::new(s))
+        .collect::<Result<Vec<_>, _>>()?;
+    let _preserved_exts_ptrs: Vec<*const std::ffi::c_char> = preserved_exts_cstrs
+        .iter()
+        .map(|s| s.as_ptr())
+        .chain(std::iter::once(std::ptr::null()))
+        .collect();
+
+    let result_pool = apr::Pool::new();
+    let mut target_revision: subversion_sys::svn_revnum_t = 0;
+    let mut editor_ptr: *const subversion_sys::svn_delta_editor_t = std::ptr::null();
+    let mut edit_baton: *mut std::ffi::c_void = std::ptr::null_mut();
+
+    let err = with_tmp_pool(|scratch_pool| {
+        unsafe {
+            svn_result(subversion_sys::svn_wc_get_update_editor4(
+                &mut editor_ptr,
+                &mut edit_baton,
+                &mut target_revision,
+                wc_ctx.as_mut_ptr(),
+                anchor_abspath_cstr.as_ptr(),
+                target_basename_cstr.as_ptr(),
+                if use_commit_times { 1 } else { 0 }, // use_commit_times
+                depth.into(),
+                if depth_is_sticky { 1 } else { 0 },
+                if allow_unver_obstructions { 1 } else { 0 },
+                if adds_as_modification { 1 } else { 0 },
+                0, // server_performs_filtering
+                0, // clean_checkout
+                diff3_cmd_cstr
+                    .as_ref()
+                    .map_or(std::ptr::null(), |c| c.as_ptr()),
+                std::ptr::null(), // preserved_exts - TODO: create proper apr_array_header_t
+                None,             // fetch_dirents_func
+                std::ptr::null_mut(), // fetch_baton
+                None,             // conflict_func
+                std::ptr::null_mut(), // conflict_baton
+                None,             // external_func
+                std::ptr::null_mut(), // external_baton
+                None,             // cancel_func
+                std::ptr::null_mut(), // cancel_baton
+                None,             // notify_func
+                std::ptr::null_mut(), // notify_baton
+                result_pool.as_mut_ptr(),
+                scratch_pool.as_mut_ptr(),
+            ))
+        }
+    });
+
+    err?;
+
+    // Create the update editor wrapper
+    let editor = UpdateEditor {
+        editor: editor_ptr as *const subversion_sys::svn_delta_editor_t,
+        edit_baton,
+        _pool: result_pool,
+        target_revision: crate::Revnum::from_raw(target_revision).unwrap_or_default(),
+    };
+
+    Ok((
+        editor,
+        crate::Revnum::from_raw(target_revision).unwrap_or_default(),
+    ))
+}
+
+/// Update editor for working copy operations
+pub struct UpdateEditor {
+    editor: *const subversion_sys::svn_delta_editor_t,
+    edit_baton: *mut std::ffi::c_void,
+    _pool: apr::Pool,
+    target_revision: crate::Revnum,
+}
+
+impl UpdateEditor {
+    /// Get the target revision for this update
+    pub fn target_revision(&self) -> crate::Revnum {
+        self.target_revision
+    }
+}
+
+impl crate::delta::Editor for UpdateEditor {
+    fn as_raw_parts(
+        &self,
+    ) -> (
+        *const subversion_sys::svn_delta_editor_t,
+        *mut std::ffi::c_void,
+    ) {
+        (self.editor, self.edit_baton)
+    }
+
+    fn set_target_revision(&mut self, revision: Option<crate::Revnum>) -> Result<(), crate::Error> {
+        let scratch_pool = apr::Pool::new();
+        let err = unsafe {
+            ((*self.editor).set_target_revision.unwrap())(
+                self.edit_baton,
+                revision.map_or(-1, |r| r.into()),
+                scratch_pool.as_mut_ptr(),
+            )
+        };
+        crate::Error::from_raw(err)?;
+        Ok(())
+    }
+
+    fn open_root(
+        &mut self,
+        base_revision: Option<crate::Revnum>,
+    ) -> Result<Box<dyn crate::delta::DirectoryEditor + 'static>, crate::Error> {
+        let mut baton = std::ptr::null_mut();
+        let pool = apr::Pool::new();
+        let err = unsafe {
+            ((*self.editor).open_root.unwrap())(
+                self.edit_baton,
+                base_revision.map_or(-1, |r| r.into()),
+                pool.as_mut_ptr(),
+                &mut baton,
+            )
+        };
+        crate::Error::from_raw(err)?;
+        Ok(Box::new(crate::delta::WrapDirectoryEditor {
+            editor: self.editor,
+            baton,
+            _pool: std::marker::PhantomData,
+        }))
+    }
+
+    fn close(&mut self) -> Result<(), crate::Error> {
+        let scratch_pool = apr::Pool::new();
+        let err = unsafe {
+            ((*self.editor).close_edit.unwrap())(self.edit_baton, scratch_pool.as_mut_ptr())
+        };
+        crate::Error::from_raw(err)?;
+        Ok(())
+    }
+
+    fn abort(&mut self) -> Result<(), crate::Error> {
+        let scratch_pool = apr::Pool::new();
+        let err = unsafe {
+            ((*self.editor).abort_edit.unwrap())(self.edit_baton, scratch_pool.as_mut_ptr())
+        };
+        crate::Error::from_raw(err)?;
+        Ok(())
+    }
+}
+
+/// Directory entries type for working copy operations
+pub type DirEntries = std::collections::HashMap<String, crate::ra::Dirent>;
+
 /// Check working copy format at path
 pub fn check_wc(path: &std::path::Path) -> Result<Option<i32>, crate::Error> {
     let path_str = path.to_string_lossy();

@@ -1811,6 +1811,18 @@ pub struct WrapReporter {
     _phantom: PhantomData<*mut ()>,
 }
 
+impl WrapReporter {
+    /// Returns the reporter pointer
+    pub fn as_ptr(&self) -> *const subversion_sys::svn_ra_reporter3_t {
+        self.reporter
+    }
+
+    /// Returns the reporter baton
+    pub fn as_baton(&self) -> *mut std::ffi::c_void {
+        self.baton
+    }
+}
+
 impl Drop for WrapReporter {
     fn drop(&mut self) {
         // Pool drop will clean up
