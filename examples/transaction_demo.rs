@@ -12,7 +12,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Begin a transaction
     println!("Beginning transaction...");
-    let mut txn = fs.begin_txn(Revnum::from(0u32))?;
+    let mut txn = fs.begin_txn(Revnum::from(0u32), 0)?;
 
     // Get transaction information
     let txn_name = txn.name()?;
@@ -38,12 +38,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     root.make_file("trunk/src/main.rs")?;
 
     // Add content to files
-    let mut stream = root.apply_text("trunk/README.txt")?;
+    let mut stream = root.apply_text("trunk/README.txt", None)?;
     stream.write_all(b"This is a demo repository.\n")?;
     stream.write_all(b"Created using Subversion Rust bindings.\n")?;
     drop(stream);
 
-    let mut stream = root.apply_text("trunk/src/main.rs")?;
+    let mut stream = root.apply_text("trunk/src/main.rs", None)?;
     stream.write_all(b"fn main() {\n")?;
     stream.write_all(b"    println!(\"Hello from SVN!\");\n")?;
     stream.write_all(b"}\n")?;

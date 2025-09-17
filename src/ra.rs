@@ -2100,17 +2100,17 @@ mod tests {
 
         // Create some test files in the repository
         let fs = repo.fs().unwrap();
-        let mut txn = fs.begin_txn(crate::Revnum(0)).unwrap();
+        let mut txn = fs.begin_txn(crate::Revnum(0), 0).unwrap();
         let mut txn_root = txn.root().unwrap();
 
         // Create test files
         txn_root.make_file("file1.txt").unwrap();
-        let mut stream1 = txn_root.apply_text("file1.txt").unwrap();
+        let mut stream1 = txn_root.apply_text("file1.txt", None).unwrap();
         stream1.write(b"Content of file 1").unwrap();
         stream1.close().unwrap();
 
         txn_root.make_file("file2.txt").unwrap();
-        let mut stream2 = txn_root.apply_text("file2.txt").unwrap();
+        let mut stream2 = txn_root.apply_text("file2.txt", None).unwrap();
         stream2.write(b"Content of file 2").unwrap();
         stream2.close().unwrap();
 
@@ -2364,7 +2364,7 @@ mod tests {
 
         // Create a directory structure with properties
         let fs = repo.fs().unwrap();
-        let mut txn = fs.begin_txn(crate::Revnum::from(0u32)).unwrap();
+        let mut txn = fs.begin_txn(crate::Revnum::from(0u32), 0).unwrap();
         let mut root = txn.root().unwrap();
 
         // Create directories
@@ -2416,12 +2416,12 @@ mod tests {
                 *revisions.last().unwrap()
             };
 
-            let mut txn = fs.begin_txn(base_rev).unwrap();
+            let mut txn = fs.begin_txn(base_rev, 0).unwrap();
             let mut root = txn.root().unwrap();
 
             let filename = format!("file{}.txt", i);
             root.make_file(&filename).unwrap();
-            let mut stream = root.apply_text(&filename).unwrap();
+            let mut stream = root.apply_text(&filename, None).unwrap();
             use std::io::Write;
             writeln!(stream, "Content for file {}", i).unwrap();
             drop(stream);
@@ -2476,12 +2476,12 @@ mod tests {
 
         // Create a commit to replay
         let fs = repo.fs().unwrap();
-        let mut txn = fs.begin_txn(crate::Revnum(0)).unwrap();
+        let mut txn = fs.begin_txn(crate::Revnum(0), 0).unwrap();
         let mut root = txn.root().unwrap();
 
         root.make_dir("trunk").unwrap();
         root.make_file("trunk/test.txt").unwrap();
-        let mut stream = root.apply_text("trunk/test.txt").unwrap();
+        let mut stream = root.apply_text("trunk/test.txt", None).unwrap();
         use std::io::Write;
         stream.write_all(b"Test content\n").unwrap();
         drop(stream);
@@ -2735,11 +2735,11 @@ mod tests {
 
         // Create a file to lock
         let fs = repo.fs().unwrap();
-        let mut txn = fs.begin_txn(crate::Revnum(0)).unwrap();
+        let mut txn = fs.begin_txn(crate::Revnum(0), 0).unwrap();
         let mut root = txn.root().unwrap();
 
         root.make_file("lockable.txt").unwrap();
-        let mut stream = root.apply_text("lockable.txt").unwrap();
+        let mut stream = root.apply_text("lockable.txt", None).unwrap();
         use std::io::Write;
         stream.write_all(b"Content to lock\n").unwrap();
         drop(stream);
@@ -2805,19 +2805,19 @@ mod tests {
         let fs = repo.fs().unwrap();
 
         // Rev 1: Create file
-        let mut txn = fs.begin_txn(crate::Revnum(0)).unwrap();
+        let mut txn = fs.begin_txn(crate::Revnum(0), 0).unwrap();
         let mut root = txn.root().unwrap();
         root.make_file("original.txt").unwrap();
-        let mut stream = root.apply_text("original.txt").unwrap();
+        let mut stream = root.apply_text("original.txt", None).unwrap();
         use std::io::Write;
         stream.write_all(b"Original content\n").unwrap();
         drop(stream);
         let rev1 = txn.commit().unwrap();
 
         // Rev 2: Modify file
-        let mut txn = fs.begin_txn(rev1).unwrap();
+        let mut txn = fs.begin_txn(rev1, 0).unwrap();
         let mut root = txn.root().unwrap();
-        let mut stream = root.apply_text("original.txt").unwrap();
+        let mut stream = root.apply_text("original.txt", None).unwrap();
         stream.write_all(b"Modified content\n").unwrap();
         drop(stream);
         let rev2 = txn.commit().unwrap();

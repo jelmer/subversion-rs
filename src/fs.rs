@@ -1459,8 +1459,9 @@ impl TxnRoot {
     }
 
     /// Apply text changes to a file
-    pub fn apply_text(&mut self, path: &str) -> Result<crate::io::Stream, Error> {
+    pub fn apply_text(&mut self, path: &str, result_checksum: Option<&str>) -> Result<crate::io::Stream, Error> {
         let path_cstr = std::ffi::CString::new(path)?;
+        let checksum_cstr = result_checksum.map(std::ffi::CString::new).transpose()?;
         let pool = apr::Pool::new();
         unsafe {
             let mut stream_ptr = std::ptr::null_mut();
@@ -1468,7 +1469,9 @@ impl TxnRoot {
                 &mut stream_ptr,
                 self.ptr,
                 path_cstr.as_ptr(),
-                std::ptr::null(), // result_checksum - we ignore for now
+                checksum_cstr
+                    .as_ref()
+                    .map_or(std::ptr::null(), |c| c.as_ptr() as *const _),
                 pool.as_mut_ptr(),
             );
             Error::from_raw(err)?;
@@ -1596,7 +1599,7 @@ impl TxnRoot {
 
 impl Fs {
     /// Begin a new transaction
-    pub fn begin_txn(&self, base_rev: Revnum) -> Result<Transaction, Error> {
+    pub fn begin_txn(&self, base_rev: Revnum, flags: u32) -> Result<Transaction, Error> {
         let pool = apr::Pool::new();
         unsafe {
             let mut txn_ptr = std::ptr::null_mut();
@@ -1604,7 +1607,7 @@ impl Fs {
                 &mut txn_ptr,
                 self.as_ptr() as *mut _,
                 base_rev.into(),
-                0, // flags - 0 for now
+                flags,
                 pool.as_mut_ptr(),
             );
             Error::from_raw(err)?;
@@ -1913,7 +1916,7 @@ mod tests {
         let fs = Fs::create(&fs_path).unwrap();
 
         // Begin a transaction
-        let mut txn = fs.begin_txn(crate::Revnum::from(0u32)).unwrap();
+        let mut txn = fs.begin_txn(crate::Revnum::from(0u32), 0).unwrap();
 
         // Check basic transaction properties
         let name = txn.name().unwrap();
@@ -1948,7 +1951,7 @@ mod tests {
         assert_eq!(kind, crate::NodeKind::File);
 
         // Add content to the file
-        let mut stream = root.apply_text("trunk/test.txt").unwrap();
+        let mut stream = root.apply_text("trunk/test.txt", None).unwrap();
         use std::io::Write;
         stream.write_all(b"Hello, World!\n").unwrap();
         drop(stream);
@@ -1978,7 +1981,7 @@ mod tests {
         let fs = Fs::create(&fs_path).unwrap();
 
         // Begin a transaction
-        let mut txn = fs.begin_txn(crate::Revnum(0)).unwrap();
+        let mut txn = fs.begin_txn(crate::Revnum(0), 0).unwrap();
         let mut root = txn.root().unwrap();
 
         // Make some changes
@@ -2005,14 +2008,14 @@ mod tests {
         let fs = Fs::create(&fs_path).unwrap();
 
         // First, create some content to copy
-        let mut txn1 = fs.begin_txn(crate::Revnum(0)).unwrap();
+        let mut txn1 = fs.begin_txn(crate::Revnum(0), 0).unwrap();
         txn1.change_prop("svn:log", "Initial commit").unwrap();
         let mut root1 = txn1.root().unwrap();
 
         root1.make_dir("original").unwrap();
         root1.make_file("original/file.txt").unwrap();
 
-        let mut stream = root1.apply_text("original/file.txt").unwrap();
+        let mut stream = root1.apply_text("original/file.txt", None).unwrap();
         use std::io::Write;
         stream.write_all(b"Original content\n").unwrap();
         drop(stream);
@@ -2020,7 +2023,7 @@ mod tests {
         let rev1 = txn1.commit().unwrap();
 
         // Now copy the content in a new transaction
-        let mut txn2 = fs.begin_txn(rev1).unwrap();
+        let mut txn2 = fs.begin_txn(rev1, 0).unwrap();
         txn2.change_prop("svn:log", "Copy operation").unwrap();
         let mut root2 = txn2.root().unwrap();
 
@@ -2048,7 +2051,7 @@ mod tests {
         let fs = Fs::create(&fs_path).unwrap();
 
         // Create content first
-        let mut txn1 = fs.begin_txn(crate::Revnum(0)).unwrap();
+        let mut txn1 = fs.begin_txn(crate::Revnum(0), 0).unwrap();
         txn1.change_prop("svn:log", "Create files").unwrap();
         let mut root1 = txn1.root().unwrap();
 
@@ -2059,7 +2062,7 @@ mod tests {
         let rev1 = txn1.commit().unwrap();
 
         // Now delete some content
-        let mut txn2 = fs.begin_txn(rev1).unwrap();
+        let mut txn2 = fs.begin_txn(rev1, 0).unwrap();
         txn2.change_prop("svn:log", "Delete files").unwrap();
         let mut root2 = txn2.root().unwrap();
 
@@ -2084,7 +2087,7 @@ mod tests {
 
         let fs = Fs::create(&fs_path).unwrap();
 
-        let mut txn = fs.begin_txn(crate::Revnum(0)).unwrap();
+        let mut txn = fs.begin_txn(crate::Revnum(0), 0).unwrap();
         let mut root = txn.root().unwrap();
 
         // Create a file and set properties
@@ -2120,7 +2123,7 @@ mod tests {
         let fs = Fs::create(&fs_path).unwrap();
 
         // Begin a transaction
-        let txn = fs.begin_txn(crate::Revnum(0)).unwrap();
+        let txn = fs.begin_txn(crate::Revnum(0), 0).unwrap();
         let txn_name = txn.name().unwrap();
 
         // Don't commit it, just get the name
@@ -2143,12 +2146,12 @@ mod tests {
         let fs = Fs::create(&fs_path).unwrap();
 
         // Create first revision with a file
-        let mut txn = fs.begin_txn(Revnum(0)).unwrap();
+        let mut txn = fs.begin_txn(Revnum(0), 0).unwrap();
         let mut txn_root = txn.root().unwrap();
 
         // Create a file
         txn_root.make_file("test.txt").unwrap();
-        let mut stream = txn_root.apply_text("test.txt").unwrap();
+        let mut stream = txn_root.apply_text("test.txt", None).unwrap();
         use std::io::Write;
         write!(stream, "Initial content").unwrap();
         stream.close().unwrap();
@@ -2157,10 +2160,10 @@ mod tests {
         let rev1 = txn.commit().unwrap();
 
         // Create second revision modifying the file
-        let mut txn2 = fs.begin_txn(rev1).unwrap();
+        let mut txn2 = fs.begin_txn(rev1, 0).unwrap();
         let mut txn_root2 = txn2.root().unwrap();
 
-        let mut stream2 = txn_root2.apply_text("test.txt").unwrap();
+        let mut stream2 = txn_root2.apply_text("test.txt", None).unwrap();
         write!(stream2, "Modified content").unwrap();
         stream2.close().unwrap();
 
@@ -2229,7 +2232,7 @@ mod tests {
         let fs = Fs::create(&fs_path).unwrap();
 
         // Create first revision with a file
-        let mut txn = fs.begin_txn(Revnum(0)).unwrap();
+        let mut txn = fs.begin_txn(Revnum(0), 0).unwrap();
         let mut txn_root = txn.root().unwrap();
 
         // Create a file with a property
@@ -2241,7 +2244,7 @@ mod tests {
         let rev1 = txn.commit().unwrap();
 
         // Create second revision changing the property
-        let mut txn2 = fs.begin_txn(rev1).unwrap();
+        let mut txn2 = fs.begin_txn(rev1, 0).unwrap();
         let mut txn_root2 = txn2.root().unwrap();
 
         txn_root2
@@ -2282,7 +2285,7 @@ mod tests {
         assert_eq!(txns.len(), 0, "Should have no transactions initially");
 
         // Create a transaction
-        let txn = fs.begin_txn(Revnum(0)).unwrap();
+        let txn = fs.begin_txn(Revnum(0), 0).unwrap();
         let txn_name = txn.name().unwrap();
 
         // Now we should see it in the list
@@ -2305,7 +2308,7 @@ mod tests {
         let fs = Fs::create(&fs_path).unwrap();
 
         // First create a file in revision 1
-        let mut txn1 = fs.begin_txn(Revnum(0)).unwrap();
+        let mut txn1 = fs.begin_txn(Revnum(0), 0).unwrap();
         let mut txn_root1 = txn1.root().unwrap();
         txn_root1.make_file("test.txt").unwrap();
         txn_root1
@@ -2314,7 +2317,7 @@ mod tests {
         let rev1 = txn1.commit().unwrap();
 
         // Now test moving the file in a new transaction
-        let mut txn2 = fs.begin_txn(rev1).unwrap();
+        let mut txn2 = fs.begin_txn(rev1, 0).unwrap();
         let mut txn_root2 = txn2.root().unwrap();
 
         // Move requires copying from the base revision then deleting the old
@@ -2355,7 +2358,7 @@ mod tests {
         let fs = Fs::create(&fs_path).unwrap();
 
         // Create initial revision with a file
-        let mut txn1 = fs.begin_txn(Revnum(0)).unwrap();
+        let mut txn1 = fs.begin_txn(Revnum(0), 0).unwrap();
         let mut root1 = txn1.root().unwrap();
         root1.make_file("file.txt").unwrap();
         root1
@@ -2365,7 +2368,7 @@ mod tests {
 
         // Create two divergent changes
         // Branch 1: modify the file
-        let mut txn2 = fs.begin_txn(rev1).unwrap();
+        let mut txn2 = fs.begin_txn(rev1, 0).unwrap();
         let mut root2 = txn2.root().unwrap();
         root2
             .set_file_contents("file.txt", b"Branch 1 content")
@@ -2373,7 +2376,7 @@ mod tests {
         let rev2 = txn2.commit().unwrap();
 
         // Branch 2: also modify the file (creating a conflict)
-        let mut txn3 = fs.begin_txn(rev1).unwrap();
+        let mut txn3 = fs.begin_txn(rev1, 0).unwrap();
         let mut root3 = txn3.root().unwrap();
         root3
             .set_file_contents("file.txt", b"Branch 2 content")
@@ -2398,7 +2401,7 @@ mod tests {
         let fs = Fs::create(&fs_path).unwrap();
 
         // Create initial file with properties
-        let mut txn1 = fs.begin_txn(Revnum(0)).unwrap();
+        let mut txn1 = fs.begin_txn(Revnum(0), 0).unwrap();
         let mut root1 = txn1.root().unwrap();
         root1.make_file("file.txt").unwrap();
         root1
@@ -2410,7 +2413,7 @@ mod tests {
         let rev1 = txn1.commit().unwrap();
 
         // Modify contents but not properties
-        let mut txn2 = fs.begin_txn(rev1).unwrap();
+        let mut txn2 = fs.begin_txn(rev1, 0).unwrap();
         let mut root2 = txn2.root().unwrap();
         root2
             .set_file_contents("file.txt", b"Modified content")
@@ -2434,7 +2437,7 @@ mod tests {
         assert!(!props_changed, "Properties should not have changed");
 
         // Now modify properties
-        let mut txn3 = fs.begin_txn(rev2).unwrap();
+        let mut txn3 = fs.begin_txn(rev2, 0).unwrap();
         let mut root3 = txn3.root().unwrap();
         root3
             .change_node_prop("file.txt", "custom:prop", b"value2")
@@ -2464,20 +2467,20 @@ mod tests {
         let fs = Fs::create(&fs_path).unwrap();
 
         // Create a file in rev 1
-        let mut txn1 = fs.begin_txn(Revnum(0)).unwrap();
+        let mut txn1 = fs.begin_txn(Revnum(0), 0).unwrap();
         let mut root1 = txn1.root().unwrap();
         root1.make_file("file.txt").unwrap();
         root1.set_file_contents("file.txt", b"Version 1").unwrap();
         let rev1 = txn1.commit().unwrap();
 
         // Modify the file in rev 2
-        let mut txn2 = fs.begin_txn(rev1).unwrap();
+        let mut txn2 = fs.begin_txn(rev1, 0).unwrap();
         let mut root2 = txn2.root().unwrap();
         root2.set_file_contents("file.txt", b"Version 2").unwrap();
         let rev2 = txn2.commit().unwrap();
 
         // Copy the file in rev 3
-        let mut txn3 = fs.begin_txn(rev2).unwrap();
+        let mut txn3 = fs.begin_txn(rev2, 0).unwrap();
         let mut root3 = txn3.root().unwrap();
         let source_root = fs.revision_root(rev2).unwrap();
         root3.copy(&source_root, "file.txt", "copied.txt").unwrap();
@@ -2513,7 +2516,7 @@ mod tests {
         fs.set_access("testuser").unwrap();
 
         // Create a transaction to add a file
-        let mut txn = fs.begin_txn(crate::Revnum(0)).unwrap();
+        let mut txn = fs.begin_txn(crate::Revnum(0), 0).unwrap();
         let mut root = txn.root().unwrap();
         root.make_file("test.txt").unwrap();
         root.set_file_contents("test.txt", b"test content").unwrap();
@@ -2572,7 +2575,7 @@ mod tests {
         fs.set_access("testuser").unwrap();
 
         // Create a file
-        let mut txn = fs.begin_txn(crate::Revnum(0)).unwrap();
+        let mut txn = fs.begin_txn(crate::Revnum(0), 0).unwrap();
         let mut root = txn.root().unwrap();
         root.make_file("locked.txt").unwrap();
         root.set_file_contents("locked.txt", b"content").unwrap();
@@ -2635,7 +2638,7 @@ mod tests {
         fs.set_access("testuser").unwrap();
 
         // Create multiple files in a directory structure
-        let mut txn = fs.begin_txn(crate::Revnum(0)).unwrap();
+        let mut txn = fs.begin_txn(crate::Revnum(0), 0).unwrap();
         let mut root = txn.root().unwrap();
         root.make_dir("dir1").unwrap();
         root.make_file("dir1/file1.txt").unwrap();
@@ -2912,8 +2915,106 @@ mod tests {
         // or succeed if it can do an incremental update
         if result.is_err() {
             // Check if it's a reasonable error (e.g., "already up to date")
-            let err = result.unwrap_err();
-            println!("Incremental hotcopy error (may be expected): {}", err);
+            let _err = result.unwrap_err();
+            // Error is expected for incremental hotcopy with no changes
         }
+    }
+
+    #[test]
+    fn test_apply_text_with_checksum() {
+        let dir = tempdir().unwrap();
+        let fs_path = dir.path().join("test-fs");
+        
+        let fs = Fs::create(&fs_path).unwrap();
+        let mut txn = fs.begin_txn(Revnum(0), 0).unwrap();
+        let mut root = txn.root().unwrap();
+        
+        // Create a file
+        root.make_file("test.txt").unwrap();
+        
+        // Apply text with a specific expected checksum (MD5)
+        // The MD5 of "Hello, World!\n" is: 8ddd8be4b179a529afa5f2ffae4b9858
+        let expected_checksum = "8ddd8be4b179a529afa5f2ffae4b9858";
+        let mut stream = root.apply_text("test.txt", Some(expected_checksum)).unwrap();
+        use std::io::Write;
+        stream.write_all(b"Hello, World!\n").unwrap();
+        drop(stream);
+        
+        // Commit should succeed since checksum matches
+        txn.commit().unwrap();
+    }
+
+    #[test]
+    fn test_apply_text_with_wrong_checksum() {
+        let dir = tempdir().unwrap();
+        let fs_path = dir.path().join("test-fs");
+        
+        let fs = Fs::create(&fs_path).unwrap();
+        let mut txn = fs.begin_txn(Revnum(0), 0).unwrap();
+        let mut root = txn.root().unwrap();
+        
+        // Create a file
+        root.make_file("test.txt").unwrap();
+        
+        // Apply text with wrong expected checksum
+        let wrong_checksum = "00000000000000000000000000000000";
+        let result = root.apply_text("test.txt", Some(wrong_checksum));
+        // This should succeed in creating the stream, but commit might fail
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_begin_txn_with_flags() {
+        let dir = tempdir().unwrap();
+        let fs_path = dir.path().join("test-fs");
+        
+        let fs = Fs::create(&fs_path).unwrap();
+        
+        // Test with no flags (0)
+        let txn1 = fs.begin_txn(Revnum(0), 0).unwrap();
+        assert!(!txn1.name().unwrap().is_empty());
+        drop(txn1);
+        
+        // Test with SVN_FS_TXN_CHECK_OOD flag (if defined)
+        // Note: The actual flag values would need to be imported from subversion_sys
+        let txn2 = fs.begin_txn(Revnum(0), 0x00000001).unwrap();
+        assert!(!txn2.name().unwrap().is_empty());
+        drop(txn2);
+        
+        // Test with SVN_FS_TXN_CHECK_LOCKS flag (if defined)
+        let txn3 = fs.begin_txn(Revnum(0), 0x00000002).unwrap();
+        assert!(!txn3.name().unwrap().is_empty());
+        drop(txn3);
+    }
+
+    #[test]
+    fn test_transaction_properties_extended() {
+        let dir = tempdir().unwrap();
+        let fs_path = dir.path().join("test-fs");
+        
+        let fs = Fs::create(&fs_path).unwrap();
+        let mut txn = fs.begin_txn(Revnum(0), 0).unwrap();
+        
+        // Test change_prop_bytes with binary data
+        let binary_data = b"\x00\x01\x02\x03\xFF";
+        txn.change_prop_bytes("custom:binary", Some(binary_data)).unwrap();
+        
+        // Test prop retrieval
+        let prop_value = txn.prop("custom:binary").unwrap();
+        assert_eq!(prop_value.as_deref(), Some(binary_data.as_ref()));
+        
+        // Test proplist
+        txn.change_prop("svn:log", "Test commit").unwrap();
+        txn.change_prop("svn:author", "test-user").unwrap();
+        
+        let props = txn.proplist().unwrap();
+        assert!(props.contains_key("svn:log"));
+        assert!(props.contains_key("svn:author")); 
+        assert!(props.contains_key("custom:binary"));
+        
+        // Test removing a property
+        txn.change_prop_bytes("custom:binary", None).unwrap();
+        let prop_value = txn.prop("custom:binary").unwrap();
+        assert!(prop_value.is_none() || prop_value.as_deref() == Some(b"".as_ref()));
     }
 }

@@ -1429,6 +1429,137 @@ impl Context {
         Error::from_raw(ret)
     }
 
+    /// Get an editor for switching the working copy to a different URL
+    pub fn get_switch_editor(
+        &mut self,
+        anchor_abspath: &str,
+        target_basename: &str,
+        switch_url: &str,
+        use_commit_times: bool,
+        depth: crate::Depth,
+        depth_is_sticky: bool,
+        allow_unver_obstructions: bool,
+        diff3_cmd: Option<&str>,
+    ) -> Result<(Box<dyn crate::delta::Editor>, crate::Revnum), crate::Error> {
+        let anchor_abspath_cstr = std::ffi::CString::new(anchor_abspath)?;
+        let target_basename_cstr = std::ffi::CString::new(target_basename)?;
+        let switch_url_cstr = std::ffi::CString::new(switch_url)?;
+        let diff3_cmd_cstr = diff3_cmd.map(std::ffi::CString::new).transpose()?;
+
+        let result_pool = apr::Pool::new();
+        let mut target_revision: subversion_sys::svn_revnum_t = 0;
+        let mut editor_ptr: *const subversion_sys::svn_delta_editor_t = std::ptr::null();
+        let mut edit_baton: *mut std::ffi::c_void = std::ptr::null_mut();
+
+        let err = with_tmp_pool(|scratch_pool| {
+            unsafe {
+                svn_result(subversion_sys::svn_wc_get_switch_editor4(
+                    &mut editor_ptr,
+                    &mut edit_baton,
+                    &mut target_revision,
+                    self.ptr,
+                    anchor_abspath_cstr.as_ptr(),
+                    target_basename_cstr.as_ptr(),
+                    switch_url_cstr.as_ptr(),
+                    if use_commit_times { 1 } else { 0 },
+                    depth.into(),
+                    if depth_is_sticky { 1 } else { 0 },
+                    if allow_unver_obstructions { 1 } else { 0 },
+                    0, // server_performs_filtering
+                    diff3_cmd_cstr
+                        .as_ref()
+                        .map_or(std::ptr::null(), |c| c.as_ptr()),
+                    std::ptr::null(), // preserved_exts
+                    None,             // fetch_dirents_func
+                    std::ptr::null_mut(), // fetch_baton
+                    None,             // conflict_func
+                    std::ptr::null_mut(), // conflict_baton
+                    None,             // external_func
+                    std::ptr::null_mut(), // external_baton
+                    None,             // cancel_func
+                    std::ptr::null_mut(), // cancel_baton
+                    None,             // notify_func
+                    std::ptr::null_mut(), // notify_baton
+                    result_pool.as_mut_ptr(),
+                    scratch_pool.as_mut_ptr(),
+                ))
+            }
+        });
+
+        err?;
+
+        // Reuse the existing WrapEditor from delta module
+        let editor = Box::new(crate::delta::WrapEditor {
+            editor: editor_ptr,
+            baton: edit_baton,
+            _pool: std::marker::PhantomData,
+        });
+
+        Ok((
+            editor,
+            crate::Revnum::from_raw(target_revision).unwrap_or_default(),
+        ))
+    }
+
+    /// Get an editor for showing differences in the working copy
+    /// Note: This returns an editor that will generate diff callbacks.
+    /// The callbacks parameter should be a valid svn_wc_diff_callbacks4_t structure.
+    /// For now, we pass NULL which means no actual diff output will be generated.
+    pub fn get_diff_editor(
+        &mut self,
+        anchor_abspath: &str,
+        target_abspath: &str,
+        use_text_base: bool,
+        depth: crate::Depth,
+        ignore_ancestry: bool,
+        show_copies_as_adds: bool,
+        use_git_diff_format: bool,
+    ) -> Result<Box<dyn crate::delta::Editor>, crate::Error> {
+        let anchor_abspath_cstr = std::ffi::CString::new(anchor_abspath)?;
+        let target_abspath_cstr = std::ffi::CString::new(target_abspath)?;
+        
+        let result_pool = apr::Pool::new();
+        let mut editor_ptr: *const subversion_sys::svn_delta_editor_t = std::ptr::null();
+        let mut edit_baton: *mut std::ffi::c_void = std::ptr::null_mut();
+
+        let err = with_tmp_pool(|scratch_pool| {
+            unsafe {
+                svn_result(subversion_sys::svn_wc_get_diff_editor6(
+                    &mut editor_ptr,
+                    &mut edit_baton,
+                    self.ptr,
+                    anchor_abspath_cstr.as_ptr(),
+                    target_abspath_cstr.as_ptr(),
+                    depth.into(),
+                    if ignore_ancestry { 1 } else { 0 },
+                    if show_copies_as_adds { 1 } else { 0 },
+                    if use_git_diff_format { 1 } else { 0 },
+                    if use_text_base { 1 } else { 0 },
+                    0, // reverse_order
+                    0, // server_performs_filtering
+                    std::ptr::null(), // changelist_filter
+                    std::ptr::null(), // callbacks - TODO: implement svn_wc_diff_callbacks4_t
+                    std::ptr::null_mut(), // callback_baton
+                    None,                 // cancel_func
+                    std::ptr::null_mut(), // cancel_baton
+                    result_pool.as_mut_ptr(),
+                    scratch_pool.as_mut_ptr(),
+                ))
+            }
+        });
+
+        err?;
+
+        // Reuse the existing WrapEditor from delta module
+        let editor = Box::new(crate::delta::WrapEditor {
+            editor: editor_ptr,
+            baton: edit_baton,
+            _pool: std::marker::PhantomData,
+        });
+
+        Ok(editor)
+    }
+
     /// Delete a path from version control
     pub fn delete(
         &mut self,
@@ -2168,6 +2299,149 @@ mod tests {
         // Should fail without a working copy
         let result = ctx.delete(&file_path, false, false, None, None);
         assert!(result.is_err());
+    }
+    
+    #[test]
+    fn test_get_switch_editor() {
+        // Test that the API compiles and can be called
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut ctx = Context::new().unwrap();
+        
+        // This will fail without a working copy, but tests the API
+        let result = ctx.get_switch_editor(
+            temp_dir.path().to_str().unwrap(),
+            "",
+            "http://example.com/repo/branches/test",
+            false,
+            crate::Depth::Infinity,
+            false,
+            false,
+            None,
+        );
+        
+        // Expected to fail without a valid working copy
+        assert!(result.is_err());
+    }
+    
+    #[test]
+    fn test_get_switch_editor_api() {
+        // Test that the switch editor API compiles and can be called
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut ctx = Context::new().unwrap();
+        
+        // This will fail without a working copy, but tests the API
+        let result = ctx.get_switch_editor(
+            temp_dir.path().to_str().unwrap(),
+            "",
+            "http://example.com/svn/trunk",
+            false,  // use_commit_times
+            crate::Depth::Infinity,
+            false,  // depth_is_sticky
+            false,  // allow_unver_obstructions
+            None,   // diff3_cmd
+        );
+        
+        // Expected to fail without a valid working copy
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_get_switch_editor_with_target() {
+        // Test switch editor with target basename
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut ctx = Context::new().unwrap();
+        
+        let result = ctx.get_switch_editor(
+            temp_dir.path().to_str().unwrap(),
+            "subdir",  // target basename
+            "http://example.com/svn/branches/test",
+            true,   // use_commit_times
+            crate::Depth::Files,
+            true,   // depth_is_sticky
+            true,   // allow_unver_obstructions
+            None,   // diff3_cmd
+        );
+        
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_get_diff_editor() {
+        // Test that the API compiles and can be called
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut ctx = Context::new().unwrap();
+        
+        // Create the directory
+        std::fs::create_dir_all(temp_dir.path()).unwrap();
+        
+        // This should succeed with an existing directory
+        let result = ctx.get_diff_editor(
+            temp_dir.path().to_str().unwrap(),
+            temp_dir.path().to_str().unwrap(),
+            false,  // use_text_base
+            crate::Depth::Infinity,
+            false,  // ignore_ancestry
+            false,  // show_copies_as_adds
+            false,  // use_git_diff_format
+        );
+        
+        // Should succeed with an existing path
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_get_diff_editor_with_options() {
+        // Test diff editor with various options
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut ctx = Context::new().unwrap();
+        
+        // Create the paths so they exist
+        std::fs::create_dir_all(temp_dir.path()).unwrap();
+        
+        // Test with text base using existing paths
+        let result = ctx.get_diff_editor(
+            temp_dir.path().to_str().unwrap(),
+            temp_dir.path().to_str().unwrap(),
+            true,   // use_text_base
+            crate::Depth::Empty,
+            true,   // ignore_ancestry
+            true,   // show_copies_as_adds
+            true,   // use_git_diff_format
+        );
+        
+        // Should succeed since paths exist
+        assert!(result.is_ok());
+        
+        // Test with different paths
+        let anchor_path = temp_dir.path().join("anchor");
+        let target_path = temp_dir.path().join("target");
+        std::fs::create_dir_all(&anchor_path).unwrap();
+        std::fs::create_dir_all(&target_path).unwrap();
+        
+        let result = ctx.get_diff_editor(
+            anchor_path.to_str().unwrap(),
+            target_path.to_str().unwrap(),
+            false,
+            crate::Depth::Files,
+            false,
+            false,
+            false,
+        );
+        
+        // Should succeed since paths exist
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_update_editor_trait() {
+        // Test that UpdateEditor implements the Editor trait
+        use crate::delta::Editor;
+        
+        // This just verifies the trait implementation compiles
+        fn check_editor_impl<T: Editor>() {}
+        
+        // Verify UpdateEditor implements Editor trait
+        check_editor_impl::<UpdateEditor>();
     }
 
     #[test]

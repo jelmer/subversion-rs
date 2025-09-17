@@ -786,4 +786,28 @@ mod tests {
             ConflictDisplayStyle::OnlyConflicts.into();
         assert_eq!(style, subversion_sys::svn_diff_conflict_display_style_t_svn_diff_conflict_display_only_conflicts);
     }
+    
+    #[test]
+    fn test_file_diff4() -> Result<(), Box<dyn std::error::Error>> {
+        let temp_dir = tempdir()?;
+        
+        // Create test files for 4-way diff
+        let original_path = temp_dir.path().join("original.txt");
+        let modified_path = temp_dir.path().join("modified.txt");
+        let latest_path = temp_dir.path().join("latest.txt");
+        let ancestor_path = temp_dir.path().join("ancestor.txt");
+        
+        std::fs::write(&original_path, b"line 1\nline 2\nline 3\n")?;
+        std::fs::write(&modified_path, b"line 1 modified\nline 2\nline 3\n")?;
+        std::fs::write(&latest_path, b"line 1\nline 2 latest\nline 3\n")?;
+        std::fs::write(&ancestor_path, b"line 1\nline 2\nline 3\n")?;
+        
+        let options = FileOptions::default();
+        let diff = file_diff4(&original_path, &modified_path, &latest_path, &ancestor_path, options)?;
+        
+        // Should have changes since modified and latest differ from original
+        assert!(diff.contains_changes());
+        
+        Ok(())
+    }
 }
