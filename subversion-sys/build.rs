@@ -12,6 +12,7 @@ fn create_svn_bindings(
 
     let mut builder = bindgen::Builder::default()
         .header(svn_path.join("svn_dirent_uri.h").to_str().unwrap())
+        .header(svn_path.join("svn_path.h").to_str().unwrap())
         .header(svn_path.join("svn_version.h").to_str().unwrap())
         .header(svn_path.join("svn_error.h").to_str().unwrap())
         .header(svn_path.join("svn_error_codes.h").to_str().unwrap())
@@ -55,6 +56,7 @@ fn create_svn_bindings(
         .raw_line("use apr_sys::apr_getopt_option_t;")
         .raw_line("use apr_sys::apr_exit_why_e;")
         .raw_line("use apr_sys::apr_seek_where_t;")
+        .raw_line("#[allow(unused_imports)]")
         .raw_line("use apr_sys::apr_byte_t;")
         .clang_args(
             include_paths

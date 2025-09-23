@@ -1,4 +1,124 @@
 use crate::{svn_result, with_tmp_pool, Error, Revnum};
+use std::ffi::{CStr, CString};
+
+/// A canonical absolute filesystem path for use with Subversion filesystem operations.
+///
+/// SVN filesystem paths must be canonical and absolute (start with '/').
+/// This type ensures paths are properly canonicalized using SVN's own canonicalization functions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FsPath {
+    path: CString,
+}
+
+impl FsPath {
+    /// Create an FsPath from an already-canonical path.
+    ///
+    /// This is a fast path that only validates the path is canonical.
+    /// Returns an error if the path is not canonical.
+    pub fn from_canonical(path: &str) -> Result<Self, Error> {
+        // Handle empty path as root
+        let path = if path.is_empty() { "/" } else { path };
+
+        // Ensure path is absolute for filesystem operations
+        if !path.starts_with('/') {
+            return Err(Error::from_str(&format!(
+                "Filesystem path must be absolute (start with '/'): {}",
+                path
+            )));
+        }
+
+        with_tmp_pool(|pool| unsafe {
+            let path_cstr = CString::new(path)?;
+
+            // Check if canonical
+            let is_canonical =
+                subversion_sys::svn_path_is_canonical(path_cstr.as_ptr(), pool.as_mut_ptr()) != 0;
+
+            if is_canonical {
+                Ok(Self { path: path_cstr })
+            } else {
+                Err(Error::from_str(&format!("Path is not canonical: {}", path)))
+            }
+        })
+    }
+
+    /// Create an FsPath by canonicalizing the input path.
+    ///
+    /// This will canonicalize the path using SVN's canonicalization rules.
+    /// Returns an error if the path cannot be made canonical.
+    pub fn canonicalize(path: &str) -> Result<Self, Error> {
+        // Handle empty path as root
+        let path = if path.is_empty() { "/" } else { path };
+
+        // Ensure path is absolute for filesystem operations
+        if !path.starts_with('/') {
+            return Err(Error::from_str(&format!(
+                "Filesystem path must be absolute (start with '/'): {}",
+                path
+            )));
+        }
+
+        with_tmp_pool(|pool| unsafe {
+            let path_cstr = CString::new(path)?;
+
+            // Check if already canonical (fast path)
+            let is_canonical =
+                subversion_sys::svn_path_is_canonical(path_cstr.as_ptr(), pool.as_mut_ptr()) != 0;
+
+            if is_canonical {
+                Ok(Self { path: path_cstr })
+            } else {
+                // Canonicalize the path
+                let canonical_ptr =
+                    subversion_sys::svn_path_canonicalize(path_cstr.as_ptr(), pool.as_mut_ptr());
+
+                if canonical_ptr.is_null() {
+                    return Err(Error::from_str(&format!(
+                        "Failed to canonicalize path: {}",
+                        path
+                    )));
+                }
+
+                let canonical_str = CStr::from_ptr(canonical_ptr).to_str()?;
+                Ok(Self {
+                    path: CString::new(canonical_str)?,
+                })
+            }
+        })
+    }
+
+    /// Get the path as a C string pointer for FFI.
+    pub fn as_ptr(&self) -> *const i8 {
+        self.path.as_ptr()
+    }
+
+    /// Get the path as a string slice.
+    pub fn as_str(&self) -> &str {
+        self.path.to_str().unwrap_or("/")
+    }
+}
+
+impl TryFrom<&str> for FsPath {
+    type Error = Error;
+
+    fn try_from(path: &str) -> Result<Self, Self::Error> {
+        FsPath::canonicalize(path)
+    }
+}
+
+impl TryFrom<String> for FsPath {
+    type Error = Error;
+
+    fn try_from(path: String) -> Result<Self, Self::Error> {
+        FsPath::canonicalize(&path)
+    }
+}
+
+impl std::fmt::Display for FsPath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
 
 /// Represents a change to a path in the filesystem
 pub struct FsPathChange {
@@ -417,7 +537,7 @@ impl Root {
         &self,
         path: &str,
         kind: crate::ChecksumKind,
-    ) -> Result<Option<crate::Checksum>, Error> {
+    ) -> Result<Option<crate::Checksum<'_>>, Error> {
         with_tmp_pool(|pool| unsafe {
             let path_c = std::ffi::CString::new(path).unwrap();
             let mut checksum = std::ptr::null_mut();
@@ -455,7 +575,7 @@ impl Root {
             svn_result(err)?;
 
             let result = if !props.is_null() {
-                let prop_hash = unsafe { crate::props::PropHash::from_ptr(props) };
+                let prop_hash = crate::props::PropHash::from_ptr(props);
                 prop_hash.to_hashmap()
             } else {
                 std::collections::HashMap::new()
@@ -478,21 +598,24 @@ impl Root {
             if changed_paths.is_null() {
                 Ok(std::collections::HashMap::new())
             } else {
-                let hash = unsafe { crate::hash::PathChangeHash::from_ptr(changed_paths) };
+                let hash = crate::hash::PathChangeHash::from_ptr(changed_paths);
                 Ok(hash.to_hashmap())
             }
         })
     }
 
     /// Check the type of a path (file, directory, or none)
-    pub fn check_path(&self, path: &str) -> Result<crate::NodeKind, Error> {
+    pub fn check_path(
+        &self,
+        path: impl TryInto<FsPath, Error = Error>,
+    ) -> Result<crate::NodeKind, Error> {
+        let fs_path = path.try_into()?;
         with_tmp_pool(|pool| unsafe {
-            let path_c = std::ffi::CString::new(path).unwrap();
             let mut kind = subversion_sys::svn_node_kind_t_svn_node_none;
             let err = subversion_sys::svn_fs_check_path(
                 &mut kind,
                 self.ptr,
-                path_c.as_ptr(),
+                fs_path.as_ptr(),
                 pool.as_mut_ptr(),
             );
             svn_result(err)?;
@@ -503,15 +626,15 @@ impl Root {
     /// List directory entries
     pub fn dir_entries(
         &self,
-        path: &str,
+        path: impl TryInto<FsPath, Error = Error>,
     ) -> Result<std::collections::HashMap<String, FsDirEntry>, Error> {
+        let fs_path = path.try_into()?;
         with_tmp_pool(|pool| unsafe {
-            let path_c = std::ffi::CString::new(path).unwrap();
             let mut entries = std::ptr::null_mut();
             let err = subversion_sys::svn_fs_dir_entries(
                 &mut entries,
                 self.ptr,
-                path_c.as_ptr(),
+                fs_path.as_ptr(),
                 pool.as_mut_ptr(),
             );
             svn_result(err)?;
@@ -519,7 +642,7 @@ impl Root {
             if entries.is_null() {
                 Ok(std::collections::HashMap::new())
             } else {
-                let hash = unsafe { crate::hash::FsDirentHash::from_ptr(entries) };
+                let hash = crate::hash::FsDirentHash::from_ptr(entries);
                 Ok(hash.to_hashmap())
             }
         })
@@ -611,7 +734,8 @@ impl Root {
 
     /// Get the node ID for a path
     pub fn node_id(&self, path: &str) -> Result<NodeId, Error> {
-        with_tmp_pool(|pool| unsafe {
+        unsafe {
+            let pool = apr::Pool::new();
             let path_c = std::ffi::CString::new(path)?;
             let mut id: *const subversion_sys::svn_fs_id_t = std::ptr::null();
 
@@ -627,17 +751,15 @@ impl Root {
                 return Err(Error::from_str("Failed to get node ID"));
             }
 
-            Ok(NodeId {
-                ptr: id,
-                _phantom: std::marker::PhantomData,
-            })
-        })
+            Ok(NodeId { ptr: id, pool })
+        }
     }
 }
 
 /// Represents the history of a node in the filesystem
 pub struct NodeHistory {
     ptr: *mut subversion_sys::svn_fs_history_t,
+    #[allow(dead_code)]
     pool: apr::Pool,
 }
 
@@ -694,7 +816,7 @@ impl Drop for NodeHistory {
 /// Represents a node ID in the filesystem
 pub struct NodeId {
     ptr: *const subversion_sys::svn_fs_id_t,
-    _phantom: std::marker::PhantomData<()>,
+    pool: apr::Pool, // Keep the pool alive for the lifetime of the NodeId
 }
 
 impl NodeId {
@@ -708,9 +830,9 @@ impl NodeId {
     }
 
     /// Convert the node ID to a string representation
-    pub fn to_string(&self, pool: &apr::Pool) -> Result<String, Error> {
+    pub fn to_string(&self) -> Result<String, Error> {
         unsafe {
-            let str_svn = subversion_sys::svn_fs_unparse_id(self.ptr, pool.as_mut_ptr());
+            let str_svn = subversion_sys::svn_fs_unparse_id(self.ptr, self.pool.as_mut_ptr());
             if str_svn.is_null() {
                 return Err(Error::from_str("Failed to unparse node ID"));
             }
@@ -729,6 +851,7 @@ impl NodeId {
 /// Transaction handle with RAII cleanup
 pub struct Transaction {
     ptr: *mut subversion_sys::svn_fs_txn_t,
+    #[allow(dead_code)]
     pool: apr::Pool,
     _phantom: std::marker::PhantomData<*mut ()>, // !Send + !Sync
 }
@@ -840,36 +963,35 @@ pub struct TxnRoot {
 
 impl TxnRoot {
     /// Create a directory
-    pub fn make_dir(&mut self, path: &str) -> Result<(), Error> {
-        let path_cstr = std::ffi::CString::new(path)?;
+    pub fn make_dir(&mut self, path: impl TryInto<FsPath, Error = Error>) -> Result<(), Error> {
+        let fs_path = path.try_into()?;
         let pool = apr::Pool::new();
         unsafe {
             let err =
-                subversion_sys::svn_fs_make_dir(self.ptr, path_cstr.as_ptr(), pool.as_mut_ptr());
+                subversion_sys::svn_fs_make_dir(self.ptr, fs_path.as_ptr(), pool.as_mut_ptr());
             Error::from_raw(err)?;
             Ok(())
         }
     }
 
     /// Create a file
-    pub fn make_file(&mut self, path: &str) -> Result<(), Error> {
-        let path_cstr = std::ffi::CString::new(path)?;
+    pub fn make_file(&mut self, path: impl TryInto<FsPath, Error = Error>) -> Result<(), Error> {
+        let fs_path = path.try_into()?;
         let pool = apr::Pool::new();
         unsafe {
             let err =
-                subversion_sys::svn_fs_make_file(self.ptr, path_cstr.as_ptr(), pool.as_mut_ptr());
+                subversion_sys::svn_fs_make_file(self.ptr, fs_path.as_ptr(), pool.as_mut_ptr());
             Error::from_raw(err)?;
             Ok(())
         }
     }
 
     /// Delete a node
-    pub fn delete(&mut self, path: &str) -> Result<(), Error> {
-        let path_cstr = std::ffi::CString::new(path)?;
+    pub fn delete(&mut self, path: impl TryInto<FsPath, Error = Error>) -> Result<(), Error> {
+        let fs_path = path.try_into()?;
         let pool = apr::Pool::new();
         unsafe {
-            let err =
-                subversion_sys::svn_fs_delete(self.ptr, path_cstr.as_ptr(), pool.as_mut_ptr());
+            let err = subversion_sys::svn_fs_delete(self.ptr, fs_path.as_ptr(), pool.as_mut_ptr());
             Error::from_raw(err)?;
             Ok(())
         }
@@ -894,15 +1016,18 @@ impl TxnRoot {
     }
 
     /// Apply text changes to a file
-    pub fn apply_text(&mut self, path: &str) -> Result<crate::io::Stream, Error> {
-        let path_cstr = std::ffi::CString::new(path)?;
+    pub fn apply_text(
+        &mut self,
+        path: impl TryInto<FsPath, Error = Error>,
+    ) -> Result<crate::io::Stream, Error> {
+        let fs_path = path.try_into()?;
         let pool = apr::Pool::new();
         unsafe {
             let mut stream_ptr = std::ptr::null_mut();
             let err = subversion_sys::svn_fs_apply_text(
                 &mut stream_ptr,
                 self.ptr,
-                path_cstr.as_ptr(),
+                fs_path.as_ptr(),
                 std::ptr::null(), // result_checksum - we ignore for now
                 pool.as_mut_ptr(),
             );
@@ -1369,27 +1494,27 @@ mod tests {
         let mut root = txn.root().unwrap();
 
         // Create a directory
-        root.make_dir("trunk").unwrap();
+        root.make_dir("/trunk").unwrap();
 
         // Verify the directory exists
-        let kind = root.check_path("trunk").unwrap();
+        let kind = root.check_path("/trunk").unwrap();
         assert_eq!(kind, crate::NodeKind::Dir);
 
         // Create a file
-        root.make_file("trunk/test.txt").unwrap();
+        root.make_file("/trunk/test.txt").unwrap();
 
         // Verify the file exists
-        let kind = root.check_path("trunk/test.txt").unwrap();
+        let kind = root.check_path("/trunk/test.txt").unwrap();
         assert_eq!(kind, crate::NodeKind::File);
 
         // Add content to the file
-        let mut stream = root.apply_text("trunk/test.txt").unwrap();
+        let mut stream = root.apply_text("/trunk/test.txt").unwrap();
         use std::io::Write;
         stream.write_all(b"Hello, World!\n").unwrap();
         drop(stream);
 
         // Set a property on the file
-        root.change_node_prop("trunk/test.txt", "custom:prop", b"value")
+        root.change_node_prop("/trunk/test.txt", "custom:prop", b"value")
             .unwrap();
 
         // Commit the transaction
@@ -1417,8 +1542,8 @@ mod tests {
         let mut root = txn.root().unwrap();
 
         // Make some changes
-        root.make_dir("test-dir").unwrap();
-        root.make_file("test-file.txt").unwrap();
+        root.make_dir("/test-dir").unwrap();
+        root.make_file("/test-file.txt").unwrap();
 
         // Abort the transaction
         txn.abort().unwrap();
@@ -1444,10 +1569,10 @@ mod tests {
         txn1.change_prop("svn:log", "Initial commit").unwrap();
         let mut root1 = txn1.root().unwrap();
 
-        root1.make_dir("original").unwrap();
-        root1.make_file("original/file.txt").unwrap();
+        root1.make_dir("/original").unwrap();
+        root1.make_file("/original/file.txt").unwrap();
 
-        let mut stream = root1.apply_text("original/file.txt").unwrap();
+        let mut stream = root1.apply_text("/original/file.txt").unwrap();
         use std::io::Write;
         stream.write_all(b"Original content\n").unwrap();
         drop(stream);
@@ -1487,9 +1612,9 @@ mod tests {
         txn1.change_prop("svn:log", "Create files").unwrap();
         let mut root1 = txn1.root().unwrap();
 
-        root1.make_dir("dir1").unwrap();
-        root1.make_file("dir1/file1.txt").unwrap();
-        root1.make_file("file2.txt").unwrap();
+        root1.make_dir("/dir1").unwrap();
+        root1.make_file("/dir1/file1.txt").unwrap();
+        root1.make_file("/file2.txt").unwrap();
 
         let rev1 = txn1.commit().unwrap();
 
@@ -1499,14 +1624,14 @@ mod tests {
         let mut root2 = txn2.root().unwrap();
 
         // Delete a file
-        root2.delete("file2.txt").unwrap();
+        root2.delete("/file2.txt").unwrap();
 
         // Verify it's gone
-        let kind = root2.check_path("file2.txt").unwrap();
+        let kind = root2.check_path("/file2.txt").unwrap();
         assert_eq!(kind, crate::NodeKind::None);
 
         // But the other file still exists
-        let kind = root2.check_path("dir1/file1.txt").unwrap();
+        let kind = root2.check_path("/dir1/file1.txt").unwrap();
         assert_eq!(kind, crate::NodeKind::File);
 
         let _rev2 = txn2.commit().unwrap();
@@ -1523,18 +1648,18 @@ mod tests {
         let mut root = txn.root().unwrap();
 
         // Create a file and set properties
-        root.make_file("test.txt").unwrap();
+        root.make_file("/test.txt").unwrap();
 
         // Set various properties
-        root.change_node_prop("test.txt", "svn:mime-type", b"text/plain")
+        root.change_node_prop("/test.txt", "svn:mime-type", b"text/plain")
             .unwrap();
-        root.change_node_prop("test.txt", "custom:author", b"test-user")
+        root.change_node_prop("/test.txt", "custom:author", b"test-user")
             .unwrap();
-        root.change_node_prop("test.txt", "custom:description", b"A test file")
+        root.change_node_prop("/test.txt", "custom:description", b"A test file")
             .unwrap();
 
         // Set an empty property (delete)
-        root.change_node_prop("test.txt", "custom:empty", b"")
+        root.change_node_prop("/test.txt", "custom:empty", b"")
             .unwrap();
 
         // Set transaction properties
@@ -1582,8 +1707,8 @@ mod tests {
         let mut txn_root = txn.root().unwrap();
 
         // Create a file
-        txn_root.make_file("test.txt").unwrap();
-        let mut stream = txn_root.apply_text("test.txt").unwrap();
+        txn_root.make_file("/test.txt").unwrap();
+        let mut stream = txn_root.apply_text("/test.txt").unwrap();
         use std::io::Write;
         write!(stream, "Initial content").unwrap();
         stream.close().unwrap();
@@ -1595,7 +1720,7 @@ mod tests {
         let mut txn2 = fs.begin_txn(rev1).unwrap();
         let mut txn_root2 = txn2.root().unwrap();
 
-        let mut stream2 = txn_root2.apply_text("test.txt").unwrap();
+        let mut stream2 = txn_root2.apply_text("/test.txt").unwrap();
         write!(stream2, "Modified content").unwrap();
         stream2.close().unwrap();
 
@@ -1648,9 +1773,8 @@ mod tests {
 
         // Just verify we can get node IDs - comparison semantics may vary
         // based on SVN backend implementation
-        let pool = apr::Pool::new();
-        let _id1_str = node_id1.to_string(&pool).unwrap();
-        let _id2_str = node_id2.to_string(&pool).unwrap();
+        let _id1_str = node_id1.to_string().unwrap();
+        let _id2_str = node_id2.to_string().unwrap();
 
         // Cleanup handled by tempdir Drop
     }
@@ -1668,9 +1792,9 @@ mod tests {
         let mut txn_root = txn.root().unwrap();
 
         // Create a file with a property
-        txn_root.make_file("test.txt").unwrap();
+        txn_root.make_file("/test.txt").unwrap();
         txn_root
-            .change_node_prop("test.txt", "custom:prop", b"value1")
+            .change_node_prop("/test.txt", "custom:prop", b"value1")
             .unwrap();
 
         let rev1 = txn.commit().unwrap();
@@ -1680,7 +1804,7 @@ mod tests {
         let mut txn_root2 = txn2.root().unwrap();
 
         txn_root2
-            .change_node_prop("test.txt", "custom:prop", b"value2")
+            .change_node_prop("/test.txt", "custom:prop", b"value2")
             .unwrap();
 
         let rev2 = txn2.commit().unwrap();
@@ -1742,9 +1866,9 @@ mod tests {
         // First create a file in revision 1
         let mut txn1 = fs.begin_txn(Revnum(0)).unwrap();
         let mut txn_root1 = txn1.root().unwrap();
-        txn_root1.make_file("test.txt").unwrap();
+        txn_root1.make_file("/test.txt").unwrap();
         txn_root1
-            .set_file_contents("test.txt", b"Hello, World!")
+            .set_file_contents("/test.txt", b"Hello, World!")
             .unwrap();
         let rev1 = txn1.commit().unwrap();
 
@@ -1755,15 +1879,15 @@ mod tests {
         // Move requires copying from the base revision then deleting the old
         let base_root = fs.revision_root(rev1).unwrap();
         txn_root2
-            .copy(&base_root, "test.txt", "renamed.txt")
+            .copy(&base_root, "/test.txt", "/renamed.txt")
             .unwrap();
-        txn_root2.delete("test.txt").unwrap();
+        txn_root2.delete("/test.txt").unwrap();
 
         // Check that old path doesn't exist and new one does
-        let old_kind = txn_root2.check_path("test.txt").unwrap();
+        let old_kind = txn_root2.check_path("/test.txt").unwrap();
         assert_eq!(old_kind, crate::NodeKind::None);
 
-        let new_kind = txn_root2.check_path("renamed.txt").unwrap();
+        let new_kind = txn_root2.check_path("/renamed.txt").unwrap();
         assert_eq!(new_kind, crate::NodeKind::File);
 
         let rev2 = txn2.commit().unwrap();
@@ -1792,9 +1916,9 @@ mod tests {
         // Create initial revision with a file
         let mut txn1 = fs.begin_txn(Revnum(0)).unwrap();
         let mut root1 = txn1.root().unwrap();
-        root1.make_file("file.txt").unwrap();
+        root1.make_file("/file.txt").unwrap();
         root1
-            .set_file_contents("file.txt", b"Initial content")
+            .set_file_contents("/file.txt", b"Initial content")
             .unwrap();
         let rev1 = txn1.commit().unwrap();
 
@@ -1803,7 +1927,7 @@ mod tests {
         let mut txn2 = fs.begin_txn(rev1).unwrap();
         let mut root2 = txn2.root().unwrap();
         root2
-            .set_file_contents("file.txt", b"Branch 1 content")
+            .set_file_contents("/file.txt", b"Branch 1 content")
             .unwrap();
         let rev2 = txn2.commit().unwrap();
 
@@ -1811,7 +1935,7 @@ mod tests {
         let mut txn3 = fs.begin_txn(rev1).unwrap();
         let mut root3 = txn3.root().unwrap();
         root3
-            .set_file_contents("file.txt", b"Branch 2 content")
+            .set_file_contents("/file.txt", b"Branch 2 content")
             .unwrap();
 
         // Try to merge branch 1 into branch 2
@@ -1835,9 +1959,9 @@ mod tests {
         // Create initial file with properties
         let mut txn1 = fs.begin_txn(Revnum(0)).unwrap();
         let mut root1 = txn1.root().unwrap();
-        root1.make_file("file.txt").unwrap();
+        root1.make_file("/file.txt").unwrap();
         root1
-            .set_file_contents("file.txt", b"Original content")
+            .set_file_contents("/file.txt", b"Original content")
             .unwrap();
         root1
             .change_node_prop("file.txt", "custom:prop", b"value1")
@@ -1848,7 +1972,7 @@ mod tests {
         let mut txn2 = fs.begin_txn(rev1).unwrap();
         let mut root2 = txn2.root().unwrap();
         root2
-            .set_file_contents("file.txt", b"Modified content")
+            .set_file_contents("/file.txt", b"Modified content")
             .unwrap();
         let rev2 = txn2.commit().unwrap();
 
@@ -1901,7 +2025,7 @@ mod tests {
         // Create a file in rev 1
         let mut txn1 = fs.begin_txn(Revnum(0)).unwrap();
         let mut root1 = txn1.root().unwrap();
-        root1.make_file("file.txt").unwrap();
+        root1.make_file("/file.txt").unwrap();
         root1.set_file_contents("file.txt", b"Version 1").unwrap();
         let rev1 = txn1.commit().unwrap();
 

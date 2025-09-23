@@ -79,12 +79,14 @@ pub enum ConfigOption<'a> {
 /// Configuration container wrapping svn_config_t
 pub struct Config {
     ptr: *mut subversion_sys::svn_config_t,
+    #[allow(dead_code)]
     pool: apr::Pool,
 }
 
 /// Configuration hash wrapping apr_hash_t (as expected by repository access APIs)
 pub struct ConfigHash {
     ptr: *mut apr_sys::apr_hash_t,
+    #[allow(dead_code)]
     pool: apr::Pool,
 }
 
@@ -438,10 +440,12 @@ impl ConfigHash {
         Self { ptr, pool }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn as_ptr(&self) -> *const apr_sys::apr_hash_t {
         self.ptr
     }
 
+    #[allow(dead_code)]
     pub(crate) fn as_mut_ptr(&mut self) -> *mut apr_sys::apr_hash_t {
         self.ptr
     }

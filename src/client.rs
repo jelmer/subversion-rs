@@ -92,7 +92,7 @@ extern "C" fn wrap_proplist_receiver2(
     scratch_pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     unsafe {
-        let scratch_pool = std::rc::Rc::new(apr::pool::Pool::from_raw(scratch_pool));
+        let _scratch_pool = std::rc::Rc::new(apr::pool::Pool::from_raw(scratch_pool));
         let callback = baton
             as *mut &mut dyn FnMut(
                 &str,
@@ -101,7 +101,7 @@ extern "C" fn wrap_proplist_receiver2(
             ) -> Result<(), Error>;
         let callback = &mut *(callback);
         let path: &str = std::ffi::CStr::from_ptr(path).to_str().unwrap();
-        let prop_hash = unsafe { crate::props::PropHash::from_ptr(props) };
+        let prop_hash = crate::props::PropHash::from_ptr(props);
         let props = prop_hash.to_hashmap();
         let inherited_props = if inherited_props.is_null() {
             None
@@ -218,13 +218,13 @@ unsafe extern "C" fn blame_receiver_wrapper(
     merged_path: *const i8,
     line: *const subversion_sys::svn_string_t,
     local_change: subversion_sys::svn_boolean_t,
-    pool: *mut apr_sys::apr_pool_t,
+    _pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     let callback = &mut *(baton as *mut &mut dyn FnMut(BlameInfo) -> Result<(), Error>);
 
     // Extract revprops
     let revprops = if !rev_props.is_null() {
-        let prop_hash = unsafe { crate::props::PropHash::from_ptr(rev_props) };
+        let prop_hash = crate::props::PropHash::from_ptr(rev_props);
         prop_hash.to_hashmap()
     } else {
         HashMap::new()
@@ -232,7 +232,7 @@ unsafe extern "C" fn blame_receiver_wrapper(
 
     // Extract merged revprops
     let merged_revprops = if !merged_rev_props.is_null() {
-        let prop_hash = unsafe { crate::props::PropHash::from_ptr(merged_rev_props) };
+        let prop_hash = crate::props::PropHash::from_ptr(merged_rev_props);
         prop_hash.to_hashmap()
     } else {
         HashMap::new()
@@ -802,7 +802,7 @@ impl Context {
         let url = url.as_canonical_uri()?;
         let path = path.as_canonical_dirent()?;
 
-        with_tmp_pool(|tmp_pool| unsafe {
+        unsafe {
             let mut revnum = 0;
             // Convert to C strings for FFI
             let url_cstr = std::ffi::CString::new(url.as_str())?;
@@ -822,7 +822,7 @@ impl Context {
             );
             Error::from_raw(err)?;
             Ok(Revnum::from_raw(revnum).unwrap())
-        })
+        }
     }
 
     pub fn update(
@@ -877,7 +877,7 @@ impl Context {
         let path = path.as_canonical_dirent()?;
         let url = url.as_canonical_uri()?;
 
-        with_tmp_pool(|tmp_pool| unsafe {
+        unsafe {
             // Convert to C strings for FFI
             let path_cstr = std::ffi::CString::new(path.as_str())?;
             let url_cstr = std::ffi::CString::new(url.as_str())?;
@@ -898,13 +898,13 @@ impl Context {
             );
             Error::from_raw(err)?;
             Ok(Revnum::from_raw(result_rev).unwrap())
-        })
+        }
     }
 
     pub fn add(&mut self, path: impl AsCanonicalDirent, options: &AddOptions) -> Result<(), Error> {
         let pool = Pool::default();
         let path = path.as_canonical_dirent()?;
-        with_tmp_pool(|tmp_pool| unsafe {
+        unsafe {
             let path_cstr = std::ffi::CString::new(path.as_str())?;
             let err = svn_client_add5(
                 path_cstr.as_ptr(),
@@ -918,7 +918,7 @@ impl Context {
             );
             Error::from_raw(err)?;
             Ok(())
-        })
+        }
     }
 
     pub fn mkdir(
@@ -1116,7 +1116,7 @@ impl Context {
         to_path: impl AsCanonicalDirent,
         options: &ExportOptions,
     ) -> Result<Revnum, Error> {
-        let pool = std::rc::Rc::new(Pool::default());
+        let _pool = std::rc::Rc::new(Pool::default());
         let native_eol: Option<&str> = options.native_eol.into();
         let native_eol = native_eol.map(|s| std::ffi::CString::new(s).unwrap());
         let mut revnum = 0;
@@ -1502,7 +1502,7 @@ impl Context {
         local_abspath: impl AsCanonicalDirent,
     ) -> Result<Conflict, Error> {
         let pool = apr::Pool::new();
-        let scratch_pool = apr::Pool::new();
+        let _scratch_pool = apr::Pool::new();
         let local_abspath = local_abspath.as_canonical_dirent()?;
         let mut conflict: *mut subversion_sys::svn_client_conflict_t = std::ptr::null_mut();
         with_tmp_pool(|tmp_pool| unsafe {
@@ -1542,7 +1542,7 @@ impl Context {
                 apr::pool::Pool::new().as_mut_ptr(),
             );
             Error::from_raw(err)?;
-            let prop_hash = unsafe { crate::props::PropHash::from_ptr(props) };
+            let prop_hash = crate::props::PropHash::from_ptr(props);
             Ok(prop_hash.to_hashmap())
         }
     }
@@ -1597,7 +1597,7 @@ impl Context {
         &mut self,
         path: impl AsCanonicalDirent,
     ) -> Result<std::path::PathBuf, Error> {
-        let pool = std::rc::Rc::new(Pool::default());
+        let _pool = std::rc::Rc::new(Pool::default());
         let path = path.as_canonical_dirent()?;
         let mut wc_root: *const i8 = std::ptr::null();
         with_tmp_pool(|tmp_pool| unsafe {
@@ -1619,7 +1619,7 @@ impl Context {
         local_abspath: impl AsCanonicalDirent,
         committed: bool,
     ) -> Result<(Revnum, Revnum), Error> {
-        let scratch_pool = apr::pool::Pool::new();
+        let _scratch_pool = apr::pool::Pool::new();
         let local_abspath = local_abspath.as_canonical_dirent()?;
         let mut min_revision: subversion_sys::svn_revnum_t = 0;
         let mut max_revision: subversion_sys::svn_revnum_t = 0;
@@ -1647,7 +1647,7 @@ impl Context {
         // Canonicalize input
         let path = path.as_canonical_uri()?;
 
-        with_tmp_pool(|tmp_pool| unsafe {
+        unsafe {
             let mut url: *const i8 = std::ptr::null();
             let path_cstr = std::ffi::CString::new(path.as_str())?;
 
@@ -1660,7 +1660,7 @@ impl Context {
             );
             Error::from_raw(err)?;
             Ok(std::ffi::CStr::from_ptr(url).to_str().unwrap().into())
-        })
+        }
     }
 
     pub fn get_repos_root(&mut self, path_or_url: &str) -> Result<(String, String), Error> {
@@ -1696,7 +1696,7 @@ impl Context {
         &mut self,
         url: &str,
         wri_path: &std::path::Path,
-    ) -> Result<crate::ra::Session, Error> {
+    ) -> Result<crate::ra::Session<'_>, Error> {
         let url = std::ffi::CString::new(url).unwrap();
         let wri_path = std::ffi::CString::new(wri_path.to_str().unwrap()).unwrap();
         let pool = apr::Pool::new();
@@ -1753,7 +1753,7 @@ impl Context {
                 fetch_excluded as i32,
                 fetch_actual_only as i32,
                 include_externals as i32,
-                changelists.map_or(std::ptr::null(), |cl| unsafe { cl.as_ptr() }),
+                changelists.map_or(std::ptr::null(), |cl| cl.as_ptr()),
                 Some(wrap_info_receiver2),
                 receiver,
                 self.as_mut_ptr(),
@@ -1973,7 +1973,7 @@ impl Context {
                         std::ptr::null_mut()
                     },
                     depth.into(),
-                    changelists.map_or(std::ptr::null(), |cl| unsafe { cl.as_ptr() }),
+                    changelists.map_or(std::ptr::null(), |cl| cl.as_ptr()),
                     self.as_mut_ptr(),
                     pool.as_mut_ptr(),
                     pool.as_mut_ptr(),
@@ -2003,7 +2003,7 @@ impl Context {
         target: &str,
         depth: Depth,
         skip_checks: bool,
-        base_revision_for_url: Revnum,
+        _base_revision_for_url: Revnum,
         changelists: Option<&[&str]>,
     ) -> Result<(), Error> {
         with_tmp_pool(|pool| {
@@ -2037,7 +2037,7 @@ impl Context {
                     targets_array.as_ptr(),
                     depth.into(),
                     skip_checks as i32,
-                    changelists.map_or(std::ptr::null(), |cl| unsafe { cl.as_ptr() }),
+                    changelists.map_or(std::ptr::null(), |cl| cl.as_ptr()),
                     self.as_mut_ptr(),
                     pool.as_mut_ptr(),
                 )
@@ -2106,7 +2106,7 @@ impl Context {
                     &(*peg_revision).into(),
                     &(*revision).into(),
                     depth.into(),
-                    changelists.map_or(std::ptr::null(), |cl| unsafe { cl.as_ptr() }),
+                    changelists.map_or(std::ptr::null(), |cl| cl.as_ptr()),
                     get_target_inherited_props as i32,
                     Some(proplist_receiver),
                     receiver_ptr,
@@ -2188,7 +2188,7 @@ impl Context {
                     header_encoding_c.as_ptr(),
                     outstream.as_mut_ptr(),
                     errstream.as_mut_ptr(),
-                    changelists.map_or(std::ptr::null(), |cl| unsafe { cl.as_ptr() }),
+                    changelists.map_or(std::ptr::null(), |cl| cl.as_ptr()),
                     self.as_mut_ptr(),
                     pool.as_mut_ptr(),
                 )
@@ -3719,7 +3719,7 @@ impl Context {
             Error::from_raw(err)?;
 
             let result = if !props_hash.is_null() {
-                let prop_hash = unsafe { crate::props::PropHash::from_ptr(props_hash) };
+                let prop_hash = crate::props::PropHash::from_ptr(props_hash);
                 prop_hash.to_hashmap()
             } else {
                 std::collections::HashMap::new()
@@ -3882,7 +3882,7 @@ impl Status {
         unsafe { (*self.0).file_external != 0 }
     }
 
-    pub fn lock(&self) -> Option<crate::Lock> {
+    pub fn lock(&self) -> Option<crate::Lock<'_>> {
         let lock_ptr = unsafe { (*self.0).lock };
         if lock_ptr.is_null() {
             None
@@ -3925,7 +3925,7 @@ impl Status {
         unsafe { (*self.0).repos_prop_status.into() }
     }
 
-    pub fn repos_lock(&self) -> Option<crate::Lock> {
+    pub fn repos_lock(&self) -> Option<crate::Lock<'_>> {
         let lock_ptr = unsafe { (*self.0).repos_lock };
         if lock_ptr.is_null() {
             None
@@ -4079,7 +4079,7 @@ impl Conflict {
     /// Resolve a tree conflict
     pub fn tree_resolve(
         &mut self,
-        choice: crate::TreeConflictChoice,
+        choice: crate::ClientConflictOptionId,
         ctx: &mut Context,
     ) -> Result<(), Error> {
         unsafe {
@@ -4117,11 +4117,10 @@ impl Conflict {
             let mut prop_conflicts = Vec::new();
             if !props_conflicted.is_null() {
                 // Property conflicts array contains property names
-                let array = unsafe {
-                    apr::tables::TypedArray::<*const std::ffi::c_char>::from_ptr(props_conflicted)
-                };
+                let array =
+                    apr::tables::TypedArray::<*const std::ffi::c_char>::from_ptr(props_conflicted);
                 for cstr_ptr in array.iter() {
-                    let cstr = unsafe { std::ffi::CStr::from_ptr(cstr_ptr) };
+                    let cstr = std::ffi::CStr::from_ptr(cstr_ptr);
                     let propname = cstr.to_string_lossy().into_owned();
                     prop_conflicts.push(propname);
                 }
@@ -4178,7 +4177,6 @@ mod tests {
         // let dirent = crate::dirent::Dirent::from(repo_path.as_c_str());
         // let url = dirent.canonicalize().to_file_url().unwrap();
         let url_str = format!("file://{}", repo_path.to_str().unwrap());
-        let pool = apr::Pool::new();
         let url = crate::uri::Uri::new(&url_str).unwrap();
         let revnum = ctx
             .checkout(
@@ -4208,7 +4206,6 @@ mod tests {
         // Check out working copy
         let mut ctx = Context::new().unwrap();
         let url_str = format!("file://{}", repo_path.to_str().unwrap());
-        let pool = apr::Pool::new();
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         ctx.checkout(
@@ -4267,7 +4264,6 @@ mod tests {
         // Check out working copy
         let mut ctx = Context::new().unwrap();
         let url_str = format!("file://{}", repo_path.to_str().unwrap());
-        let pool = apr::Pool::new();
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         ctx.checkout(
@@ -4310,7 +4306,6 @@ mod tests {
         // Check out working copy
         let mut ctx = Context::new().unwrap();
         let url_str = format!("file://{}", repo_path.to_str().unwrap());
-        let pool = apr::Pool::new();
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         ctx.checkout(
@@ -4569,7 +4564,6 @@ mod tests {
         // Check out working copy
         let mut ctx = Context::new().unwrap();
         let url_str = format!("file://{}", repo_path.to_str().unwrap());
-        let pool = apr::Pool::new();
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         ctx.checkout(
@@ -4616,7 +4610,6 @@ mod tests {
         // Check out working copy
         let mut ctx = Context::new().unwrap();
         let url_str = format!("file://{}", repo_path.to_str().unwrap());
-        let pool = apr::Pool::new();
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         ctx.checkout(
@@ -4675,7 +4668,6 @@ mod tests {
         // Check out working copy
         let mut ctx = Context::new().unwrap();
         let url_str = format!("file://{}", repo_path.to_str().unwrap());
-        let pool = apr::Pool::new();
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         ctx.checkout(
@@ -4738,7 +4730,7 @@ mod tests {
                 | subversion_sys::SVN_DIRENT_LAST_AUTHOR,
             false, // fetch_locks
             false, // include_externals
-            &mut |path, dirent, _lock| {
+            &mut |path, _dirent, _lock| {
                 entries.push(path.to_string());
                 Ok(())
             },
@@ -4786,7 +4778,6 @@ mod tests {
         // Check out working copy
         let mut ctx = Context::new().unwrap();
         let url_str = format!("file://{}", repo_path.to_str().unwrap());
-        let pool = apr::Pool::new();
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         ctx.checkout(
@@ -4866,7 +4857,6 @@ mod tests {
         // Check out working copy
         let mut ctx = Context::new().unwrap();
         let url_str = format!("file://{}", repo_path.to_str().unwrap());
-        let pool = apr::Pool::new();
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         ctx.checkout(
@@ -4973,7 +4963,6 @@ mod tests {
         // Check out working copy and make a commit
         let mut ctx = Context::new().unwrap();
         let url_str = format!("file://{}", repo_path.to_str().unwrap());
-        let pool = apr::Pool::new();
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         ctx.checkout(
@@ -5055,7 +5044,6 @@ mod tests {
         // Check out working copy
         let mut ctx = Context::new().unwrap();
         let url_str = format!("file://{}", repo_path.to_str().unwrap());
-        let pool = apr::Pool::new();
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         ctx.checkout(
@@ -5099,7 +5087,6 @@ mod tests {
         // Check out working copy
         let mut ctx = Context::new().unwrap();
         let url_str = format!("file://{}", repo_path.to_str().unwrap());
-        let pool = apr::Pool::new();
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         ctx.checkout(
