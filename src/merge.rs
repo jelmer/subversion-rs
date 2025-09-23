@@ -398,7 +398,7 @@ pub fn mergeinfo_to_string(
         if output_ptr.is_null() {
             Ok(String::new())
         } else {
-            let svn_string = unsafe { &*output_ptr };
+            let svn_string = &*output_ptr;
             let slice = std::slice::from_raw_parts(svn_string.data as *const u8, svn_string.len);
             Ok(String::from_utf8_lossy(slice).into_owned())
         }

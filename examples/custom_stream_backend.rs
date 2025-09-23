@@ -95,9 +95,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     use subversion::io::builder::StreamBuilder;
 
     let backend = BufferBackend::from_vec(b"Built with builder".to_vec());
-    let stream = StreamBuilder::new(backend).buffer_size(1024).build()?;
+    let mut stream = StreamBuilder::new(backend).buffer_size(1024).build()?;
 
-    println!("   Stream created with builder pattern");
+    // Read from the stream created with builder
+    let mut buf = vec![0u8; 18];
+    stream.read(&mut buf)?;
+    println!(
+        "   Read from builder stream: {:?}",
+        String::from_utf8_lossy(&buf)
+    );
 
     // Example 5: Read-only and Write-only backends
     println!("\n5. Using specialized backends:");

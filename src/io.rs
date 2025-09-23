@@ -53,6 +53,7 @@ impl From<subversion_sys::svn_io_file_del_t> for FileDel {
 /// Stream mark with RAII cleanup
 pub struct Mark {
     ptr: *mut subversion_sys::svn_stream_mark_t,
+    #[allow(dead_code)]
     pool: apr::Pool,
     _phantom: PhantomData<*mut ()>, // !Send + !Sync
 }
@@ -87,6 +88,7 @@ impl Mark {
 /// String buffer for stream operations
 pub struct StringBuf {
     ptr: *mut subversion_sys::svn_stringbuf_t,
+    #[allow(dead_code)]
     pool: apr::Pool,
     _phantom: PhantomData<*mut ()>, // !Send + !Sync
 }
@@ -158,6 +160,7 @@ impl StringBuf {
 /// Stream handle with RAII cleanup
 pub struct Stream {
     ptr: *mut subversion_sys::svn_stream_t,
+    #[allow(dead_code)]
     pool: apr::Pool,
     backend: Option<*mut std::ffi::c_void>, // Boxed backend for manual cleanup (not used by from_backend)
     _phantom: PhantomData<*mut ()>,         // !Send + !Sync
@@ -594,7 +597,7 @@ impl Stream {
         &mut self,
         checksum_kind: crate::ChecksumKind,
         read_all: bool,
-    ) -> (crate::io::Stream, crate::Checksum, crate::Checksum) {
+    ) -> (crate::io::Stream, crate::Checksum<'_>, crate::Checksum<'_>) {
         let mut read_checksum = std::ptr::null_mut();
         let mut write_checksum = std::ptr::null_mut();
         let stream = unsafe {
@@ -607,7 +610,7 @@ impl Stream {
                 apr::pool::Pool::new().as_mut_ptr(),
             )
         };
-        let pool = std::rc::Rc::new(apr::pool::Pool::new());
+        let _pool = std::rc::Rc::new(apr::pool::Pool::new());
         (
             unsafe { crate::io::Stream::from_ptr_and_pool(stream, apr::Pool::new()) },
             crate::Checksum {
@@ -635,7 +638,7 @@ impl Stream {
     pub fn contents_checksum(
         &mut self,
         checksum_kind: crate::ChecksumKind,
-    ) -> Result<crate::Checksum, Error> {
+    ) -> Result<crate::Checksum<'_>, Error> {
         let mut checksum = std::ptr::null_mut();
         let pool = apr::pool::Pool::new();
         let err = unsafe {
@@ -944,7 +947,7 @@ impl Stream {
         extern "C" fn mark_trampoline(
             baton: *mut std::ffi::c_void,
             mark: *mut *mut subversion_sys::svn_stream_mark_t,
-            pool: *mut apr_sys::apr_pool_t,
+            _pool: *mut apr_sys::apr_pool_t,
         ) -> *mut subversion_sys::svn_error_t {
             let mark_func = unsafe {
                 &*(baton
@@ -1008,7 +1011,7 @@ impl Stream {
         extern "C" fn open_trampoline(
             lazyopen_stream: *mut *mut subversion_sys::svn_stream_t,
             open_baton: *mut std::ffi::c_void,
-            result_pool: *mut apr_sys::apr_pool_t,
+            _result_pool: *mut apr_sys::apr_pool_t,
             _scratch_pool: *mut apr_sys::apr_pool_t,
         ) -> *mut subversion_sys::svn_error_t {
             let open_func =
@@ -1523,7 +1526,7 @@ pub fn filesizes_three_different_p(
 pub fn file_checksum(
     file: &std::path::Path,
     checksum_kind: crate::ChecksumKind,
-) -> Result<crate::Checksum, Error> {
+) -> Result<crate::Checksum<'_>, Error> {
     let file = std::ffi::CString::new(file.to_str().unwrap()).unwrap();
     let mut checksum = std::ptr::null_mut();
     let pool = apr::pool::Pool::new();

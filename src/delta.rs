@@ -1249,7 +1249,7 @@ mod tests {
 
         // Test calling set_target_revision wrapper function directly
         let pool = apr::pool::Pool::new();
-        let result = unsafe { wrap_editor_set_target_revision(baton_ptr, 42, pool.as_mut_ptr()) };
+        let result = wrap_editor_set_target_revision(baton_ptr, 42, pool.as_mut_ptr());
 
         // Clean up
         unsafe {

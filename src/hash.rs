@@ -601,6 +601,7 @@ impl<'a> DirentHash<'a> {
     }
 
     /// Convert the dirents to a HashMap<String, crate::Dirent>
+    #[cfg(feature = "ra")]
     pub fn to_hashmap(&self) -> HashMap<String, crate::ra::Dirent> {
         self.inner
             .iter()
@@ -613,6 +614,7 @@ impl<'a> DirentHash<'a> {
     }
 
     /// Iterate over the dirents as (path: &str, dirent: crate::ra::Dirent) pairs
+    #[cfg(feature = "ra")]
     pub fn iter(&self) -> impl Iterator<Item = (&str, crate::ra::Dirent)> + '_ {
         self.inner.iter().map(|(k, v)| {
             let path = std::str::from_utf8(k).unwrap_or("");
