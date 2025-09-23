@@ -28,11 +28,11 @@ jobs:
     - name: Install cargo-all-features
       run: cargo install cargo-all-features
     - name: Build
-      run: cargo build-all-features --verbose
+      run: cargo build-all-features
       env:
         RUSTFLAGS: -Dwarnings
     - name: Run tests
-      run: cargo test-all-features --verbose
+      run: cargo test-all-features
       env:
         RUSTFLAGS: -Dwarnings
     - name: Check formatting
