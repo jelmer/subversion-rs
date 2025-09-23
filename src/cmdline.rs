@@ -210,7 +210,7 @@ pub fn create_auth_baton(
     config_dir: Option<&str>,
     non_interactive: bool,
 ) -> Result<AuthBaton, Error> {
-    let mut auth_baton = AuthBaton::open(vec![])?;
+    let auth_baton = AuthBaton::open(vec![])?;
 
     // TODO: When subversion-sys exposes more auth providers, add:
     // - Keychain providers (macOS)

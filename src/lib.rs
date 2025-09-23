@@ -32,7 +32,6 @@ pub mod iter;
 #[cfg(feature = "client")]
 pub mod merge;
 pub mod mergeinfo;
-pub mod nls;
 pub mod opt;
 pub mod props;
 #[cfg(feature = "ra")]
@@ -1133,6 +1132,7 @@ extern "C" fn wrap_cancel_func(
 }
 
 /// Conflict resolution choice for text and property conflicts
+#[cfg(feature = "client")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TextConflictChoice {
     /// Postpone resolution for later
@@ -1153,6 +1153,7 @@ pub enum TextConflictChoice {
     Unspecified,
 }
 
+#[cfg(feature = "client")]
 impl From<TextConflictChoice> for subversion_sys::svn_client_conflict_option_id_t {
     fn from(choice: TextConflictChoice) -> Self {
         match choice {
@@ -1169,6 +1170,7 @@ impl From<TextConflictChoice> for subversion_sys::svn_client_conflict_option_id_
 }
 
 /// Conflict resolution choice for tree conflicts  
+#[cfg(feature = "client")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TreeConflictChoice {
     /// Postpone resolution for later
@@ -1187,21 +1189,62 @@ pub enum TreeConflictChoice {
     IgnoreIncomingAdd,
 }
 
-impl From<TreeConflictChoice> for subversion_sys::svn_client_conflict_option_id_t {
-    fn from(choice: TreeConflictChoice) -> Self {
+/// Client conflict option ID that maps directly to svn_client_conflict_option_id_t
+#[cfg(feature = "client")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClientConflictOptionId {
+    Undefined,
+    Postpone,
+    BaseText,
+    IncomingText,
+    WorkingText,
+    IncomingTextWhereConflicted,
+    WorkingTextWhereConflicted,
+    MergedText,
+    Unspecified,
+    AcceptCurrentWcState,
+    UpdateMoveDestination,
+    UpdateAnyMovedAwayChildren,
+    IncomingAddIgnore,
+    IncomingAddedFileTextMerge,
+    IncomingAddedFileReplaceAndMerge,
+    IncomingAddedDirMerge,
+    IncomingAddedDirReplace,
+    IncomingAddedDirReplaceAndMerge,
+    IncomingDeleteIgnore,
+    IncomingDeleteAccept,
+}
+
+#[cfg(feature = "client")]
+impl From<ClientConflictOptionId> for subversion_sys::svn_client_conflict_option_id_t {
+    fn from(choice: ClientConflictOptionId) -> Self {
         match choice {
-            TreeConflictChoice::Postpone => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_postpone,
-            TreeConflictChoice::AcceptCurrentState => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_accept_current_wc_state,
-            TreeConflictChoice::AcceptIncomingDelete => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_delete_accept,
-            TreeConflictChoice::IgnoreIncomingDelete => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_delete_ignore,
-            TreeConflictChoice::UpdateMoveDestination => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_update_move_destination,
-            TreeConflictChoice::AcceptIncomingAdd => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_add_ignore,
-            TreeConflictChoice::IgnoreIncomingAdd => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_delete_ignore,
+            ClientConflictOptionId::Undefined => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_undefined,
+            ClientConflictOptionId::Postpone => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_postpone,
+            ClientConflictOptionId::BaseText => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_base_text,
+            ClientConflictOptionId::IncomingText => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_text,
+            ClientConflictOptionId::WorkingText => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_working_text,
+            ClientConflictOptionId::IncomingTextWhereConflicted => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_text_where_conflicted,
+            ClientConflictOptionId::WorkingTextWhereConflicted => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_working_text_where_conflicted,
+            ClientConflictOptionId::MergedText => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_merged_text,
+            ClientConflictOptionId::Unspecified => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_unspecified,
+            ClientConflictOptionId::AcceptCurrentWcState => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_accept_current_wc_state,
+            ClientConflictOptionId::UpdateMoveDestination => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_update_move_destination,
+            ClientConflictOptionId::UpdateAnyMovedAwayChildren => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_update_any_moved_away_children,
+            ClientConflictOptionId::IncomingAddIgnore => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_add_ignore,
+            ClientConflictOptionId::IncomingAddedFileTextMerge => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_added_file_text_merge,
+            ClientConflictOptionId::IncomingAddedFileReplaceAndMerge => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_added_file_replace_and_merge,
+            ClientConflictOptionId::IncomingAddedDirMerge => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_added_dir_merge,
+            ClientConflictOptionId::IncomingAddedDirReplace => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_added_dir_replace,
+            ClientConflictOptionId::IncomingAddedDirReplaceAndMerge => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_added_dir_replace_and_merge,
+            ClientConflictOptionId::IncomingDeleteIgnore => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_delete_ignore,
+            ClientConflictOptionId::IncomingDeleteAccept => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_delete_accept,
         }
     }
 }
 
 /// Legacy conflict choice enum for backward compatibility with WC functions
+#[cfg(feature = "wc")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConflictChoice {
     Postpone,
@@ -1214,6 +1257,7 @@ pub enum ConflictChoice {
     Unspecified,
 }
 
+#[cfg(feature = "wc")]
 impl From<ConflictChoice> for subversion_sys::svn_wc_conflict_choice_t {
     fn from(choice: ConflictChoice) -> Self {
         match choice {

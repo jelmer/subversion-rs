@@ -18,10 +18,10 @@ impl Uri {
 
     /// Check if this URI is a root URI (has no path component beyond "/")
     pub fn is_root(&self) -> bool {
-        with_tmp_pool(|pool| unsafe {
+        unsafe {
             let uri_cstr = std::ffi::CString::new(self.0.as_str()).unwrap();
             subversion_sys::svn_uri_is_root(uri_cstr.as_ptr(), self.0.len()) != 0
-        })
+        }
     }
 
     /// Get the canonical form of this URI

@@ -125,7 +125,7 @@ impl<'a> PropHash<'a> {
     /// Iterate over the properties as (key: &str, value: &str) pairs
     ///
     /// Non-UTF-8 bytes in values will be replaced with the UTF-8 replacement character.
-    pub fn iter_strings(&self) -> impl Iterator<Item = (&str, std::borrow::Cow<str>)> {
+    pub fn iter_strings(&self) -> impl Iterator<Item = (&str, std::borrow::Cow<'_, str>)> {
         self.inner.iter().map(|(k, v)| {
             let key = std::str::from_utf8(k).unwrap_or("");
             let value = String::from_utf8_lossy(crate::svn_string_helpers::as_bytes(v));

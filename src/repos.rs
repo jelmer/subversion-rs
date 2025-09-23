@@ -55,6 +55,7 @@ pub fn find_root_path(path: &std::path::Path) -> Option<std::path::PathBuf> {
 /// Repository handle with RAII cleanup
 pub struct Repos {
     ptr: *mut svn_repos_t,
+    #[allow(dead_code)]
     pool: apr::Pool,
     _phantom: PhantomData<*mut ()>, // !Send + !Sync
 }
@@ -455,7 +456,7 @@ impl Repos {
         let mut uuid_ptr = std::ptr::null();
         let ret = unsafe {
             subversion_sys::svn_fs_get_uuid(
-                unsafe { subversion_sys::svn_repos_fs(self.ptr) },
+                subversion_sys::svn_repos_fs(self.ptr),
                 &mut uuid_ptr,
                 pool.as_mut_ptr(),
             )
@@ -476,7 +477,7 @@ impl Repos {
         let uuid_cstr = std::ffi::CString::new(uuid)?;
         let ret = unsafe {
             subversion_sys::svn_fs_set_uuid(
-                unsafe { subversion_sys::svn_repos_fs(self.ptr) },
+                subversion_sys::svn_repos_fs(self.ptr),
                 uuid_cstr.as_ptr(),
                 pool.as_mut_ptr(),
             )
@@ -492,7 +493,7 @@ impl Repos {
         let ret = unsafe {
             subversion_sys::svn_fs_youngest_rev(
                 &mut revnum,
-                unsafe { subversion_sys::svn_repos_fs(self.ptr) },
+                subversion_sys::svn_repos_fs(self.ptr),
                 pool.as_mut_ptr(),
             )
         };
@@ -1325,7 +1326,6 @@ pub fn fs_pack(
     notify_func: Option<&dyn Fn(&Notify)>,
     cancel_func: Option<&dyn Fn() -> Result<(), Error>>,
 ) -> Result<(), Error> {
-    let path_cstr = std::ffi::CString::new(path.to_string_lossy().as_ref())?;
     let pool = apr::Pool::new();
 
     let notify_baton = notify_func
@@ -1384,6 +1384,7 @@ impl Repos {
     /// * `author` - Optional author name
     /// * `revprops` - Optional additional revision properties (svn:log and svn:author are set automatically)
     /// * `commit_callback` - Optional callback to be called on successful commit
+    #[cfg(feature = "delta")]
     pub fn get_commit_editor(
         &self,
         repos_url: &str,
@@ -1516,9 +1517,9 @@ impl Repos {
 
         Error::from_raw(ret)?;
 
-        // Leak the pool to keep it alive for the lifetime of the editor
-        // This is safe because the editor will be dropped eventually
-        let pool = Box::leak(pool);
+        // TODO: This is a memory leak! The pool is leaked and never freed.
+        // WrapEditor should be changed to own the pool instead of using PhantomData.
+        let _pool = Box::leak(pool);
 
         let editor = crate::delta::WrapEditor {
             editor: editor_ptr,
@@ -1546,6 +1547,7 @@ mod additional_tests {
     }
 
     #[test]
+    #[cfg(feature = "delta")]
     fn test_get_commit_editor_basic() {
         // Create a temporary repository for testing
         let temp_dir = tempfile::tempdir().unwrap();
@@ -1560,7 +1562,7 @@ mod additional_tests {
         // Test get_commit_editor with basic parameters
         let result = repo.get_commit_editor(
             &repo_url,
-            "/", // base path (repository root)
+            "", // base path (repository root - empty string in fspath format)
             "Test commit message",
             Some("test_author"),
             None, // no revprops

@@ -50,7 +50,7 @@ impl From<EolStyle> for subversion_sys::svn_subst_eol_style_t {
 pub fn eol_style_from_value(value: &str) -> (EolStyle, Option<String>) {
     let value_cstr = std::ffi::CString::new(value).unwrap();
 
-    with_tmp_pool(|pool| unsafe {
+    unsafe {
         let mut style: subversion_sys::svn_subst_eol_style_t =
             subversion_sys::svn_subst_eol_style_svn_subst_eol_style_unknown;
         let mut eol_ptr: *const std::ffi::c_char = std::ptr::null();
@@ -73,7 +73,7 @@ pub fn eol_style_from_value(value: &str) -> (EolStyle, Option<String>) {
         };
 
         (EolStyle::from(style), eol_str)
-    })
+    }
 }
 
 /// Check if translation is required for the given parameters

@@ -1143,7 +1143,7 @@ impl Context {
         src_abspath: &std::path::Path,
         dst_abspath: &std::path::Path,
         metadata_only: bool,
-        allow_mixed_revisions: bool,
+        _allow_mixed_revisions: bool,
         cancel_func: Option<&dyn Fn() -> Result<(), Error>>,
         notify_func: Option<&dyn Fn(&Notify)>,
     ) -> Result<(), Error> {
@@ -1300,6 +1300,7 @@ extern "C" fn wrap_notify_func(
 /// Represents a queue of committed items
 pub struct CommittedQueue {
     ptr: *mut subversion_sys::svn_wc_committed_queue_t,
+    #[allow(dead_code)]
     pool: apr::Pool,
 }
 
@@ -1345,7 +1346,7 @@ pub fn cleanup(
     fix_recorded_timestamps: bool,
     clear_dav_cache: bool,
     vacuum_pristines: bool,
-    include_externals: bool,
+    _include_externals: bool,
 ) -> Result<(), Error> {
     let path_str = wc_path.to_string_lossy();
     let path_cstr = std::ffi::CString::new(path_str.as_ref()).unwrap();
@@ -1389,11 +1390,11 @@ pub fn cleanup(
 pub fn add(
     ctx: &mut Context,
     path: &std::path::Path,
-    depth: crate::Depth,
+    _depth: crate::Depth,
     force: bool,
-    no_ignore: bool,
-    no_autoprops: bool,
-    add_parents: bool,
+    _no_ignore: bool,
+    _no_autoprops: bool,
+    _add_parents: bool,
 ) -> Result<(), Error> {
     let path_str = path.to_string_lossy();
     let path_cstr = std::ffi::CString::new(path_str.as_ref())?;
@@ -1520,7 +1521,7 @@ pub fn resolve_conflict(
     path: &std::path::Path,
     depth: crate::Depth,
     resolve_text: bool,
-    resolve_props: bool,
+    _resolve_props: bool,
     resolve_tree: bool,
     conflict_choice: ConflictChoice,
 ) -> Result<(), Error> {
