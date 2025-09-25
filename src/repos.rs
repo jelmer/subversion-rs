@@ -76,6 +76,9 @@ impl Repos {
         config: Option<&std::collections::HashMap<String, String>>,
         fs_config: Option<&std::collections::HashMap<String, String>>,
     ) -> Result<Repos, Error> {
+        // Ensure SVN libraries are initialized
+        crate::init::initialize()?;
+
         let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
         let pool = apr::Pool::new();
 
@@ -134,6 +137,9 @@ impl Repos {
     }
 
     pub fn open(path: &std::path::Path) -> Result<Repos, Error> {
+        // Ensure SVN libraries are initialized
+        crate::init::initialize()?;
+
         let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
         let pool = apr::Pool::new();
 
