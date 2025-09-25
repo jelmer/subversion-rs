@@ -27,6 +27,7 @@ pub mod dirent;
 pub mod error;
 pub mod fs;
 pub mod hash;
+pub mod init;
 pub mod io;
 pub mod iter;
 #[cfg(feature = "client")]
@@ -48,6 +49,7 @@ pub mod version;
 pub mod wc;
 pub mod x509;
 pub mod xml;
+
 use bitflags::bitflags;
 use std::str::FromStr;
 use subversion_sys::{svn_opt_revision_t, svn_opt_revision_value_t};

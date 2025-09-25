@@ -298,6 +298,9 @@ impl<'a> Session<'a> {
         mut callbacks: Option<&'a mut Callbacks>,
         mut config: Option<&mut crate::config::ConfigHash>,
     ) -> Result<(Self, Option<String>, Option<String>), Error> {
+        // Ensure SVN libraries are initialized
+        crate::init::initialize()?;
+
         let url = std::ffi::CString::new(url).unwrap();
         let mut corrected_url = std::ptr::null();
         let mut redirect_url = std::ptr::null();

@@ -12,6 +12,7 @@ fn create_svn_bindings(
 
     let mut builder = bindgen::Builder::default()
         .header(svn_path.join("svn_dirent_uri.h").to_str().unwrap())
+        .header(svn_path.join("svn_dso.h").to_str().unwrap())
         .header(svn_path.join("svn_path.h").to_str().unwrap())
         .header(svn_path.join("svn_version.h").to_str().unwrap())
         .header(svn_path.join("svn_error.h").to_str().unwrap())
@@ -58,6 +59,8 @@ fn create_svn_bindings(
         .raw_line("use apr_sys::apr_seek_where_t;")
         .raw_line("#[allow(unused_imports)]")
         .raw_line("use apr_sys::apr_byte_t;")
+        .raw_line("use apr_sys::apr_dso_handle_t;")
+        .raw_line("use apr_sys::apr_dso_handle_sym_t;")
         .clang_args(
             include_paths
                 .iter()
@@ -72,7 +75,9 @@ fn create_svn_bindings(
         builder = builder.header(svn_path.join("svn_wc.h").to_str().unwrap());
     }
 
-    if ra_feature_enabled {
+    // Include svn_ra.h if ra feature OR client feature is enabled
+    // (client library depends on ra)
+    if ra_feature_enabled || client_feature_enabled {
         builder = builder.header(svn_path.join("svn_ra.h").to_str().unwrap());
     }
 

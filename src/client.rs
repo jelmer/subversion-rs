@@ -674,6 +674,9 @@ impl Drop for Context {
 
 impl Context {
     pub fn new() -> Result<Self, Error> {
+        // Ensure SVN libraries are initialized
+        crate::init::initialize()?;
+
         let pool = apr::Pool::new();
         let mut ctx = std::ptr::null_mut();
         let ret = unsafe {
