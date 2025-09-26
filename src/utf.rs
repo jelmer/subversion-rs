@@ -5,20 +5,6 @@
 
 use crate::{with_tmp_pool, Error};
 
-/// Initialize the UTF-8 encoding/decoding subsystem
-///
-/// # Arguments
-/// * `assume_native_utf8` - If true, assume the native encoding is UTF-8
-///
-/// This should be called early in the application lifecycle.
-pub fn initialize(assume_native_utf8: bool) {
-    with_tmp_pool(|pool| unsafe {
-        subversion_sys::svn_utf_initialize2(
-            if assume_native_utf8 { 1 } else { 0 },
-            pool.as_mut_ptr(),
-        );
-    })
-}
 
 /// Convert a C string from native encoding to UTF-8
 ///
