@@ -60,7 +60,6 @@ fn create_svn_bindings(
         .raw_line("#[allow(unused_imports)]")
         .raw_line("use apr_sys::apr_byte_t;")
         .raw_line("use apr_sys::apr_dso_handle_t;")
-        .raw_line("use apr_sys::apr_dso_handle_sym_t;")
         .clang_args(
             include_paths
                 .iter()

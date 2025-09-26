@@ -1514,7 +1514,7 @@ impl Context {
                 &mut conflict,
                 path_cstr.as_ptr(),
                 self.ptr,
-                pool.as_mut_ptr(),  // Use the persistent pool for the conflict object
+                pool.as_mut_ptr(), // Use the persistent pool for the conflict object
                 scratch_pool.as_mut_ptr(),
             );
             Error::from_raw(err)?;

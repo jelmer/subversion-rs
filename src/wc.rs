@@ -667,7 +667,7 @@ pub fn get_pristine_contents(
 
     // Create a pool that will live as long as the Stream
     let result_pool = apr::Pool::new();
-    
+
     with_tmp_pool(|scratch_pool| -> Result<(), crate::Error> {
         let mut ctx = std::ptr::null_mut();
         with_tmp_pool(|ctx_scratch_pool| {
@@ -675,7 +675,7 @@ pub fn get_pristine_contents(
                 subversion_sys::svn_wc_context_create(
                     &mut ctx,
                     std::ptr::null_mut(),
-                    scratch_pool.as_mut_ptr(),  // ctx lives in the outer scratch pool
+                    scratch_pool.as_mut_ptr(), // ctx lives in the outer scratch pool
                     ctx_scratch_pool.as_mut_ptr(),
                 )
             };
@@ -688,7 +688,7 @@ pub fn get_pristine_contents(
                 ctx,
                 path_cstr.as_ptr(),
                 result_pool.as_mut_ptr(),  // result pool for the stream
-                scratch_pool.as_mut_ptr(),  // scratch pool for temporary allocations
+                scratch_pool.as_mut_ptr(), // scratch pool for temporary allocations
             )
         };
         Error::from_raw(err)?;
@@ -719,7 +719,7 @@ pub fn get_pristine_copy_path(path: &std::path::Path) -> Result<std::path::PathB
             )
         };
         Error::from_raw(err)?;
-        
+
         // Copy the string before the pool is destroyed
         let result = if pristine_path.is_null() {
             String::new()

@@ -531,8 +531,11 @@ pub fn get_config(config_dir: Option<&Path>) -> Result<(Config, Config), Error> 
     unsafe {
         // Get config into the config_pool
         let mut cfg_hash = ptr::null_mut();
-        let err =
-            subversion_sys::svn_config_get_config(&mut cfg_hash, config_dir_ptr, config_pool.as_mut_ptr());
+        let err = subversion_sys::svn_config_get_config(
+            &mut cfg_hash,
+            config_dir_ptr,
+            config_pool.as_mut_ptr(),
+        );
         svn_result(err)?;
 
         // Get the config and servers from the hash
@@ -547,10 +550,13 @@ pub fn get_config(config_dir: Option<&Path>) -> Result<(Config, Config), Error> 
 
         // Get servers config into the servers_pool
         let mut servers_hash = ptr::null_mut();
-        let err2 =
-            subversion_sys::svn_config_get_config(&mut servers_hash, config_dir_ptr, servers_pool.as_mut_ptr());
+        let err2 = subversion_sys::svn_config_get_config(
+            &mut servers_hash,
+            config_dir_ptr,
+            servers_pool.as_mut_ptr(),
+        );
         svn_result(err2)?;
-        
+
         let servers_ptr = apr_sys::apr_hash_get(
             servers_hash,
             servers_key.as_ptr() as *const std::ffi::c_void,
