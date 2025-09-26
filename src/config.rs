@@ -511,7 +511,9 @@ pub fn get_config_hash(config_dir: Option<&Path>) -> Result<ConfigHash, Error> {
 
 /// Read configuration from the default locations
 pub fn get_config(config_dir: Option<&Path>) -> Result<(Config, Config), Error> {
-    let pool = apr::Pool::new();
+    // Create separate pools for each config object that will be returned
+    let config_pool = apr::Pool::new();
+    let servers_pool = apr::Pool::new();
 
     let config_dir_cstr = if let Some(dir) = config_dir {
         Some(CString::new(dir.to_str().ok_or_else(|| {
@@ -527,9 +529,10 @@ pub fn get_config(config_dir: Option<&Path>) -> Result<(Config, Config), Error> 
         .unwrap_or(ptr::null());
 
     unsafe {
+        // Get config into the config_pool
         let mut cfg_hash = ptr::null_mut();
         let err =
-            subversion_sys::svn_config_get_config(&mut cfg_hash, config_dir_ptr, pool.as_mut_ptr());
+            subversion_sys::svn_config_get_config(&mut cfg_hash, config_dir_ptr, config_pool.as_mut_ptr());
         svn_result(err)?;
 
         // Get the config and servers from the hash
@@ -542,15 +545,21 @@ pub fn get_config(config_dir: Option<&Path>) -> Result<(Config, Config), Error> 
             apr_sys::APR_HASH_KEY_STRING as isize,
         ) as *mut subversion_sys::svn_config_t;
 
+        // Get servers config into the servers_pool
+        let mut servers_hash = ptr::null_mut();
+        let err2 =
+            subversion_sys::svn_config_get_config(&mut servers_hash, config_dir_ptr, servers_pool.as_mut_ptr());
+        svn_result(err2)?;
+        
         let servers_ptr = apr_sys::apr_hash_get(
-            cfg_hash,
+            servers_hash,
             servers_key.as_ptr() as *const std::ffi::c_void,
             apr_sys::APR_HASH_KEY_STRING as isize,
         ) as *mut subversion_sys::svn_config_t;
 
         Ok((
-            Config::from_ptr_and_pool(config_ptr, apr::Pool::new()),
-            Config::from_ptr_and_pool(servers_ptr, apr::Pool::new()),
+            Config::from_ptr_and_pool(config_ptr, config_pool),
+            Config::from_ptr_and_pool(servers_ptr, servers_pool),
         ))
     }
 }

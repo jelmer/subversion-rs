@@ -67,7 +67,8 @@ pub fn initialize() -> Result<(), Error> {
 
     // Check if initialization succeeded
     unsafe {
-        match &INIT_RESULT {
+        let result_ptr = &raw const INIT_RESULT;
+        match &*result_ptr {
             Ok(()) => Ok(()),
             Err(msg) => Err(Error::from_str(msg)),
         }

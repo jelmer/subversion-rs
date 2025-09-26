@@ -665,15 +665,18 @@ pub fn get_pristine_contents(
     let path_cstr = std::ffi::CString::new(path_str.as_ref()).unwrap();
     let mut contents: *mut subversion_sys::svn_stream_t = std::ptr::null_mut();
 
-    with_tmp_pool(|pool| -> Result<(), crate::Error> {
+    // Create a pool that will live as long as the Stream
+    let result_pool = apr::Pool::new();
+    
+    with_tmp_pool(|scratch_pool| -> Result<(), crate::Error> {
         let mut ctx = std::ptr::null_mut();
-        with_tmp_pool(|scratch_pool| {
+        with_tmp_pool(|ctx_scratch_pool| {
             let err = unsafe {
                 subversion_sys::svn_wc_context_create(
                     &mut ctx,
                     std::ptr::null_mut(),
-                    pool.as_mut_ptr(),
-                    scratch_pool.as_mut_ptr(),
+                    scratch_pool.as_mut_ptr(),  // ctx lives in the outer scratch pool
+                    ctx_scratch_pool.as_mut_ptr(),
                 )
             };
             svn_result(err)
@@ -684,8 +687,8 @@ pub fn get_pristine_contents(
                 &mut contents,
                 ctx,
                 path_cstr.as_ptr(),
-                pool.as_mut_ptr(),
-                pool.as_mut_ptr(),
+                result_pool.as_mut_ptr(),  // result pool for the stream
+                scratch_pool.as_mut_ptr(),  // scratch pool for temporary allocations
             )
         };
         Error::from_raw(err)?;
@@ -696,7 +699,7 @@ pub fn get_pristine_contents(
         Ok(None)
     } else {
         Ok(Some(unsafe {
-            crate::io::Stream::from_ptr_and_pool(contents, apr::Pool::new())
+            crate::io::Stream::from_ptr_and_pool(contents, result_pool)
         }))
     }
 }
@@ -707,7 +710,7 @@ pub fn get_pristine_copy_path(path: &std::path::Path) -> Result<std::path::PathB
     let path_cstr = std::ffi::CString::new(path_str.as_ref()).unwrap();
     let mut pristine_path: *const i8 = std::ptr::null();
 
-    with_tmp_pool(|pool| -> Result<(), crate::Error> {
+    let pristine_path_str = with_tmp_pool(|pool| -> Result<String, crate::Error> {
         let err = unsafe {
             subversion_sys::svn_wc_get_pristine_copy_path(
                 path_cstr.as_ptr(),
@@ -716,16 +719,17 @@ pub fn get_pristine_copy_path(path: &std::path::Path) -> Result<std::path::PathB
             )
         };
         Error::from_raw(err)?;
-        Ok(())
+        
+        // Copy the string before the pool is destroyed
+        let result = if pristine_path.is_null() {
+            String::new()
+        } else {
+            unsafe { std::ffi::CStr::from_ptr(pristine_path) }
+                .to_string_lossy()
+                .into_owned()
+        };
+        Ok(result)
     })?;
-
-    let pristine_path_str = if pristine_path.is_null() {
-        String::new()
-    } else {
-        unsafe { std::ffi::CStr::from_ptr(pristine_path) }
-            .to_string_lossy()
-            .into_owned()
-    };
 
     Ok(std::path::PathBuf::from(pristine_path_str))
 }
