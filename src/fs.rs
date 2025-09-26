@@ -253,10 +253,10 @@ impl Fs {
         fs_ptr: *mut subversion_sys::svn_fs_t,
         pool: apr::Pool,
     ) -> Self {
-        Self { 
-            fs_ptr, 
+        Self {
+            fs_ptr,
             pool,
-            owned: false,  // This is a borrowed fs from repos
+            owned: false, // This is a borrowed fs from repos
         }
     }
 
@@ -284,10 +284,10 @@ impl Fs {
                 svn_result(err)
             })?;
 
-            Ok(Fs { 
-                fs_ptr, 
+            Ok(Fs {
+                fs_ptr,
                 pool,
-                owned: true,  // We created this fs
+                owned: true, // We created this fs
             })
         }
     }
@@ -316,10 +316,10 @@ impl Fs {
                 svn_result(err)
             })?;
 
-            Ok(Fs { 
-                fs_ptr, 
+            Ok(Fs {
+                fs_ptr,
                 pool,
-                owned: true,  // We created this fs
+                owned: true, // We created this fs
             })
         }
     }
@@ -751,7 +751,7 @@ impl Root {
 
             Ok(NodeHistory {
                 ptr: history,
-                pool,  // Use the same pool that allocated the history
+                pool, // Use the same pool that allocated the history
             })
         }
     }
@@ -804,7 +804,7 @@ impl Root {
 /// Represents the history of a node in the filesystem
 pub struct NodeHistory {
     ptr: *mut subversion_sys::svn_fs_history_t,
-    pool: apr::Pool,  // Pool used for all history allocations
+    pool: apr::Pool, // Pool used for all history allocations
 }
 
 impl NodeHistory {
