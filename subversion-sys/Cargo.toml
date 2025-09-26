@@ -14,6 +14,7 @@ doctest = false
 
 [dependencies]
 apr = { version = ">=0.1.14, <0.4" }
+apr-sys = "0.2.1"
 
 [build-dependencies]
 bindgen = "0.72"
@@ -29,6 +30,7 @@ delta = []
 [package.metadata.system-deps]
 libsvn_client = { version = ">=1.14", feature = "client" }
 libsvn_delta = { version = ">=1.14", feature = "delta" }
+libsvn_diff = ">=1.14"
 libsvn_subr = ">=1.14"
 libsvn_repos = ">=1.14"
 libsvn_fs = ">=1.14"
