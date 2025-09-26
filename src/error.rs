@@ -7,9 +7,15 @@ unsafe impl Send for Error {}
 impl Error {
     pub fn new(status: apr::Status, child: Option<Error>, msg: &str) -> Self {
         let msg = std::ffi::CString::new(msg).unwrap();
-        let child = child.map(|e| e.0).unwrap_or(std::ptr::null_mut());
+        let child = child
+            .map(|mut e| unsafe { e.detach() })
+            .unwrap_or(std::ptr::null_mut());
         let err = unsafe { subversion_sys::svn_error_create(status as i32, child, msg.as_ptr()) };
         Self(err)
+    }
+
+    pub fn from_str(msg: &str) -> Self {
+        Self::new(apr::Status::from(1), None, msg)
     }
 
     pub fn apr_err(&self) -> apr::Status {
@@ -62,10 +68,14 @@ impl Error {
         }
     }
 
-    pub fn message(&self) -> &str {
+    pub fn message(&self) -> Option<&str> {
         unsafe {
             let message = (*self.0).message;
-            std::ffi::CStr::from_ptr(message).to_str().unwrap()
+            if message.is_null() {
+                None
+            } else {
+                Some(std::ffi::CStr::from_ptr(message).to_str().unwrap())
+            }
         }
     }
 
@@ -101,6 +111,31 @@ impl Error {
         unsafe {
             let ret = subversion_sys::svn_err_best_message(self.0, buf.as_mut_ptr(), buf.len());
             std::ffi::CStr::from_ptr(ret).to_string_lossy().into_owned()
+        }
+    }
+
+    /// Collect all messages from the error chain
+    pub fn full_message(&self) -> String {
+        let mut messages = Vec::new();
+        let mut current = self.0;
+
+        unsafe {
+            while !current.is_null() {
+                let msg = (*current).message;
+                if !msg.is_null() {
+                    let msg_str = std::ffi::CStr::from_ptr(msg).to_string_lossy();
+                    if !msg_str.is_empty() {
+                        messages.push(msg_str.into_owned());
+                    }
+                }
+                current = (*current).child;
+            }
+        }
+
+        if messages.is_empty() {
+            self.best_message()
+        } else {
+            messages.join(": ")
         }
     }
 }
@@ -147,7 +182,7 @@ impl std::fmt::Debug for Error {
             "{}:{}: {}",
             self.file().unwrap_or("<unspecified>"),
             self.line(),
-            self.message()
+            self.message().unwrap_or("<no message>")
         )?;
         let mut n = self.child();
         while let Some(err) = n {
@@ -156,7 +191,7 @@ impl std::fmt::Debug for Error {
                 "{}:{}: {}",
                 err.file().unwrap_or("<unspecified>"),
                 err.line(),
-                err.message()
+                err.message().unwrap_or("<no message>")
             )?;
             n = err.child();
         }
@@ -166,8 +201,7 @@ impl std::fmt::Debug for Error {
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        writeln!(f, "{}", self.message())?;
-        Ok(())
+        write!(f, "{}", self.full_message())
     }
 }
 
@@ -183,8 +217,63 @@ impl From<Error> for std::io::Error {
     fn from(err: Error) -> Self {
         let errno = err.apr_err().raw_os_error();
         errno.map_or(
-            std::io::Error::new(std::io::ErrorKind::Other, err.message()),
+            std::io::Error::other(err.message().unwrap_or("Unknown error")),
             std::io::Error::from_raw_os_error,
         )
+    }
+}
+
+impl From<std::ffi::NulError> for Error {
+    fn from(err: std::ffi::NulError) -> Self {
+        Self::from_str(&format!("Null byte in string: {}", err))
+    }
+}
+
+impl From<std::str::Utf8Error> for Error {
+    fn from(err: std::str::Utf8Error) -> Self {
+        Self::from_str(&format!("UTF-8 encoding error: {}", err))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_error_chain_formatting() {
+        // Create a chain of errors
+        let child_err = Error::from_str("Child error");
+        let parent_err = Error::new(apr::Status::from(1), Some(child_err), "Parent error");
+
+        let full_msg = parent_err.full_message();
+        assert!(full_msg.contains("Parent error"));
+        assert!(full_msg.contains("Child error"));
+        assert!(full_msg.contains(": ")); // Check for separator
+    }
+
+    #[test]
+    fn test_single_error_message() {
+        let err = Error::from_str("Single error");
+        assert_eq!(err.message(), Some("Single error"));
+
+        let full_msg = err.full_message();
+        assert!(full_msg.contains("Single error"));
+    }
+
+    #[test]
+    fn test_error_display() {
+        let err = Error::from_str("Display test error");
+        let display_str = format!("{}", err);
+        assert!(display_str.contains("Display test error"));
+    }
+
+    #[test]
+    fn test_error_from_raw() {
+        // Test with null pointer
+        let result = Error::from_raw(std::ptr::null_mut());
+        assert!(result.is_ok());
+
+        // Test with actual error would require creating a real svn_error_t
+        // which is complex, so we skip that for now
     }
 }
