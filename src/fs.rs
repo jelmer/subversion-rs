@@ -216,14 +216,19 @@ impl FsDirEntry {
 /// Filesystem handle with RAII cleanup
 pub struct Fs {
     fs_ptr: *mut subversion_sys::svn_fs_t,
-    pool: apr::Pool, // Keep pool alive for fs lifetime
+    pool: apr::Pool, // Pool for allocations (and fs lifetime if owned)
+    owned: bool,     // Whether we own the fs_ptr or just borrow it
 }
 
 unsafe impl Send for Fs {}
 
 impl Drop for Fs {
     fn drop(&mut self) {
-        // Pool drop will clean up fs
+        // Only owned fs needs cleanup via pool
+        // Borrowed fs is cleaned up by its owner
+        if self.owned {
+            // Pool drop will clean up fs
+        }
     }
 }
 
@@ -243,11 +248,16 @@ impl Fs {
         self.fs_ptr
     }
     /// Create Fs from existing pointer with shared pool (for repos integration)
+    /// This creates a borrowed Fs that doesn't own the fs_ptr
     pub(crate) unsafe fn from_ptr_and_pool(
         fs_ptr: *mut subversion_sys::svn_fs_t,
         pool: apr::Pool,
     ) -> Self {
-        Self { fs_ptr, pool }
+        Self { 
+            fs_ptr, 
+            pool,
+            owned: false,  // This is a borrowed fs from repos
+        }
     }
 
     pub fn create(path: &std::path::Path) -> Result<Fs, Error> {
@@ -274,7 +284,11 @@ impl Fs {
                 svn_result(err)
             })?;
 
-            Ok(Fs { fs_ptr, pool })
+            Ok(Fs { 
+                fs_ptr, 
+                pool,
+                owned: true,  // We created this fs
+            })
         }
     }
 
@@ -302,7 +316,11 @@ impl Fs {
                 svn_result(err)
             })?;
 
-            Ok(Fs { fs_ptr, pool })
+            Ok(Fs { 
+                fs_ptr, 
+                pool,
+                owned: true,  // We created this fs
+            })
         }
     }
 
@@ -714,7 +732,9 @@ impl Root {
         path: impl TryInto<FsPath, Error = Error>,
     ) -> Result<NodeHistory, Error> {
         let fs_path = path.try_into()?;
-        with_tmp_pool(|pool| unsafe {
+        unsafe {
+            // Create a pool that will live as long as the NodeHistory
+            let pool = apr::Pool::new();
             let mut history: *mut subversion_sys::svn_fs_history_t = std::ptr::null_mut();
 
             let err = subversion_sys::svn_fs_node_history(
@@ -731,9 +751,9 @@ impl Root {
 
             Ok(NodeHistory {
                 ptr: history,
-                pool: apr::Pool::new(),
+                pool,  // Use the same pool that allocated the history
             })
-        })
+        }
     }
 
     /// Get the created revision of a path
@@ -784,20 +804,20 @@ impl Root {
 /// Represents the history of a node in the filesystem
 pub struct NodeHistory {
     ptr: *mut subversion_sys::svn_fs_history_t,
-    #[allow(dead_code)]
-    pool: apr::Pool,
+    pool: apr::Pool,  // Pool used for all history allocations
 }
 
 impl NodeHistory {
     /// Get the previous history entry
     pub fn prev(&mut self, cross_copies: bool) -> Result<Option<(String, Revnum)>, Error> {
-        with_tmp_pool(|pool| unsafe {
+        unsafe {
             let mut prev_history: *mut subversion_sys::svn_fs_history_t = std::ptr::null_mut();
+            // Use the NodeHistory's own pool for allocations
             let err = subversion_sys::svn_fs_history_prev(
                 &mut prev_history,
                 self.ptr,
                 if cross_copies { 1 } else { 0 },
-                pool.as_mut_ptr(),
+                self.pool.as_mut_ptr(),
             );
             svn_result(err)?;
 
@@ -816,7 +836,7 @@ impl NodeHistory {
                 &mut path,
                 &mut rev,
                 prev_history,
-                pool.as_mut_ptr(),
+                self.pool.as_mut_ptr(),
             );
             svn_result(err)?;
 
@@ -828,7 +848,7 @@ impl NodeHistory {
                 .to_string_lossy()
                 .into_owned();
             Ok(Some((path_str, Revnum(rev))))
-        })
+        }
     }
 }
 

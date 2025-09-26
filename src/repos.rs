@@ -218,8 +218,10 @@ impl Repos {
         if fs_ptr.is_null() {
             None
         } else {
-            // Create a child pool from the repos pool to keep the fs alive
-            let child_pool = apr::Pool::new();
+            // Create a subpool from the repos pool
+            // The fs_ptr is owned by repos and valid as long as repos exists
+            // The subpool ensures proper cleanup order
+            let child_pool = self.pool.subpool();
             Some(unsafe { crate::fs::Fs::from_ptr_and_pool(fs_ptr, child_pool) })
         }
     }

@@ -1505,21 +1505,21 @@ impl Context {
         local_abspath: impl AsCanonicalDirent,
     ) -> Result<Conflict, Error> {
         let pool = apr::Pool::new();
-        let _scratch_pool = apr::Pool::new();
+        let scratch_pool = apr::Pool::new();
         let local_abspath = local_abspath.as_canonical_dirent()?;
         let mut conflict: *mut subversion_sys::svn_client_conflict_t = std::ptr::null_mut();
-        with_tmp_pool(|tmp_pool| unsafe {
+        unsafe {
             let path_cstr = std::ffi::CString::new(local_abspath.as_path().to_str().unwrap())?;
             let err = svn_client_conflict_get(
                 &mut conflict,
                 path_cstr.as_ptr(),
                 self.ptr,
-                tmp_pool.as_mut_ptr(),
-                tmp_pool.as_mut_ptr(),
+                pool.as_mut_ptr(),  // Use the persistent pool for the conflict object
+                scratch_pool.as_mut_ptr(),
             );
             Error::from_raw(err)?;
             Ok(Conflict::from_ptr_and_pool(conflict, pool))
-        })
+        }
     }
 
     pub fn cat(
@@ -1613,7 +1613,9 @@ impl Context {
                 tmp_pool.as_mut_ptr(),
             );
             Error::from_raw(err)?;
-            Ok(std::ffi::CStr::from_ptr(wc_root).to_str().unwrap().into())
+            // Copy the string before the temporary pool is destroyed
+            let result = std::ffi::CStr::from_ptr(wc_root).to_str()?.to_string();
+            Ok(result.into())
         })
     }
 
