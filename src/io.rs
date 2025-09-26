@@ -600,6 +600,8 @@ impl Stream {
     ) -> (crate::io::Stream, crate::Checksum<'_>, crate::Checksum<'_>) {
         let mut read_checksum = std::ptr::null_mut();
         let mut write_checksum = std::ptr::null_mut();
+        // Create a pool that will live as long as the returned objects
+        let pool = apr::pool::Pool::new();
         let stream = unsafe {
             subversion_sys::svn_stream_checksummed2(
                 self.ptr,
@@ -607,12 +609,11 @@ impl Stream {
                 &mut write_checksum,
                 checksum_kind.into(),
                 read_all as i32,
-                apr::pool::Pool::new().as_mut_ptr(),
+                pool.as_mut_ptr(),
             )
         };
-        let _pool = std::rc::Rc::new(apr::pool::Pool::new());
         (
-            unsafe { crate::io::Stream::from_ptr_and_pool(stream, apr::Pool::new()) },
+            unsafe { crate::io::Stream::from_ptr_and_pool(stream, pool) },
             crate::Checksum {
                 ptr: read_checksum,
                 _pool: std::marker::PhantomData,
