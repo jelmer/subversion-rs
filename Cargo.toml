@@ -41,7 +41,7 @@ delta = ["subversion-sys/delta"]
 zero-copy = []
 
 [dev-dependencies]
-tempfile = "3.22.0"
+tempfile = "3.23.0"
 
 [[example]]
 name = "checkout"
