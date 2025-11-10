@@ -20,11 +20,11 @@ apr = "0.3"
 bitflags = "2.10.0"
 apr-sys = "0.2.1"
 atty = "0.2"
-ctor = "0.6.0"
+ctor = ">=0.2.0,<0.7.0"
 indexmap = "2.12"
 lazy_static = "1.5.0"
 libc = "0.2"
-pyo3 = { version = ">=0.22", optional = true }
+pyo3 = { version = "0.27", optional = true }
 url = { version = "2.5.7", optional = true }
 subversion-sys = { version = "0.0.8", path = "subversion-sys", default-features = false }
 
