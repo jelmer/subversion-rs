@@ -376,8 +376,10 @@ impl FromStr for Revision {
 }
 
 #[cfg(feature = "pyo3")]
-impl pyo3::FromPyObject<'_> for Revision {
-    fn extract_bound(ob: &pyo3::Bound<pyo3::PyAny>) -> pyo3::PyResult<Self> {
+impl pyo3::FromPyObject<'_, '_> for Revision {
+    type Error = pyo3::PyErr;
+
+    fn extract(ob: pyo3::Borrowed<'_, '_, pyo3::PyAny>) -> pyo3::PyResult<Self> {
         use pyo3::prelude::*;
         if ob.is_instance_of::<pyo3::types::PyString>() {
             let rev = ob.extract::<String>()?;
@@ -539,8 +541,10 @@ impl std::str::FromStr for Depth {
 }
 
 #[cfg(feature = "pyo3")]
-impl pyo3::FromPyObject<'_> for Depth {
-    fn extract_bound(ob: &pyo3::Bound<pyo3::PyAny>) -> pyo3::PyResult<Self> {
+impl pyo3::FromPyObject<'_, '_> for Depth {
+    type Error = pyo3::PyErr;
+
+    fn extract(ob: pyo3::Borrowed<'_, '_, pyo3::PyAny>) -> pyo3::PyResult<Self> {
         use pyo3::prelude::*;
         if ob.is_instance_of::<pyo3::types::PyString>() {
             let depth = ob.extract::<String>()?;
