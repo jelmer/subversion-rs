@@ -17,7 +17,7 @@ doctest = false
 
 [dependencies]
 apr = "0.3"
-bitflags = "2.9.4"
+bitflags = "2.10.0"
 apr-sys = "0.2.1"
 atty = "0.2"
 ctor = "0.5.0"
