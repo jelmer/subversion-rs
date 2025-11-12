@@ -197,14 +197,19 @@ pub fn keywords_differ(
     compare_values: bool,
 ) -> Result<bool, Error> {
     with_tmp_pool(|pool| {
+        // Keep c_strings alive until after the FFI call
+        let c_strings_a: Vec<_> = match a {
+            Some(kw) => kw
+                .iter()
+                .map(|(k, v)| (k.as_str(), std::ffi::CString::new(v.as_str()).unwrap()))
+                .collect(),
+            None => Vec::new(),
+        };
+
         let hash_a = match a {
             Some(kw) => {
                 let mut hash = apr::hash::Hash::new(pool);
-                let c_strings: Vec<_> = kw
-                    .iter()
-                    .map(|(k, v)| (k.as_str(), std::ffi::CString::new(v.as_str()).unwrap()))
-                    .collect();
-                for ((k, _), (_, v_cstr)) in kw.iter().zip(c_strings.iter()) {
+                for ((k, _), (_, v_cstr)) in kw.iter().zip(c_strings_a.iter()) {
                     unsafe {
                         hash.insert(k.as_bytes(), v_cstr.as_ptr() as *mut std::ffi::c_void);
                     }
@@ -214,14 +219,19 @@ pub fn keywords_differ(
             None => std::ptr::null_mut(),
         };
 
+        // Keep c_strings alive until after the FFI call
+        let c_strings_b: Vec<_> = match b {
+            Some(kw) => kw
+                .iter()
+                .map(|(k, v)| (k.as_str(), std::ffi::CString::new(v.as_str()).unwrap()))
+                .collect(),
+            None => Vec::new(),
+        };
+
         let hash_b = match b {
             Some(kw) => {
                 let mut hash = apr::hash::Hash::new(pool);
-                let c_strings: Vec<_> = kw
-                    .iter()
-                    .map(|(k, v)| (k.as_str(), std::ffi::CString::new(v.as_str()).unwrap()))
-                    .collect();
-                for ((k, _), (_, v_cstr)) in kw.iter().zip(c_strings.iter()) {
+                for ((k, _), (_, v_cstr)) in kw.iter().zip(c_strings_b.iter()) {
                     unsafe {
                         hash.insert(k.as_bytes(), v_cstr.as_ptr() as *mut std::ffi::c_void);
                     }
@@ -498,7 +508,6 @@ mod tests {
         assert!(empty_keywords.is_empty());
     }
 
-    #[ignore] // TODO: Memory management issue causing segfault
     #[test]
     fn test_keywords_differ() {
         let mut kw1 = HashMap::new();
