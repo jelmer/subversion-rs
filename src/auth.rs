@@ -363,6 +363,7 @@ impl AuthBaton {
         let mut cred = std::ptr::null_mut();
         let mut state = std::ptr::null_mut();
         let pool = apr::pool::Pool::new();
+        let creds_pool = apr::pool::Pool::new();
         unsafe {
             let err = subversion_sys::svn_auth_first_credentials(
                 &mut cred,
@@ -370,7 +371,7 @@ impl AuthBaton {
                 cred_kind.as_ptr(),
                 realm.as_ptr(),
                 self.ptr,
-                pool.as_mut_ptr(),
+                creds_pool.as_mut_ptr(),
             );
             Error::from_raw(err)?;
             let first_creds = C::from_raw(cred);
@@ -378,6 +379,7 @@ impl AuthBaton {
                 ptr: state,
                 pool,
                 creds: Some(first_creds),
+                creds_pool: Some(creds_pool),
                 _phantom: PhantomData,
             })
         }
@@ -468,6 +470,7 @@ pub struct IterState<C: Credentials> {
     ptr: *mut subversion_sys::svn_auth_iterstate_t,
     pool: apr::Pool,
     creds: Option<C>,
+    creds_pool: Option<apr::Pool>,
     _phantom: PhantomData<*mut ()>,
 }
 
@@ -505,6 +508,8 @@ impl<C: Credentials> IterState<C> {
             if cred.is_null() {
                 return Ok(None);
             }
+            // Store the pool to keep credentials alive
+            self.creds_pool = Some(pool);
             Ok(Some(C::from_raw(cred)))
         }
     }
