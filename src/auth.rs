@@ -389,19 +389,24 @@ impl AuthBaton {
         cred_kind: Option<&str>,
         realm: Option<&str>,
     ) -> Result<(), Error> {
-        let cred_kind = cred_kind
-            .map(|s| std::ffi::CString::new(s).unwrap())
-            .map_or_else(std::ptr::null, |p| p.as_ptr());
-        let realmstring = realm
-            .map(|s| std::ffi::CString::new(s).unwrap())
-            .map_or_else(std::ptr::null, |p| p.as_ptr());
+        // Keep CStrings alive for the duration of the C call
+        let cred_kind_cstring = cred_kind.map(|s| std::ffi::CString::new(s).unwrap());
+        let realm_cstring = realm.map(|s| std::ffi::CString::new(s).unwrap());
+
+        let cred_kind_ptr = cred_kind_cstring
+            .as_ref()
+            .map_or(std::ptr::null(), |c| c.as_ptr());
+        let realm_ptr = realm_cstring
+            .as_ref()
+            .map_or(std::ptr::null(), |c| c.as_ptr());
+
         let err = std::ptr::null_mut();
         let pool = apr::pool::Pool::new();
         unsafe {
             subversion_sys::svn_auth_forget_credentials(
                 self.ptr,
-                cred_kind,
-                realmstring,
+                cred_kind_ptr,
+                realm_ptr,
                 pool.as_mut_ptr(),
             );
             Error::from_raw(err)?;
@@ -560,7 +565,7 @@ impl AsAuthProvider for &AuthProvider {
 /// Authentication provider.
 pub struct AuthProvider {
     ptr: *const subversion_sys::svn_auth_provider_object_t,
-    pool: apr::Pool,
+    pool: apr::SharedPool,
     _phantom: PhantomData<*mut ()>,
 }
 unsafe impl Send for AuthProvider {}
@@ -600,7 +605,7 @@ impl AuthProvider {
 /// Gets the username authentication provider.
 pub fn get_username_provider() -> AuthProvider {
     let mut auth_provider = std::ptr::null_mut();
-    let pool = apr::Pool::new();
+    let pool = apr::SharedPool::new();
     unsafe {
         subversion_sys::svn_auth_get_username_provider(&mut auth_provider, pool.as_mut_ptr());
     }
@@ -614,7 +619,7 @@ pub fn get_username_provider() -> AuthProvider {
 /// Gets the SSL server trust file authentication provider.
 pub fn get_ssl_server_trust_file_provider() -> AuthProvider {
     let mut auth_provider = std::ptr::null_mut();
-    let pool = apr::Pool::new();
+    let pool = apr::SharedPool::new();
     unsafe {
         subversion_sys::svn_auth_get_ssl_server_trust_file_provider(
             &mut auth_provider,
@@ -632,7 +637,7 @@ pub fn get_ssl_server_trust_file_provider() -> AuthProvider {
 /// SSL server certificate information.
 pub struct SslServerCertInfo {
     ptr: *const subversion_sys::svn_auth_ssl_server_cert_info_t,
-    pool: apr::Pool,
+    pool: apr::PoolHandle,
     _phantom: PhantomData<*mut ()>,
 }
 unsafe impl Send for SslServerCertInfo {}
@@ -646,7 +651,7 @@ impl SslServerCertInfo {
         };
         Self {
             ptr,
-            pool,
+            pool: apr::PoolHandle::owned(pool),
             _phantom: PhantomData,
         }
     }
@@ -714,12 +719,14 @@ pub fn get_ssl_server_trust_prompt_provider(
                 ) -> Result<SslServerTrust, crate::Error>)
         };
         let realm = unsafe { std::ffi::CStr::from_ptr(realmstring).to_str().unwrap() };
+        // SAFETY: SVN provides the pool pointer and owns it. We create a borrowed
+        // handle so the pool is NOT destroyed when cert_info goes out of scope.
         let cert_info = SslServerCertInfo {
             ptr: cert_info,
-            pool: apr::pool::Pool::from_raw(pool),
+            pool: unsafe { apr::PoolHandle::from_borrowed_raw(pool) },
             _phantom: PhantomData,
         };
-        f(
+        let result = f(
             realm,
             failures.try_into().unwrap(),
             &cert_info,
@@ -729,10 +736,11 @@ pub fn get_ssl_server_trust_prompt_provider(
             unsafe { *cred = creds.ptr };
             std::ptr::null_mut()
         })
-        .unwrap_or_else(|e| unsafe { e.into_raw() })
+        .unwrap_or_else(|e| unsafe { e.into_raw() });
+        result
     }
 
-    let pool = apr::Pool::new();
+    let pool = apr::SharedPool::new();
     unsafe {
         subversion_sys::svn_auth_get_ssl_server_trust_prompt_provider(
             &mut auth_provider,
@@ -751,7 +759,7 @@ pub fn get_ssl_server_trust_prompt_provider(
 /// Gets an SSL client certificate file authentication provider.
 pub fn get_ssl_client_cert_file_provider() -> AuthProvider {
     let mut auth_provider = std::ptr::null_mut();
-    let pool = apr::Pool::new();
+    let pool = apr::SharedPool::new();
     unsafe {
         subversion_sys::svn_auth_get_ssl_client_cert_file_provider(
             &mut auth_provider,
@@ -837,7 +845,7 @@ pub fn get_ssl_client_cert_prompt_provider(
 ) -> AuthProvider {
     let mut auth_provider = std::ptr::null_mut();
 
-    let pool = apr::Pool::new();
+    let pool = apr::SharedPool::new();
     unsafe {
         subversion_sys::svn_auth_get_ssl_client_cert_prompt_provider(
             &mut auth_provider,
@@ -860,7 +868,7 @@ pub fn get_ssl_client_cert_pw_file_provider(
 ) -> AuthProvider {
     let mut auth_provider = std::ptr::null_mut();
 
-    let pool = apr::Pool::new();
+    let pool = apr::SharedPool::new();
     unsafe {
         subversion_sys::svn_auth_get_ssl_client_cert_pw_file_provider2(
             &mut auth_provider,
@@ -891,7 +899,7 @@ pub fn get_ssl_client_cert_pw_file_provider_boxed(
     prompt_fn: Option<Box<dyn Fn(&str) -> Result<bool, crate::Error> + Send>>,
 ) -> AuthProvider {
     let mut auth_provider = std::ptr::null_mut();
-    let pool = apr::Pool::new();
+    let pool = apr::SharedPool::new();
 
     let baton = if let Some(func) = prompt_fn {
         Box::into_raw(func) as *mut std::ffi::c_void
@@ -960,7 +968,7 @@ pub fn get_simple_prompt_provider<'pool>(
             .unwrap_or_else(|e| unsafe { e.into_raw() })
     }
 
-    let pool = apr::Pool::new();
+    let pool = apr::SharedPool::new();
     unsafe {
         subversion_sys::svn_auth_get_simple_prompt_provider(
             &mut auth_provider,
@@ -987,7 +995,7 @@ pub fn get_simple_prompt_provider_boxed(
     retry_limit: usize,
 ) -> AuthProvider {
     let mut auth_provider = std::ptr::null_mut();
-    let pool = apr::Pool::new();
+    let pool = apr::SharedPool::new();
 
     let baton = Box::into_raw(Box::new(prompt_fn)) as *mut std::ffi::c_void;
 
@@ -1012,14 +1020,16 @@ pub fn get_simple_prompt_provider_boxed(
         } else {
             Some(unsafe { std::ffi::CStr::from_ptr(username).to_str().unwrap() })
         };
-        let svn_pool = apr::Pool::from_raw(pool);
+        // SAFETY: SVN provides the pool pointer and owns it. We create a borrowed
+        // handle so the pool is NOT destroyed when it goes out of scope.
+        let svn_pool = unsafe { apr::PoolHandle::from_borrowed_raw(pool) };
 
         f(realm, username_str, may_save != 0)
             .map(|(user, pass, save)| {
                 // Create credentials in the SVN-provided pool
                 let creds = SimpleCredentials::new(user, pass, save, &svn_pool);
                 unsafe { *credentials = creds.ptr as *mut _ };
-                std::mem::forget(creds); // Don't drop since SVN owns it now
+                // creds is just a wrapper with a pointer - dropping it is fine
                 std::ptr::null_mut()
             })
             .unwrap_or_else(|e| unsafe { e.into_raw() })
@@ -1070,7 +1080,7 @@ pub fn get_username_prompt_provider(
             .unwrap_or_else(|e| unsafe { e.into_raw() })
     }
 
-    let pool = apr::Pool::new();
+    let pool = apr::SharedPool::new();
     unsafe {
         subversion_sys::svn_auth_get_username_prompt_provider(
             &mut auth_provider,
@@ -1095,7 +1105,7 @@ pub fn get_username_prompt_provider_boxed(
     retry_limit: usize,
 ) -> AuthProvider {
     let mut auth_provider = std::ptr::null_mut();
-    let pool = apr::Pool::new();
+    let pool = apr::SharedPool::new();
 
     let baton = Box::into_raw(Box::new(prompt_fn)) as *mut std::ffi::c_void;
 
@@ -1181,7 +1191,7 @@ pub fn get_simple_provider(
 ) -> AuthProvider {
     let mut auth_provider = std::ptr::null_mut();
 
-    let pool = apr::Pool::new();
+    let pool = apr::SharedPool::new();
     unsafe {
         subversion_sys::svn_auth_get_simple_provider2(
             &mut auth_provider,
@@ -1218,7 +1228,7 @@ pub fn get_simple_provider_boxed(
     plaintext_prompt_func: Option<Box<dyn Fn(&str) -> Result<bool, crate::Error> + Send>>,
 ) -> AuthProvider {
     let mut auth_provider = std::ptr::null_mut();
-    let pool = apr::Pool::new();
+    let pool = apr::SharedPool::new();
 
     let baton = if let Some(func) = plaintext_prompt_func {
         Box::into_raw(func) as *mut std::ffi::c_void
@@ -1253,7 +1263,7 @@ pub fn get_platform_specific_provider(
     let mut auth_provider = std::ptr::null_mut();
     let provider_name = std::ffi::CString::new(provider_name).unwrap();
     let provider_type = std::ffi::CString::new(provider_type).unwrap();
-    let pool = apr::pool::Pool::new();
+    let pool = apr::SharedPool::new();
     let err = unsafe {
         subversion_sys::svn_auth_get_platform_specific_provider(
             &mut auth_provider,
@@ -1272,7 +1282,7 @@ pub fn get_platform_specific_provider(
 
 /// Gets all platform-specific client authentication providers.
 pub fn get_platform_specific_client_providers() -> Result<Vec<AuthProvider>, Error> {
-    let pool = apr::pool::Pool::new();
+    let pool = apr::SharedPool::new();
     let mut providers = std::ptr::null_mut();
     let err = unsafe {
         subversion_sys::svn_auth_get_platform_specific_client_providers(
@@ -1288,11 +1298,12 @@ pub fn get_platform_specific_client_providers() -> Result<Vec<AuthProvider>, Err
             providers,
         )
     };
+
     Ok(providers
         .iter()
         .map(|p| AuthProvider {
             ptr: p as *const _,
-            pool: apr::Pool::new(), // Each provider gets its own pool
+            pool: pool.clone(), // Share the same pool across all providers to keep it alive
             _phantom: PhantomData,
         })
         .collect())

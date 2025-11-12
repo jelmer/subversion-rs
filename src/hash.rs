@@ -698,11 +698,11 @@ impl<'a> FsDirentHash<'a> {
     }
 
     /// Convert the dirents to a HashMap<String, FsDirEntry>
-    pub fn to_hashmap(&self) -> HashMap<String, crate::fs::FsDirEntry> {
+    pub fn to_hashmap(&self, pool: apr::SharedPool) -> HashMap<String, crate::fs::FsDirEntry> {
         let mut result = HashMap::new();
         for (k, v) in self.inner.iter() {
             let name = String::from_utf8_lossy(k).into_owned();
-            let entry = crate::fs::FsDirEntry::from_raw(v as *mut subversion_sys::svn_fs_dirent_t);
+            let entry = crate::fs::FsDirEntry::from_raw(v as *mut subversion_sys::svn_fs_dirent_t, pool.clone());
             result.insert(name, entry);
         }
         result

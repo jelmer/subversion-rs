@@ -63,12 +63,13 @@ impl FsPathChange {
 /// Represents a directory entry in the filesystem
 pub struct FsDirEntry {
     ptr: *const subversion_sys::svn_fs_dirent_t,
+    _pool: apr::SharedPool,
 }
 
 impl FsDirEntry {
-    /// Creates an FsDirEntry from a raw pointer.
-    pub fn from_raw(ptr: *mut subversion_sys::svn_fs_dirent_t) -> Self {
-        Self { ptr }
+    /// Creates an FsDirEntry from a raw pointer with a shared pool.
+    pub fn from_raw(ptr: *mut subversion_sys::svn_fs_dirent_t, pool: apr::SharedPool) -> Self {
+        Self { ptr, _pool: pool }
     }
 
     /// Gets the entry name.
@@ -1000,7 +1001,8 @@ impl Root {
         &self,
         path: &str,
     ) -> Result<std::collections::HashMap<String, FsDirEntry>, Error> {
-        with_tmp_pool(|pool| unsafe {
+        let pool = apr::SharedPool::from(apr::Pool::new());
+        unsafe {
             let path_c = std::ffi::CString::new(path).unwrap();
             let mut entries = std::ptr::null_mut();
             let err = subversion_sys::svn_fs_dir_entries(
@@ -1015,9 +1017,9 @@ impl Root {
                 Ok(std::collections::HashMap::new())
             } else {
                 let hash = crate::hash::FsDirentHash::from_ptr(entries);
-                Ok(hash.to_hashmap())
+                Ok(hash.to_hashmap(pool.clone()))
             }
-        })
+        }
     }
     /// Check if file contents have changed between two paths
     pub fn contents_changed(&self, path1: &str, root2: &Root, path2: &str) -> Result<bool, Error> {
@@ -1063,7 +1065,8 @@ impl Root {
 
     /// Get the history of a node
     pub fn node_history(&self, path: &str) -> Result<NodeHistory, Error> {
-        with_tmp_pool(|pool| unsafe {
+        let pool = apr::Pool::new();
+        unsafe {
             let path_c = std::ffi::CString::new(path)?;
             let mut history: *mut subversion_sys::svn_fs_history_t = std::ptr::null_mut();
 
@@ -1081,9 +1084,9 @@ impl Root {
 
             Ok(NodeHistory {
                 ptr: history,
-                _pool: apr::Pool::new(),
+                _pool: pool,
             })
-        })
+        }
     }
 
     /// Get the created revision of a path
@@ -1106,7 +1109,8 @@ impl Root {
 
     /// Get the node ID for a path
     pub fn node_id(&self, path: &str) -> Result<NodeId, Error> {
-        with_tmp_pool(|pool| unsafe {
+        let pool = apr::Pool::new();
+        unsafe {
             let path_c = std::ffi::CString::new(path)?;
             let mut id: *const subversion_sys::svn_fs_id_t = std::ptr::null();
 
@@ -1124,9 +1128,9 @@ impl Root {
 
             Ok(NodeId {
                 ptr: id,
-                _phantom: std::marker::PhantomData,
+                _pool: pool,
             })
-        })
+        }
     }
 }
 
@@ -1139,13 +1143,13 @@ pub struct NodeHistory {
 impl NodeHistory {
     /// Get the previous history entry
     pub fn prev(&mut self, cross_copies: bool) -> Result<Option<(String, Revnum)>, Error> {
-        with_tmp_pool(|pool| unsafe {
+        unsafe {
             let mut prev_history: *mut subversion_sys::svn_fs_history_t = std::ptr::null_mut();
             let err = subversion_sys::svn_fs_history_prev(
                 &mut prev_history,
                 self.ptr,
                 if cross_copies { 1 } else { 0 },
-                pool.as_mut_ptr(),
+                self._pool.as_mut_ptr(),
             );
             svn_result(err)?;
 
@@ -1164,7 +1168,7 @@ impl NodeHistory {
                 &mut path,
                 &mut rev,
                 prev_history,
-                pool.as_mut_ptr(),
+                self._pool.as_mut_ptr(),
             );
             svn_result(err)?;
 
@@ -1176,7 +1180,7 @@ impl NodeHistory {
                 .to_string_lossy()
                 .into_owned();
             Ok(Some((path_str, Revnum(rev))))
-        })
+        }
     }
 }
 
@@ -1189,7 +1193,7 @@ impl Drop for NodeHistory {
 /// Represents a node ID in the filesystem
 pub struct NodeId {
     ptr: *const subversion_sys::svn_fs_id_t,
-    _phantom: std::marker::PhantomData<()>,
+    _pool: apr::Pool,
 }
 
 impl NodeId {
@@ -1459,7 +1463,11 @@ impl TxnRoot {
     }
 
     /// Apply text changes to a file
-    pub fn apply_text(&mut self, path: &str, result_checksum: Option<&str>) -> Result<crate::io::Stream, Error> {
+    pub fn apply_text(
+        &mut self,
+        path: &str,
+        result_checksum: Option<&str>,
+    ) -> Result<crate::io::Stream, Error> {
         let path_cstr = std::ffi::CString::new(path)?;
         let checksum_cstr = result_checksum.map(std::ffi::CString::new).transpose()?;
         let pool = apr::Pool::new();
@@ -1937,27 +1945,27 @@ mod tests {
         let mut root = txn.root().unwrap();
 
         // Create a directory
-        root.make_dir("trunk").unwrap();
+        root.make_dir("/trunk").unwrap();
 
         // Verify the directory exists
-        let kind = root.check_path("trunk").unwrap();
+        let kind = root.check_path("/trunk").unwrap();
         assert_eq!(kind, crate::NodeKind::Dir);
 
         // Create a file
-        root.make_file("trunk/test.txt").unwrap();
+        root.make_file("/trunk/test.txt").unwrap();
 
         // Verify the file exists
-        let kind = root.check_path("trunk/test.txt").unwrap();
+        let kind = root.check_path("/trunk/test.txt").unwrap();
         assert_eq!(kind, crate::NodeKind::File);
 
         // Add content to the file
-        let mut stream = root.apply_text("trunk/test.txt", None).unwrap();
+        let mut stream = root.apply_text("/trunk/test.txt", None).unwrap();
         use std::io::Write;
         stream.write_all(b"Hello, World!\n").unwrap();
         drop(stream);
 
         // Set a property on the file
-        root.change_node_prop("trunk/test.txt", "custom:prop", b"value")
+        root.change_node_prop("/trunk/test.txt", "custom:prop", b"value")
             .unwrap();
 
         // Commit the transaction
@@ -1985,8 +1993,8 @@ mod tests {
         let mut root = txn.root().unwrap();
 
         // Make some changes
-        root.make_dir("test-dir").unwrap();
-        root.make_file("test-file.txt").unwrap();
+        root.make_dir("/test-dir").unwrap();
+        root.make_file("/test-file.txt").unwrap();
 
         // Abort the transaction
         txn.abort().unwrap();
@@ -2012,10 +2020,10 @@ mod tests {
         txn1.change_prop("svn:log", "Initial commit").unwrap();
         let mut root1 = txn1.root().unwrap();
 
-        root1.make_dir("original").unwrap();
-        root1.make_file("original/file.txt").unwrap();
+        root1.make_dir("/original").unwrap();
+        root1.make_file("/original/file.txt").unwrap();
 
-        let mut stream = root1.apply_text("original/file.txt", None).unwrap();
+        let mut stream = root1.apply_text("/original/file.txt", None).unwrap();
         use std::io::Write;
         stream.write_all(b"Original content\n").unwrap();
         drop(stream);
@@ -2031,13 +2039,13 @@ mod tests {
         let rev1_root = fs.revision_root(rev1).unwrap();
 
         // Copy the directory
-        root2.copy(&rev1_root, "original", "copy").unwrap();
+        root2.copy(&rev1_root, "/original", "/copy").unwrap();
 
         // Verify the copy exists
-        let kind = root2.check_path("copy").unwrap();
+        let kind = root2.check_path("/copy").unwrap();
         assert_eq!(kind, crate::NodeKind::Dir);
 
-        let kind = root2.check_path("copy/file.txt").unwrap();
+        let kind = root2.check_path("/copy/file.txt").unwrap();
         assert_eq!(kind, crate::NodeKind::File);
 
         let _rev2 = txn2.commit().unwrap();
@@ -2055,9 +2063,9 @@ mod tests {
         txn1.change_prop("svn:log", "Create files").unwrap();
         let mut root1 = txn1.root().unwrap();
 
-        root1.make_dir("dir1").unwrap();
-        root1.make_file("dir1/file1.txt").unwrap();
-        root1.make_file("file2.txt").unwrap();
+        root1.make_dir("/dir1").unwrap();
+        root1.make_file("/dir1/file1.txt").unwrap();
+        root1.make_file("/file2.txt").unwrap();
 
         let rev1 = txn1.commit().unwrap();
 
@@ -2067,14 +2075,14 @@ mod tests {
         let mut root2 = txn2.root().unwrap();
 
         // Delete a file
-        root2.delete("file2.txt").unwrap();
+        root2.delete("/file2.txt").unwrap();
 
         // Verify it's gone
-        let kind = root2.check_path("file2.txt").unwrap();
+        let kind = root2.check_path("/file2.txt").unwrap();
         assert_eq!(kind, crate::NodeKind::None);
 
         // But the other file still exists
-        let kind = root2.check_path("dir1/file1.txt").unwrap();
+        let kind = root2.check_path("/dir1/file1.txt").unwrap();
         assert_eq!(kind, crate::NodeKind::File);
 
         let _rev2 = txn2.commit().unwrap();
@@ -2091,18 +2099,18 @@ mod tests {
         let mut root = txn.root().unwrap();
 
         // Create a file and set properties
-        root.make_file("test.txt").unwrap();
+        root.make_file("/test.txt").unwrap();
 
         // Set various properties
-        root.change_node_prop("test.txt", "svn:mime-type", b"text/plain")
+        root.change_node_prop("/test.txt", "svn:mime-type", b"text/plain")
             .unwrap();
-        root.change_node_prop("test.txt", "custom:author", b"test-user")
+        root.change_node_prop("/test.txt", "custom:author", b"test-user")
             .unwrap();
-        root.change_node_prop("test.txt", "custom:description", b"A test file")
+        root.change_node_prop("/test.txt", "custom:description", b"A test file")
             .unwrap();
 
         // Set an empty property (delete)
-        root.change_node_prop("test.txt", "custom:empty", b"")
+        root.change_node_prop("/test.txt", "custom:empty", b"")
             .unwrap();
 
         // Set transaction properties
@@ -2150,8 +2158,8 @@ mod tests {
         let mut txn_root = txn.root().unwrap();
 
         // Create a file
-        txn_root.make_file("test.txt").unwrap();
-        let mut stream = txn_root.apply_text("test.txt", None).unwrap();
+        txn_root.make_file("/test.txt").unwrap();
+        let mut stream = txn_root.apply_text("/test.txt", None).unwrap();
         use std::io::Write;
         write!(stream, "Initial content").unwrap();
         stream.close().unwrap();
@@ -2163,7 +2171,7 @@ mod tests {
         let mut txn2 = fs.begin_txn(rev1, 0).unwrap();
         let mut txn_root2 = txn2.root().unwrap();
 
-        let mut stream2 = txn_root2.apply_text("test.txt", None).unwrap();
+        let mut stream2 = txn_root2.apply_text("/test.txt", None).unwrap();
         write!(stream2, "Modified content").unwrap();
         stream2.close().unwrap();
 
@@ -2175,7 +2183,7 @@ mod tests {
 
         // Contents should be different between revisions
         let contents_changed = root1
-            .contents_changed("test.txt", &root2, "test.txt")
+            .contents_changed("/test.txt", &root2, "/test.txt")
             .unwrap();
         assert!(
             contents_changed,
@@ -2184,7 +2192,7 @@ mod tests {
 
         // Contents should be the same when comparing the same revision
         let contents_same = root1
-            .contents_changed("test.txt", &root1, "test.txt")
+            .contents_changed("/test.txt", &root1, "/test.txt")
             .unwrap();
         assert!(
             !contents_same,
@@ -2192,7 +2200,7 @@ mod tests {
         );
 
         // Test node history
-        let _history = root2.node_history("test.txt").unwrap();
+        let _history = root2.node_history("/test.txt").unwrap();
         // We should be able to get the history
         // Note: detailed history iteration would require more setup
 
@@ -2236,9 +2244,9 @@ mod tests {
         let mut txn_root = txn.root().unwrap();
 
         // Create a file with a property
-        txn_root.make_file("test.txt").unwrap();
+        txn_root.make_file("/test.txt").unwrap();
         txn_root
-            .change_node_prop("test.txt", "custom:prop", b"value1")
+            .change_node_prop("/test.txt", "custom:prop", b"value1")
             .unwrap();
 
         let rev1 = txn.commit().unwrap();
@@ -2248,7 +2256,7 @@ mod tests {
         let mut txn_root2 = txn2.root().unwrap();
 
         txn_root2
-            .change_node_prop("test.txt", "custom:prop", b"value2")
+            .change_node_prop("/test.txt", "custom:prop", b"value2")
             .unwrap();
 
         let rev2 = txn2.commit().unwrap();
@@ -2310,9 +2318,9 @@ mod tests {
         // First create a file in revision 1
         let mut txn1 = fs.begin_txn(Revnum(0), 0).unwrap();
         let mut txn_root1 = txn1.root().unwrap();
-        txn_root1.make_file("test.txt").unwrap();
+        txn_root1.make_file("/test.txt").unwrap();
         txn_root1
-            .set_file_contents("test.txt", b"Hello, World!")
+            .set_file_contents("/test.txt", b"Hello, World!")
             .unwrap();
         let rev1 = txn1.commit().unwrap();
 
@@ -2323,15 +2331,15 @@ mod tests {
         // Move requires copying from the base revision then deleting the old
         let base_root = fs.revision_root(rev1).unwrap();
         txn_root2
-            .copy(&base_root, "test.txt", "renamed.txt")
+            .copy(&base_root, "/test.txt", "/renamed.txt")
             .unwrap();
-        txn_root2.delete("test.txt").unwrap();
+        txn_root2.delete("/test.txt").unwrap();
 
         // Check that old path doesn't exist and new one does
-        let old_kind = txn_root2.check_path("test.txt").unwrap();
+        let old_kind = txn_root2.check_path("/test.txt").unwrap();
         assert_eq!(old_kind, crate::NodeKind::None);
 
-        let new_kind = txn_root2.check_path("renamed.txt").unwrap();
+        let new_kind = txn_root2.check_path("/renamed.txt").unwrap();
         assert_eq!(new_kind, crate::NodeKind::File);
 
         let rev2 = txn2.commit().unwrap();
@@ -2360,9 +2368,9 @@ mod tests {
         // Create initial revision with a file
         let mut txn1 = fs.begin_txn(Revnum(0), 0).unwrap();
         let mut root1 = txn1.root().unwrap();
-        root1.make_file("file.txt").unwrap();
+        root1.make_file("/file.txt").unwrap();
         root1
-            .set_file_contents("file.txt", b"Initial content")
+            .set_file_contents("/file.txt", b"Initial content")
             .unwrap();
         let rev1 = txn1.commit().unwrap();
 
@@ -2371,7 +2379,7 @@ mod tests {
         let mut txn2 = fs.begin_txn(rev1, 0).unwrap();
         let mut root2 = txn2.root().unwrap();
         root2
-            .set_file_contents("file.txt", b"Branch 1 content")
+            .set_file_contents("/file.txt", b"Branch 1 content")
             .unwrap();
         let rev2 = txn2.commit().unwrap();
 
@@ -2379,7 +2387,7 @@ mod tests {
         let mut txn3 = fs.begin_txn(rev1, 0).unwrap();
         let mut root3 = txn3.root().unwrap();
         root3
-            .set_file_contents("file.txt", b"Branch 2 content")
+            .set_file_contents("/file.txt", b"Branch 2 content")
             .unwrap();
 
         // Try to merge branch 1 into branch 2
@@ -2403,12 +2411,12 @@ mod tests {
         // Create initial file with properties
         let mut txn1 = fs.begin_txn(Revnum(0), 0).unwrap();
         let mut root1 = txn1.root().unwrap();
-        root1.make_file("file.txt").unwrap();
+        root1.make_file("/file.txt").unwrap();
         root1
-            .set_file_contents("file.txt", b"Original content")
+            .set_file_contents("/file.txt", b"Original content")
             .unwrap();
         root1
-            .change_node_prop("file.txt", "custom:prop", b"value1")
+            .change_node_prop("/file.txt", "custom:prop", b"value1")
             .unwrap();
         let rev1 = txn1.commit().unwrap();
 
@@ -2416,7 +2424,7 @@ mod tests {
         let mut txn2 = fs.begin_txn(rev1, 0).unwrap();
         let mut root2 = txn2.root().unwrap();
         root2
-            .set_file_contents("file.txt", b"Modified content")
+            .set_file_contents("/file.txt", b"Modified content")
             .unwrap();
         let rev2 = txn2.commit().unwrap();
 
@@ -2426,13 +2434,13 @@ mod tests {
 
         // Contents should have changed
         let contents_changed = root_r1
-            .contents_changed("file.txt", &root_r2, "file.txt")
+            .contents_changed("/file.txt", &root_r2, "/file.txt")
             .unwrap();
         assert!(contents_changed, "Contents should have changed");
 
         // Properties should not have changed
         let props_changed = root_r1
-            .props_changed("file.txt", &root_r2, "file.txt")
+            .props_changed("/file.txt", &root_r2, "/file.txt")
             .unwrap();
         assert!(!props_changed, "Properties should not have changed");
 
@@ -2440,7 +2448,7 @@ mod tests {
         let mut txn3 = fs.begin_txn(rev2, 0).unwrap();
         let mut root3 = txn3.root().unwrap();
         root3
-            .change_node_prop("file.txt", "custom:prop", b"value2")
+            .change_node_prop("/file.txt", "custom:prop", b"value2")
             .unwrap();
         let rev3 = txn3.commit().unwrap();
 
@@ -2449,13 +2457,13 @@ mod tests {
 
         // Contents should not have changed
         let contents_changed = root_r2
-            .contents_changed("file.txt", &root_r3, "file.txt")
+            .contents_changed("/file.txt", &root_r3, "/file.txt")
             .unwrap();
         assert!(!contents_changed, "Contents should not have changed");
 
         // Properties should have changed
         let props_changed = root_r2
-            .props_changed("file.txt", &root_r3, "file.txt")
+            .props_changed("/file.txt", &root_r3, "/file.txt")
             .unwrap();
         assert!(props_changed, "Properties should have changed");
     }
@@ -2469,26 +2477,26 @@ mod tests {
         // Create a file in rev 1
         let mut txn1 = fs.begin_txn(Revnum(0), 0).unwrap();
         let mut root1 = txn1.root().unwrap();
-        root1.make_file("file.txt").unwrap();
-        root1.set_file_contents("file.txt", b"Version 1").unwrap();
+        root1.make_file("/file.txt").unwrap();
+        root1.set_file_contents("/file.txt", b"Version 1").unwrap();
         let rev1 = txn1.commit().unwrap();
 
         // Modify the file in rev 2
         let mut txn2 = fs.begin_txn(rev1, 0).unwrap();
         let mut root2 = txn2.root().unwrap();
-        root2.set_file_contents("file.txt", b"Version 2").unwrap();
+        root2.set_file_contents("/file.txt", b"Version 2").unwrap();
         let rev2 = txn2.commit().unwrap();
 
         // Copy the file in rev 3
         let mut txn3 = fs.begin_txn(rev2, 0).unwrap();
         let mut root3 = txn3.root().unwrap();
         let source_root = fs.revision_root(rev2).unwrap();
-        root3.copy(&source_root, "file.txt", "copied.txt").unwrap();
+        root3.copy(&source_root, "/file.txt", "/copied.txt").unwrap();
         let rev3 = txn3.commit().unwrap();
 
         // Get history of the copied file
         let root_r3 = fs.revision_root(rev3).unwrap();
-        let mut history = root_r3.node_history("copied.txt").unwrap();
+        let mut history = root_r3.node_history("/copied.txt").unwrap();
 
         // Get previous history entries
         if let Some((path, revision)) = history.prev(true).unwrap() {
@@ -2518,13 +2526,13 @@ mod tests {
         // Create a transaction to add a file
         let mut txn = fs.begin_txn(crate::Revnum(0), 0).unwrap();
         let mut root = txn.root().unwrap();
-        root.make_file("test.txt").unwrap();
-        root.set_file_contents("test.txt", b"test content").unwrap();
+        root.make_file("/test.txt").unwrap();
+        root.set_file_contents("/test.txt", b"test content").unwrap();
         let rev = txn.commit().unwrap();
 
         // Test locking a file
         let lock = fs.lock(
-            "test.txt",
+            "/test.txt",
             None, // Let SVN generate a token
             Some("Test lock comment"),
             false,
@@ -2542,7 +2550,7 @@ mod tests {
         assert_eq!(lock.comment(), "Test lock comment");
 
         // Get the lock info
-        let lock_info = fs.get_lock("test.txt");
+        let lock_info = fs.get_lock("/test.txt");
         assert!(lock_info.is_ok());
         let lock_info = lock_info.unwrap();
         assert!(lock_info.is_some());
@@ -2551,7 +2559,7 @@ mod tests {
         assert_eq!(lock_info.token(), lock.token());
 
         // Unlock the file
-        let unlock_result = fs.unlock("test.txt", lock.token(), false);
+        let unlock_result = fs.unlock("/test.txt", lock.token(), false);
         assert!(
             unlock_result.is_ok(),
             "Failed to unlock: {:?}",
@@ -2559,7 +2567,7 @@ mod tests {
         );
 
         // Verify the lock is gone
-        let lock_info = fs.get_lock("test.txt");
+        let lock_info = fs.get_lock("/test.txt");
         assert!(lock_info.is_ok());
         assert!(lock_info.unwrap().is_none());
     }
@@ -2577,14 +2585,14 @@ mod tests {
         // Create a file
         let mut txn = fs.begin_txn(crate::Revnum(0), 0).unwrap();
         let mut root = txn.root().unwrap();
-        root.make_file("locked.txt").unwrap();
-        root.set_file_contents("locked.txt", b"content").unwrap();
+        root.make_file("/locked.txt").unwrap();
+        root.set_file_contents("/locked.txt", b"content").unwrap();
         let rev = txn.commit().unwrap();
 
         // Lock the file
         let _lock1 = fs
             .lock(
-                "locked.txt",
+                "/locked.txt",
                 None,
                 Some("First lock"),
                 false,
@@ -2596,7 +2604,7 @@ mod tests {
 
         // Try to lock again without stealing (should fail)
         let lock2 = fs.lock(
-            "locked.txt",
+            "/locked.txt",
             None,
             Some("Second lock"),
             false,
@@ -2611,7 +2619,7 @@ mod tests {
 
         // Now steal the lock
         let lock3 = fs.lock(
-            "locked.txt",
+            "/locked.txt",
             None,
             Some("Stolen lock"),
             false,
@@ -2640,16 +2648,16 @@ mod tests {
         // Create multiple files in a directory structure
         let mut txn = fs.begin_txn(crate::Revnum(0), 0).unwrap();
         let mut root = txn.root().unwrap();
-        root.make_dir("dir1").unwrap();
-        root.make_file("dir1/file1.txt").unwrap();
-        root.make_file("dir1/file2.txt").unwrap();
-        root.make_dir("dir1/subdir").unwrap();
-        root.make_file("dir1/subdir/file3.txt").unwrap();
+        root.make_dir("/dir1").unwrap();
+        root.make_file("/dir1/file1.txt").unwrap();
+        root.make_file("/dir1/file2.txt").unwrap();
+        root.make_dir("/dir1/subdir").unwrap();
+        root.make_file("/dir1/subdir/file3.txt").unwrap();
         let rev = txn.commit().unwrap();
 
         // Lock multiple files
         fs.lock(
-            "dir1/file1.txt",
+            "/dir1/file1.txt",
             None,
             Some("Lock 1"),
             false,
@@ -2659,7 +2667,7 @@ mod tests {
         )
         .unwrap();
         fs.lock(
-            "dir1/file2.txt",
+            "/dir1/file2.txt",
             None,
             Some("Lock 2"),
             false,
@@ -2669,7 +2677,7 @@ mod tests {
         )
         .unwrap();
         fs.lock(
-            "dir1/subdir/file3.txt",
+            "/dir1/subdir/file3.txt",
             None,
             Some("Lock 3"),
             false,
@@ -2680,13 +2688,13 @@ mod tests {
         .unwrap();
 
         // Get all locks under dir1 with infinity depth
-        let locks = fs.get_locks("dir1", crate::Depth::Infinity);
+        let locks = fs.get_locks("/dir1", crate::Depth::Infinity);
         assert!(locks.is_ok(), "Failed to get locks: {:?}", locks.err());
         let locks = locks.unwrap();
         assert_eq!(locks.len(), 3, "Should find 3 locks");
 
         // Get locks with immediates depth (only direct children)
-        let locks_immediate = fs.get_locks("dir1", crate::Depth::Immediates);
+        let locks_immediate = fs.get_locks("/dir1", crate::Depth::Immediates);
         assert!(locks_immediate.is_ok());
         let locks_immediate = locks_immediate.unwrap();
         // Should get file1.txt and file2.txt but not file3.txt
@@ -2697,7 +2705,7 @@ mod tests {
         );
 
         // Get locks with files depth
-        let locks_files = fs.get_locks("dir1", crate::Depth::Files);
+        let locks_files = fs.get_locks("/dir1", crate::Depth::Files);
         assert!(locks_files.is_ok());
         let locks_files = locks_files.unwrap();
         assert_eq!(locks_files.len(), 2, "Should find 2 locks with files depth");
@@ -2924,22 +2932,24 @@ mod tests {
     fn test_apply_text_with_checksum() {
         let dir = tempdir().unwrap();
         let fs_path = dir.path().join("test-fs");
-        
+
         let fs = Fs::create(&fs_path).unwrap();
         let mut txn = fs.begin_txn(Revnum(0), 0).unwrap();
         let mut root = txn.root().unwrap();
-        
+
         // Create a file
-        root.make_file("test.txt").unwrap();
-        
+        root.make_file("/test.txt").unwrap();
+
         // Apply text with a specific expected checksum (MD5)
         // The MD5 of "Hello, World!\n" is: 8ddd8be4b179a529afa5f2ffae4b9858
         let expected_checksum = "8ddd8be4b179a529afa5f2ffae4b9858";
-        let mut stream = root.apply_text("test.txt", Some(expected_checksum)).unwrap();
+        let mut stream = root
+            .apply_text("/test.txt", Some(expected_checksum))
+            .unwrap();
         use std::io::Write;
         stream.write_all(b"Hello, World!\n").unwrap();
         drop(stream);
-        
+
         // Commit should succeed since checksum matches
         txn.commit().unwrap();
     }
@@ -2948,17 +2958,17 @@ mod tests {
     fn test_apply_text_with_wrong_checksum() {
         let dir = tempdir().unwrap();
         let fs_path = dir.path().join("test-fs");
-        
+
         let fs = Fs::create(&fs_path).unwrap();
         let mut txn = fs.begin_txn(Revnum(0), 0).unwrap();
         let mut root = txn.root().unwrap();
-        
+
         // Create a file
-        root.make_file("test.txt").unwrap();
-        
+        root.make_file("/test.txt").unwrap();
+
         // Apply text with wrong expected checksum
         let wrong_checksum = "00000000000000000000000000000000";
-        let result = root.apply_text("test.txt", Some(wrong_checksum));
+        let result = root.apply_text("/test.txt", Some(wrong_checksum));
         // This should succeed in creating the stream, but commit might fail
         assert!(result.is_ok());
     }
@@ -2967,20 +2977,20 @@ mod tests {
     fn test_begin_txn_with_flags() {
         let dir = tempdir().unwrap();
         let fs_path = dir.path().join("test-fs");
-        
+
         let fs = Fs::create(&fs_path).unwrap();
-        
+
         // Test with no flags (0)
         let txn1 = fs.begin_txn(Revnum(0), 0).unwrap();
         assert!(!txn1.name().unwrap().is_empty());
         drop(txn1);
-        
+
         // Test with SVN_FS_TXN_CHECK_OOD flag (if defined)
         // Note: The actual flag values would need to be imported from subversion_sys
         let txn2 = fs.begin_txn(Revnum(0), 0x00000001).unwrap();
         assert!(!txn2.name().unwrap().is_empty());
         drop(txn2);
-        
+
         // Test with SVN_FS_TXN_CHECK_LOCKS flag (if defined)
         let txn3 = fs.begin_txn(Revnum(0), 0x00000002).unwrap();
         assert!(!txn3.name().unwrap().is_empty());
@@ -2991,27 +3001,28 @@ mod tests {
     fn test_transaction_properties_extended() {
         let dir = tempdir().unwrap();
         let fs_path = dir.path().join("test-fs");
-        
+
         let fs = Fs::create(&fs_path).unwrap();
         let mut txn = fs.begin_txn(Revnum(0), 0).unwrap();
-        
+
         // Test change_prop_bytes with binary data
         let binary_data = b"\x00\x01\x02\x03\xFF";
-        txn.change_prop_bytes("custom:binary", Some(binary_data)).unwrap();
-        
+        txn.change_prop_bytes("custom:binary", Some(binary_data))
+            .unwrap();
+
         // Test prop retrieval
         let prop_value = txn.prop("custom:binary").unwrap();
         assert_eq!(prop_value.as_deref(), Some(binary_data.as_ref()));
-        
+
         // Test proplist
         txn.change_prop("svn:log", "Test commit").unwrap();
         txn.change_prop("svn:author", "test-user").unwrap();
-        
+
         let props = txn.proplist().unwrap();
         assert!(props.contains_key("svn:log"));
-        assert!(props.contains_key("svn:author")); 
+        assert!(props.contains_key("svn:author"));
         assert!(props.contains_key("custom:binary"));
-        
+
         // Test removing a property
         txn.change_prop_bytes("custom:binary", None).unwrap();
         let prop_value = txn.prop("custom:binary").unwrap();

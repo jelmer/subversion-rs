@@ -16,8 +16,8 @@ documentation = "https://docs.rs/subversion"
 doctest = false
 
 [dependencies]
-apr = "0.3.2"
-apr-sys = "0.2.1"
+apr = { git = "https://github.com/jelmer/apr-rs" }
+apr-sys = { git = "https://github.com/jelmer/apr-rs" }
 atty = "0.2"
 bitflags = "2.9.3"
 ctor = "0.5.0"

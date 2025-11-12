@@ -114,39 +114,38 @@ impl Authz {
     }
 
     /// Parse authz configuration from a string
-    pub fn parse(
-        contents: &str,
-        groups_contents: Option<&str>,
-    ) -> Result<Self, Error> {
+    pub fn parse(contents: &str, groups_contents: Option<&str>) -> Result<Self, Error> {
         let pool = apr::Pool::new();
         let mut authz_ptr: *mut subversion_sys::svn_authz_t = std::ptr::null_mut();
-        
+
         // Create svn_stream_t from the authz contents
         let mut contents_stream = crate::io::Stream::from(contents.as_bytes());
-        
+
         // Create optional groups stream
         let mut groups_stream = groups_contents.map(|g| crate::io::Stream::from(g.as_bytes()));
-        
+
         let ret = unsafe {
             subversion_sys::svn_repos_authz_parse2(
                 &mut authz_ptr,
                 contents_stream.as_mut_ptr(),
-                groups_stream.as_mut().map_or(std::ptr::null_mut(), |s| s.as_mut_ptr()),
+                groups_stream
+                    .as_mut()
+                    .map_or(std::ptr::null_mut(), |s| s.as_mut_ptr()),
                 None,                 // authz_validate_func
                 std::ptr::null_mut(), // authz_validate_baton
                 pool.as_mut_ptr(),
                 pool.as_mut_ptr(),
             )
         };
-        
+
         svn_result(ret)?;
-        
+
         Ok(Authz {
             ptr: authz_ptr,
             _pool: pool,
         })
     }
-    
+
     /// Check if a user has the required access to a path
     pub fn check_access(
         &self,
@@ -2166,59 +2165,69 @@ mod additional_tests {
         let has_access = result.unwrap();
         assert!(!has_access, "Should have no access with empty authz");
     }
-    
+
     #[test]
     fn test_authz_parse() {
         // Test parsing authz from string
         let authz_content = "[/]\n* = r\n\n[/trunk]\ntestuser = rw\n";
-        
+
         let authz = Authz::parse(authz_content, None);
         assert!(authz.is_ok(), "Failed to parse authz: {:?}", authz.err());
-        
+
         let authz = authz.unwrap();
-        
+
         // Test read access to root (should be granted to all)
         let result = authz.check_access(None, "/", Some("anyone"), AuthzAccess::Read);
         assert!(result.is_ok());
         assert!(result.unwrap(), "Should have read access to root");
-        
+
         // Test write access to trunk for testuser
         let result = authz.check_access(None, "/trunk", Some("testuser"), AuthzAccess::Write);
         assert!(result.is_ok());
-        assert!(result.unwrap(), "testuser should have write access to /trunk");
-        
+        assert!(
+            result.unwrap(),
+            "testuser should have write access to /trunk"
+        );
+
         // Test write access to trunk for other user (should fail)
         let result = authz.check_access(None, "/trunk", Some("otheruser"), AuthzAccess::Write);
         assert!(result.is_ok());
-        assert!(!result.unwrap(), "otheruser should not have write access to /trunk");
+        assert!(
+            !result.unwrap(),
+            "otheruser should not have write access to /trunk"
+        );
     }
-    
+
     #[test]
     fn test_authz_parse_with_groups() {
         // Test parsing authz with groups file
         let groups_content = "[groups]\nadmins = alice, bob\n";
         let authz_content = "[/]\n@admins = rw\n* = r\n";
-        
+
         let authz = Authz::parse(authz_content, Some(groups_content));
-        assert!(authz.is_ok(), "Failed to parse authz with groups: {:?}", authz.err());
-        
+        assert!(
+            authz.is_ok(),
+            "Failed to parse authz with groups: {:?}",
+            authz.err()
+        );
+
         let authz = authz.unwrap();
-        
+
         // Test that group members have write access
         let result = authz.check_access(None, "/", Some("alice"), AuthzAccess::Write);
         assert!(result.is_ok());
         assert!(result.unwrap(), "alice (admin) should have write access");
-        
+
         let result = authz.check_access(None, "/", Some("bob"), AuthzAccess::Write);
         assert!(result.is_ok());
         assert!(result.unwrap(), "bob (admin) should have write access");
-        
+
         // Test that non-group members only have read access
         let result = authz.check_access(None, "/", Some("charlie"), AuthzAccess::Write);
         assert!(result.is_ok());
         assert!(!result.unwrap(), "charlie should not have write access");
     }
-    
+
     #[test]
     fn test_authz_parse_complex_rules() {
         // Test more complex authorization rules
@@ -2236,36 +2245,54 @@ admin = rw
 [/branches]
 * = rw
 "#;
-        
+
         let authz = Authz::parse(authz_content, None);
-        assert!(authz.is_ok(), "Failed to parse complex authz: {:?}", authz.err());
-        
+        assert!(
+            authz.is_ok(),
+            "Failed to parse complex authz: {:?}",
+            authz.err()
+        );
+
         let authz = authz.unwrap();
-        
+
         // Test various access scenarios
         // Everyone can read root
-        assert!(authz.check_access(None, "/", Some("anyone"), AuthzAccess::Read).unwrap());
-        
+        assert!(authz
+            .check_access(None, "/", Some("anyone"), AuthzAccess::Read)
+            .unwrap());
+
         // dev-team can write to trunk
-        assert!(authz.check_access(None, "/trunk", Some("dev-team"), AuthzAccess::ReadWrite).unwrap());
-        
+        assert!(authz
+            .check_access(None, "/trunk", Some("dev-team"), AuthzAccess::ReadWrite)
+            .unwrap());
+
         // Others can only read trunk
-        assert!(authz.check_access(None, "/trunk", Some("other"), AuthzAccess::Read).unwrap());
-        assert!(!authz.check_access(None, "/trunk", Some("other"), AuthzAccess::Write).unwrap());
-        
+        assert!(authz
+            .check_access(None, "/trunk", Some("other"), AuthzAccess::Read)
+            .unwrap());
+        assert!(!authz
+            .check_access(None, "/trunk", Some("other"), AuthzAccess::Write)
+            .unwrap());
+
         // Only admin can access /trunk/secret
-        assert!(authz.check_access(None, "/trunk/secret", Some("admin"), AuthzAccess::ReadWrite).unwrap());
-        assert!(!authz.check_access(None, "/trunk/secret", Some("other"), AuthzAccess::Read).unwrap());
-        
+        assert!(authz
+            .check_access(None, "/trunk/secret", Some("admin"), AuthzAccess::ReadWrite)
+            .unwrap());
+        assert!(!authz
+            .check_access(None, "/trunk/secret", Some("other"), AuthzAccess::Read)
+            .unwrap());
+
         // Everyone can read/write to branches
-        assert!(authz.check_access(None, "/branches", Some("anyone"), AuthzAccess::ReadWrite).unwrap());
+        assert!(authz
+            .check_access(None, "/branches", Some("anyone"), AuthzAccess::ReadWrite)
+            .unwrap());
     }
-    
+
     #[test]
     fn test_authz_parse_invalid() {
         // Test parsing invalid authz content
         let invalid_authz = "this is not valid authz format";
-        
+
         let result = Authz::parse(invalid_authz, None);
         assert!(result.is_err(), "Should fail to parse invalid authz");
     }
@@ -2480,7 +2507,7 @@ admin = rw
     #[test]
     fn test_dir_delta2() {
         use crate::delta::{DirectoryEditor, Editor};
-        
+
         // Create a temporary repository for testing
         let temp_dir = tempfile::tempdir().unwrap();
         let repo_path = temp_dir.path().join("test_repo");
@@ -2488,103 +2515,59 @@ admin = rw
         // Create repository and filesystem
         let repo = Repos::create(&repo_path).unwrap();
         let fs = repo.fs().unwrap();
-        
+
         // Create initial content
         let mut txn = fs.begin_txn(crate::Revnum::from(0u32), 0).unwrap();
         let mut txn_root = txn.root().unwrap();
-        
+
         // Create a test file
         txn_root.make_dir("/trunk").unwrap();
         txn_root.make_file("/trunk/test.txt").unwrap();
-        
-        let mut stream = txn_root
-            .apply_text("/trunk/test.txt", None)
-            .unwrap();
+
+        let mut stream = txn_root.apply_text("/trunk/test.txt", None).unwrap();
         stream.write(b"Initial content\n").unwrap();
         stream.close().unwrap();
-        
+
         txn.commit().unwrap();
-        
+
         // Create a second revision with changes
         let mut txn2 = fs.begin_txn(crate::Revnum::from(1u32), 0).unwrap();
         let mut txn_root2 = txn2.root().unwrap();
-        
-        let mut stream2 = txn_root2
-            .apply_text("/trunk/test.txt", None)
-            .unwrap();
+
+        let mut stream2 = txn_root2.apply_text("/trunk/test.txt", None).unwrap();
         stream2.write(b"Modified content\n").unwrap();
         stream2.close().unwrap();
-        
+
         txn_root2.make_file("/trunk/new.txt").unwrap();
-        let mut stream3 = txn_root2
-            .apply_text("/trunk/new.txt", None)
-            .unwrap();
+        let mut stream3 = txn_root2.apply_text("/trunk/new.txt", None).unwrap();
         stream3.write(b"New file\n").unwrap();
         stream3.close().unwrap();
-        
+
         txn2.commit().unwrap();
-        
+
         // Get roots for comparison
         let root1 = fs.revision_root(crate::Revnum::from(1u32)).unwrap();
         let root2 = fs.revision_root(crate::Revnum::from(2u32)).unwrap();
-        
-        // Create a test editor to capture changes
-        struct TestEditor {
-            changes: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
-        }
-        
-        impl Editor for TestEditor {
-            fn as_raw_parts(&self) -> (*const subversion_sys::svn_delta_editor_t, *mut std::ffi::c_void) {
-                // For testing, we'd need a real editor implementation
-                // For now, just return null pointers
-                (std::ptr::null(), std::ptr::null_mut())
-            }
-            
-            fn set_target_revision(&mut self, _revision: Option<crate::Revnum>) -> Result<(), crate::Error> {
-                self.changes.lock().unwrap().push("set_target_revision".to_string());
-                Ok(())
-            }
-            
-            fn open_root(&mut self, _base_revision: Option<crate::Revnum>) -> Result<Box<dyn DirectoryEditor + 'static>, crate::Error> {
-                self.changes.lock().unwrap().push("open_root".to_string());
-                Err(crate::Error::new(
-                    apr::Status::from(subversion_sys::svn_errno_t_SVN_ERR_TEST_FAILED as i32),
-                    None,
-                    "Test editor doesn't support open_root",
-                ))
-            }
-            
-            fn close(&mut self) -> Result<(), crate::Error> {
-                self.changes.lock().unwrap().push("close".to_string());
-                Ok(())
-            }
-            
-            fn abort(&mut self) -> Result<(), crate::Error> {
-                self.changes.lock().unwrap().push("abort".to_string());
-                Ok(())
-            }
-        }
-        
-        let changes = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-        let editor = TestEditor { changes: changes.clone() };
-        
-        // Test dir_delta2 - this will fail because our test editor returns null pointers
-        // but it tests that the function can be called
+
+        // Create a default editor for testing
+        let pool = apr::Pool::new();
+        let editor = crate::delta::default_editor(&pool);
+
+        // Test dir_delta2 with a proper no-op editor
         let result = dir_delta2(
             &root1,
-            "/",
+            "/trunk",
             "",
-            &root2, 
-            "/",
+            &root2,
+            "/trunk",
             &editor,
-            true,  // text_deltas
+            true, // text_deltas
             crate::Depth::Infinity,
             false, // entry_props
             false, // ignore_ancestry
         );
-        
-        // The test editor returns null pointers so this will fail, but we're
-        // testing that the function compiles and can be called
-        assert!(result.is_err());
+
+        // Should succeed with a proper editor
+        assert!(result.is_ok());
     }
 }

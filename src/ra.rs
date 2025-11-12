@@ -2104,20 +2104,20 @@ mod tests {
         let mut txn_root = txn.root().unwrap();
 
         // Create test files
-        txn_root.make_file("file1.txt").unwrap();
-        let mut stream1 = txn_root.apply_text("file1.txt", None).unwrap();
+        txn_root.make_file("/file1.txt").unwrap();
+        let mut stream1 = txn_root.apply_text("/file1.txt", None).unwrap();
         stream1.write(b"Content of file 1").unwrap();
         stream1.close().unwrap();
 
-        txn_root.make_file("file2.txt").unwrap();
-        let mut stream2 = txn_root.apply_text("file2.txt", None).unwrap();
+        txn_root.make_file("/file2.txt").unwrap();
+        let mut stream2 = txn_root.apply_text("/file2.txt", None).unwrap();
         stream2.write(b"Content of file 2").unwrap();
         stream2.close().unwrap();
 
         // Commit the transaction
         txn.commit().unwrap();
 
-        // Now test get_files
+        // Now test get_files (RA methods use repository-relative paths, not absolute)
         let files = session
             .get_files(&["file1.txt", "file2.txt"], crate::Revnum(1))
             .unwrap();
@@ -2368,22 +2368,22 @@ mod tests {
         let mut root = txn.root().unwrap();
 
         // Create directories
-        root.make_dir("trunk").unwrap();
-        root.make_dir("trunk/src").unwrap();
-        root.make_dir("trunk/src/lib").unwrap();
+        root.make_dir("/trunk").unwrap();
+        root.make_dir("/trunk/src").unwrap();
+        root.make_dir("/trunk/src/lib").unwrap();
 
         // Set properties at different levels
-        root.change_node_prop("trunk", "prop:level1", b"value1")
+        root.change_node_prop("/trunk", "prop:level1", b"value1")
             .unwrap();
-        root.change_node_prop("trunk/src", "prop:level2", b"value2")
+        root.change_node_prop("/trunk/src", "prop:level2", b"value2")
             .unwrap();
-        root.change_node_prop("trunk/src/lib", "prop:level3", b"value3")
+        root.change_node_prop("/trunk/src/lib", "prop:level3", b"value3")
             .unwrap();
 
         // Commit the transaction
         let rev = txn.commit().unwrap();
 
-        // Get inherited properties for the deepest path
+        // Get inherited properties for the deepest path (RA methods use repository-relative paths)
         let inherited = session.get_inherited_props("trunk/src/lib", rev).unwrap();
 
         // We should get properties from parent paths
@@ -2419,7 +2419,7 @@ mod tests {
             let mut txn = fs.begin_txn(base_rev, 0).unwrap();
             let mut root = txn.root().unwrap();
 
-            let filename = format!("file{}.txt", i);
+            let filename = format!("/file{}.txt", i);
             root.make_file(&filename).unwrap();
             let mut stream = root.apply_text(&filename, None).unwrap();
             use std::io::Write;
@@ -2479,9 +2479,9 @@ mod tests {
         let mut txn = fs.begin_txn(crate::Revnum(0), 0).unwrap();
         let mut root = txn.root().unwrap();
 
-        root.make_dir("trunk").unwrap();
-        root.make_file("trunk/test.txt").unwrap();
-        let mut stream = root.apply_text("trunk/test.txt", None).unwrap();
+        root.make_dir("/trunk").unwrap();
+        root.make_file("/trunk/test.txt").unwrap();
+        let mut stream = root.apply_text("/trunk/test.txt", None).unwrap();
         use std::io::Write;
         stream.write_all(b"Test content\n").unwrap();
         drop(stream);
@@ -2738,15 +2738,15 @@ mod tests {
         let mut txn = fs.begin_txn(crate::Revnum(0), 0).unwrap();
         let mut root = txn.root().unwrap();
 
-        root.make_file("lockable.txt").unwrap();
-        let mut stream = root.apply_text("lockable.txt", None).unwrap();
+        root.make_file("/lockable.txt").unwrap();
+        let mut stream = root.apply_text("/lockable.txt", None).unwrap();
         use std::io::Write;
         stream.write_all(b"Content to lock\n").unwrap();
         drop(stream);
 
         let rev = txn.commit().unwrap();
 
-        // Test locking
+        // Test locking (RA methods use repository-relative paths)
         let mut lock_paths = HashMap::new();
         lock_paths.insert("lockable.txt".to_string(), rev);
 
@@ -2807,8 +2807,8 @@ mod tests {
         // Rev 1: Create file
         let mut txn = fs.begin_txn(crate::Revnum(0), 0).unwrap();
         let mut root = txn.root().unwrap();
-        root.make_file("original.txt").unwrap();
-        let mut stream = root.apply_text("original.txt", None).unwrap();
+        root.make_file("/original.txt").unwrap();
+        let mut stream = root.apply_text("/original.txt", None).unwrap();
         use std::io::Write;
         stream.write_all(b"Original content\n").unwrap();
         drop(stream);
@@ -2817,12 +2817,12 @@ mod tests {
         // Rev 2: Modify file
         let mut txn = fs.begin_txn(rev1, 0).unwrap();
         let mut root = txn.root().unwrap();
-        let mut stream = root.apply_text("original.txt", None).unwrap();
+        let mut stream = root.apply_text("/original.txt", None).unwrap();
         stream.write_all(b"Modified content\n").unwrap();
         drop(stream);
         let rev2 = txn.commit().unwrap();
 
-        // Get locations for the file at different revisions
+        // Get locations for the file at different revisions (RA methods use repository-relative paths)
         let locations = session
             .get_locations(
                 "original.txt",

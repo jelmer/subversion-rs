@@ -17,6 +17,20 @@ pub fn version() -> crate::Version {
     crate::Version(unsafe { subversion_sys::svn_delta_version() })
 }
 
+/// Creates a default/no-op delta editor.
+///
+/// This editor does nothing but can be used for testing or as a placeholder.
+pub fn default_editor(pool: &Pool) -> WrapEditor<'_> {
+    let editor = unsafe { subversion_sys::svn_delta_default_editor(pool.as_mut_ptr()) };
+    // The default editor uses null baton
+    let baton = std::ptr::null_mut();
+    WrapEditor {
+        editor,
+        baton,
+        _pool: std::marker::PhantomData,
+    }
+}
+
 /// Wrapper for a Subversion delta editor.
 pub struct WrapEditor<'pool> {
     pub(crate) editor: *const subversion_sys::svn_delta_editor_t,

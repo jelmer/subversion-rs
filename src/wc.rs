@@ -1469,16 +1469,16 @@ impl Context {
                     diff3_cmd_cstr
                         .as_ref()
                         .map_or(std::ptr::null(), |c| c.as_ptr()),
-                    std::ptr::null(), // preserved_exts
-                    None,             // fetch_dirents_func
+                    std::ptr::null(),     // preserved_exts
+                    None,                 // fetch_dirents_func
                     std::ptr::null_mut(), // fetch_baton
-                    None,             // conflict_func
+                    None,                 // conflict_func
                     std::ptr::null_mut(), // conflict_baton
-                    None,             // external_func
+                    None,                 // external_func
                     std::ptr::null_mut(), // external_baton
-                    None,             // cancel_func
+                    None,                 // cancel_func
                     std::ptr::null_mut(), // cancel_baton
-                    None,             // notify_func
+                    None,                 // notify_func
                     std::ptr::null_mut(), // notify_baton
                     result_pool.as_mut_ptr(),
                     scratch_pool.as_mut_ptr(),
@@ -1517,7 +1517,7 @@ impl Context {
     ) -> Result<Box<dyn crate::delta::Editor>, crate::Error> {
         let anchor_abspath_cstr = std::ffi::CString::new(anchor_abspath)?;
         let target_abspath_cstr = std::ffi::CString::new(target_abspath)?;
-        
+
         let result_pool = apr::Pool::new();
         let mut editor_ptr: *const subversion_sys::svn_delta_editor_t = std::ptr::null();
         let mut edit_baton: *mut std::ffi::c_void = std::ptr::null_mut();
@@ -1535,10 +1535,10 @@ impl Context {
                     if show_copies_as_adds { 1 } else { 0 },
                     if use_git_diff_format { 1 } else { 0 },
                     if use_text_base { 1 } else { 0 },
-                    0, // reverse_order
-                    0, // server_performs_filtering
-                    std::ptr::null(), // changelist_filter
-                    std::ptr::null(), // callbacks - TODO: implement svn_wc_diff_callbacks4_t
+                    0,                    // reverse_order
+                    0,                    // server_performs_filtering
+                    std::ptr::null(),     // changelist_filter
+                    std::ptr::null(),     // callbacks - TODO: implement svn_wc_diff_callbacks4_t
                     std::ptr::null_mut(), // callback_baton
                     None,                 // cancel_func
                     std::ptr::null_mut(), // cancel_baton
@@ -2300,13 +2300,13 @@ mod tests {
         let result = ctx.delete(&file_path, false, false, None, None);
         assert!(result.is_err());
     }
-    
+
     #[test]
     fn test_get_switch_editor() {
         // Test that the API compiles and can be called
         let temp_dir = tempfile::tempdir().unwrap();
         let mut ctx = Context::new().unwrap();
-        
+
         // This will fail without a working copy, but tests the API
         let result = ctx.get_switch_editor(
             temp_dir.path().to_str().unwrap(),
@@ -2318,29 +2318,29 @@ mod tests {
             false,
             None,
         );
-        
+
         // Expected to fail without a valid working copy
         assert!(result.is_err());
     }
-    
+
     #[test]
     fn test_get_switch_editor_api() {
         // Test that the switch editor API compiles and can be called
         let temp_dir = tempfile::tempdir().unwrap();
         let mut ctx = Context::new().unwrap();
-        
+
         // This will fail without a working copy, but tests the API
         let result = ctx.get_switch_editor(
             temp_dir.path().to_str().unwrap(),
             "",
             "http://example.com/svn/trunk",
-            false,  // use_commit_times
+            false, // use_commit_times
             crate::Depth::Infinity,
-            false,  // depth_is_sticky
-            false,  // allow_unver_obstructions
-            None,   // diff3_cmd
+            false, // depth_is_sticky
+            false, // allow_unver_obstructions
+            None,  // diff3_cmd
         );
-        
+
         // Expected to fail without a valid working copy
         assert!(result.is_err());
     }
@@ -2350,18 +2350,18 @@ mod tests {
         // Test switch editor with target basename
         let temp_dir = tempfile::tempdir().unwrap();
         let mut ctx = Context::new().unwrap();
-        
+
         let result = ctx.get_switch_editor(
             temp_dir.path().to_str().unwrap(),
-            "subdir",  // target basename
+            "subdir", // target basename
             "http://example.com/svn/branches/test",
-            true,   // use_commit_times
+            true, // use_commit_times
             crate::Depth::Files,
-            true,   // depth_is_sticky
-            true,   // allow_unver_obstructions
-            None,   // diff3_cmd
+            true, // depth_is_sticky
+            true, // allow_unver_obstructions
+            None, // diff3_cmd
         );
-        
+
         assert!(result.is_err());
     }
 
@@ -2370,21 +2370,21 @@ mod tests {
         // Test that the API compiles and can be called
         let temp_dir = tempfile::tempdir().unwrap();
         let mut ctx = Context::new().unwrap();
-        
+
         // Create the directory
         std::fs::create_dir_all(temp_dir.path()).unwrap();
-        
+
         // This should succeed with an existing directory
         let result = ctx.get_diff_editor(
             temp_dir.path().to_str().unwrap(),
             temp_dir.path().to_str().unwrap(),
-            false,  // use_text_base
+            false, // use_text_base
             crate::Depth::Infinity,
-            false,  // ignore_ancestry
-            false,  // show_copies_as_adds
-            false,  // use_git_diff_format
+            false, // ignore_ancestry
+            false, // show_copies_as_adds
+            false, // use_git_diff_format
         );
-        
+
         // Should succeed with an existing path
         assert!(result.is_ok());
     }
@@ -2394,30 +2394,30 @@ mod tests {
         // Test diff editor with various options
         let temp_dir = tempfile::tempdir().unwrap();
         let mut ctx = Context::new().unwrap();
-        
+
         // Create the paths so they exist
         std::fs::create_dir_all(temp_dir.path()).unwrap();
-        
+
         // Test with text base using existing paths
         let result = ctx.get_diff_editor(
             temp_dir.path().to_str().unwrap(),
             temp_dir.path().to_str().unwrap(),
-            true,   // use_text_base
+            true, // use_text_base
             crate::Depth::Empty,
-            true,   // ignore_ancestry
-            true,   // show_copies_as_adds
-            true,   // use_git_diff_format
+            true, // ignore_ancestry
+            true, // show_copies_as_adds
+            true, // use_git_diff_format
         );
-        
+
         // Should succeed since paths exist
         assert!(result.is_ok());
-        
+
         // Test with different paths
         let anchor_path = temp_dir.path().join("anchor");
         let target_path = temp_dir.path().join("target");
         std::fs::create_dir_all(&anchor_path).unwrap();
         std::fs::create_dir_all(&target_path).unwrap();
-        
+
         let result = ctx.get_diff_editor(
             anchor_path.to_str().unwrap(),
             target_path.to_str().unwrap(),
@@ -2427,7 +2427,7 @@ mod tests {
             false,
             false,
         );
-        
+
         // Should succeed since paths exist
         assert!(result.is_ok());
     }
@@ -2436,10 +2436,10 @@ mod tests {
     fn test_update_editor_trait() {
         // Test that UpdateEditor implements the Editor trait
         use crate::delta::Editor;
-        
+
         // This just verifies the trait implementation compiles
         fn check_editor_impl<T: Editor>() {}
-        
+
         // Verify UpdateEditor implements Editor trait
         check_editor_impl::<UpdateEditor>();
     }

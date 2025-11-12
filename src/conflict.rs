@@ -426,8 +426,8 @@ pub(crate) unsafe extern "C" fn conflict_resolver_callback(
 
     match resolver_baton.resolver.resolve(&conflict_desc) {
         Ok(resolution) => {
-            // Allocate result structure in the result pool
-            let pool = Pool::from_raw(result_pool);
+            // Allocate result structure in the result pool (owned by SVN)
+            let pool = unsafe { apr::PoolHandle::from_borrowed_raw(result_pool) };
             let conflict_result: *mut subversion_sys::svn_wc_conflict_result_t = pool.calloc();
 
             (*conflict_result).choice = resolution.choice.to_raw();

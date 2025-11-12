@@ -91,9 +91,10 @@ extern "C" fn wrap_proplist_receiver2(
     props: *mut apr::hash::apr_hash_t,
     inherited_props: *mut apr::tables::apr_array_header_t,
     scratch_pool: *mut subversion_sys::apr_pool_t,
-) -> *mut subversion_sys::svn_error_t {
+)-> *mut subversion_sys::svn_error_t {
     unsafe {
-        let _scratch_pool = std::rc::Rc::new(apr::pool::Pool::from_raw(scratch_pool));
+        // SVN owns the scratch_pool, we just need to reference it
+        let _scratch_pool = apr::PoolHandle::from_borrowed_raw(scratch_pool);
         let callback = baton
             as *mut &mut dyn FnMut(
                 &str,
@@ -930,13 +931,12 @@ impl Context {
     ) -> Result<Revnum, Error> {
         let peg_revision = options.peg_revision.into();
         let revision = options.revision.into();
-        let pool = Pool::default();
 
         // Canonicalize inputs
         let url = url.as_canonical_uri()?;
         let path = path.as_canonical_dirent()?;
 
-        with_tmp_pool(|_tmp_pool| unsafe {
+        with_tmp_pool(|pool| unsafe {
             let mut revnum = 0;
             // Convert to C strings for FFI
             let url_cstr = std::ffi::CString::new(url.as_str())?;
@@ -966,15 +966,14 @@ impl Context {
         revision: Revision,
         options: &UpdateOptions,
     ) -> Result<Vec<Revnum>, Error> {
-        let mut pool = std::rc::Rc::new(Pool::default());
-        let mut result_revs = std::ptr::null_mut();
-        unsafe {
+        with_tmp_pool(|pool| unsafe {
+            let mut result_revs = std::ptr::null_mut();
             // Keep CStrings alive for the duration of the function
             let path_cstrings: Vec<std::ffi::CString> = paths
                 .iter()
                 .map(|p| std::ffi::CString::new(*p).unwrap())
                 .collect();
-            let mut ps = apr::tables::TypedArray::new(&pool, paths.len() as i32);
+            let mut ps = apr::tables::TypedArray::new(pool, paths.len() as i32);
             for path in &path_cstrings {
                 ps.push(path.as_ptr() as *mut std::ffi::c_void);
             }
@@ -990,13 +989,13 @@ impl Context {
                 options.adds_as_modifications.into(),
                 options.make_parents.into(),
                 self.ptr,
-                std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
+                pool.as_mut_ptr(),
             );
             let result_revs: apr::tables::TypedArray<Revnum> =
                 apr::tables::TypedArray::<Revnum>::from_ptr(result_revs);
             Error::from_raw(err)?;
             Ok(result_revs.iter().collect())
-        }
+        })
     }
 
     /// Switches a working copy path to a different URL.
@@ -1006,14 +1005,12 @@ impl Context {
         url: impl AsCanonicalUri,
         options: &SwitchOptions,
     ) -> Result<Revnum, Error> {
-        let pool = Pool::default();
-        let mut result_rev = 0;
-
         // Canonicalize inputs
         let path = path.as_canonical_dirent()?;
         let url = url.as_canonical_uri()?;
 
-        with_tmp_pool(|_tmp_pool| unsafe {
+        with_tmp_pool(|pool| unsafe {
+            let mut result_rev = 0;
             // Convert to C strings for FFI
             let path_cstr = std::ffi::CString::new(path.as_str())?;
             let url_cstr = std::ffi::CString::new(url.as_str())?;
@@ -1039,9 +1036,8 @@ impl Context {
 
     /// Adds a file or directory to version control.
     pub fn add(&mut self, path: impl AsCanonicalDirent, options: &AddOptions) -> Result<(), Error> {
-        let pool = Pool::default();
         let path = path.as_canonical_dirent()?;
-        with_tmp_pool(|_tmp_pool| unsafe {
+        with_tmp_pool(|pool| unsafe {
             let path_cstr = std::ffi::CString::new(path.as_str())?;
             let err = svn_client_add5(
                 path_cstr.as_ptr(),
@@ -1066,16 +1062,15 @@ impl Context {
         revprop_table: std::collections::HashMap<&str, &[u8]>,
         commit_callback: &dyn FnMut(&crate::CommitInfo) -> Result<(), Error>,
     ) -> Result<(), Error> {
-        let mut pool = std::rc::Rc::new(Pool::default());
-        unsafe {
+        with_tmp_pool(|pool| unsafe {
             // Convert revprops to BStr objects that live in the pool
             let svn_strings: Vec<_> = revprop_table
                 .iter()
-                .map(|(k, v)| (*k, crate::string::BStr::from_bytes(v, &pool)))
+                .map(|(k, v)| (*k, crate::string::BStr::from_bytes(v, pool)))
                 .collect();
 
             let rps = apr::hash::Hash::from_iter(
-                &pool,
+                pool,
                 svn_strings
                     .iter()
                     .map(|(k, v)| (k.as_bytes(), v.as_ptr() as *mut std::ffi::c_void)),
@@ -1085,7 +1080,7 @@ impl Context {
                 .iter()
                 .map(|p| std::ffi::CString::new(*p).unwrap())
                 .collect();
-            let mut ps = apr::tables::TypedArray::new(&pool, paths.len() as i32);
+            let mut ps = apr::tables::TypedArray::new(pool, paths.len() as i32);
             for path in &path_cstrings {
                 ps.push(path.as_ptr() as *mut std::ffi::c_void);
             }
@@ -1096,11 +1091,11 @@ impl Context {
                 Some(crate::wrap_commit_callback2),
                 &commit_callback as *const _ as *mut std::ffi::c_void,
                 self.ptr,
-                std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
+                pool.as_mut_ptr(),
             );
             Error::from_raw(err)?;
             Ok(())
-        }
+        })
     }
 
     /// Deletes files or directories from version control.
@@ -1110,16 +1105,15 @@ impl Context {
         revprop_table: std::collections::HashMap<&str, &str>,
         options: &DeleteOptions,
     ) -> Result<(), Error> {
-        let mut pool = std::rc::Rc::new(Pool::default());
-        unsafe {
+        with_tmp_pool(|pool| unsafe {
             // Convert revprops to BStr objects that live in the pool
             let svn_strings: Vec<_> = revprop_table
                 .iter()
-                .map(|(k, v)| (*k, crate::string::BStr::from_str(v, &pool)))
+                .map(|(k, v)| (*k, crate::string::BStr::from_str(v, pool)))
                 .collect();
 
             let rps = apr::hash::Hash::from_iter(
-                &pool,
+                pool,
                 svn_strings
                     .iter()
                     .map(|(k, v)| (k.as_bytes(), v.as_ptr() as *mut std::ffi::c_void)),
@@ -1129,7 +1123,7 @@ impl Context {
                 .iter()
                 .map(|p| std::ffi::CString::new(*p).unwrap())
                 .collect();
-            let mut ps = apr::tables::TypedArray::new(&pool, paths.len() as i32);
+            let mut ps = apr::tables::TypedArray::new(pool, paths.len() as i32);
             for path in &path_cstrings {
                 ps.push(path.as_ptr() as *mut std::ffi::c_void);
             }
@@ -1143,11 +1137,11 @@ impl Context {
                 Some(crate::wrap_commit_callback2),
                 commit_callback as *mut std::ffi::c_void,
                 self.ptr,
-                std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
+                pool.as_mut_ptr(),
             );
             Error::from_raw(err)?;
             Ok(())
-        }
+        })
     }
 
     /// Lists properties on a path.
@@ -1161,40 +1155,40 @@ impl Context {
             Option<&[crate::InheritedItem]>,
         ) -> Result<(), Error>,
     ) -> Result<(), Error> {
-        let pool = Pool::default();
+        with_tmp_pool(|pool| {
+            let changelists = options.changelists.map(|cl| {
+                cl.iter()
+                    .map(|cl| std::ffi::CString::new(*cl).unwrap())
+                    .collect::<Vec<_>>()
+            });
+            let changelists = changelists.as_ref().map(|cl| {
+                let mut array = apr::tables::TypedArray::<*const i8>::new(&pool, 10);
+                for item in cl.iter() {
+                    array.push(item.as_ptr() as *const i8);
+                }
+                array
+            });
 
-        let changelists = options.changelists.map(|cl| {
-            cl.iter()
-                .map(|cl| std::ffi::CString::new(*cl).unwrap())
-                .collect::<Vec<_>>()
-        });
-        let changelists = changelists.as_ref().map(|cl| {
-            let mut array = apr::tables::TypedArray::<*const i8>::new(&pool, 10);
-            for item in cl.iter() {
-                array.push(item.as_ptr() as *const i8);
+            unsafe {
+                let receiver = Box::into_raw(Box::new(receiver));
+                let err = svn_client_proplist4(
+                    target.as_ptr() as *const i8,
+                    &options.peg_revision.into(),
+                    &options.revision.into(),
+                    options.depth.into(),
+                    changelists
+                        .map(|cl| cl.as_ptr())
+                        .unwrap_or(std::ptr::null()),
+                    options.get_target_inherited_props.into(),
+                    Some(wrap_proplist_receiver2),
+                    receiver as *mut std::ffi::c_void,
+                    self.ptr,
+                    pool.as_mut_ptr(),
+                );
+                Error::from_raw(err)?;
+                Ok(())
             }
-            array
-        });
-
-        unsafe {
-            let receiver = Box::into_raw(Box::new(receiver));
-            let err = svn_client_proplist4(
-                target.as_ptr() as *const i8,
-                &options.peg_revision.into(),
-                &options.revision.into(),
-                options.depth.into(),
-                changelists
-                    .map(|cl| cl.as_ptr())
-                    .unwrap_or(std::ptr::null()),
-                options.get_target_inherited_props.into(),
-                Some(wrap_proplist_receiver2),
-                receiver as *mut std::ffi::c_void,
-                self.ptr,
-                pool.as_mut_ptr(),
-            );
-            Error::from_raw(err)?;
-            Ok(())
-        }
+        })
     }
 
     /// Imports an unversioned path into the repository.
@@ -1210,45 +1204,46 @@ impl Context {
         filter_callback: &dyn FnMut(&mut bool, &std::path::Path, &Dirent) -> Result<(), Error>,
         commit_callback: &dyn FnMut(&crate::CommitInfo) -> Result<(), Error>,
     ) -> Result<(), Error> {
-        let mut pool = std::rc::Rc::new(Pool::default());
         let path = path.as_canonical_dirent()?;
-        // Convert revprops to BStr objects that live in the pool
-        let svn_strings: Vec<_> = revprop_table
-            .iter()
-            .map(|(k, v)| (*k, crate::string::BStr::from_str(v, &pool)))
-            .collect();
-
-        let rps = apr::hash::Hash::from_iter(
-            &pool,
-            svn_strings
+        with_tmp_pool(|pool| {
+            // Convert revprops to BStr objects that live in the pool
+            let svn_strings: Vec<_> = revprop_table
                 .iter()
-                .map(|(k, v)| (k.as_bytes(), v.as_ptr() as *mut std::ffi::c_void)),
-        );
-        unsafe {
-            let filter_callback = Box::into_raw(Box::new(filter_callback));
-            let commit_callback = Box::into_raw(Box::new(commit_callback));
-            let path_cstr = std::ffi::CString::new(path.as_str())?;
-            let err = svn_client_import5(
-                path_cstr.as_ptr(),
-                url.as_ptr() as *const i8,
-                depth.into(),
-                no_ignore.into(),
-                no_autoprops.into(),
-                ignore_unknown_node_types.into(),
-                rps.as_ptr(),
-                Some(wrap_filter_callback),
-                filter_callback as *mut std::ffi::c_void,
-                Some(crate::wrap_commit_callback2),
-                commit_callback as *mut std::ffi::c_void,
-                self.ptr,
-                std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
+                .map(|(k, v)| (*k, crate::string::BStr::from_str(v, pool)))
+                .collect();
+
+            let rps = apr::hash::Hash::from_iter(
+                pool,
+                svn_strings
+                    .iter()
+                    .map(|(k, v)| (k.as_bytes(), v.as_ptr() as *mut std::ffi::c_void)),
             );
-            // Free the boxed callbacks to prevent memory leak
-            drop(Box::from_raw(filter_callback));
-            drop(Box::from_raw(commit_callback));
-            Error::from_raw(err)?;
-            Ok(())
-        }
+            unsafe {
+                let filter_callback = Box::into_raw(Box::new(filter_callback));
+                let commit_callback = Box::into_raw(Box::new(commit_callback));
+                let path_cstr = std::ffi::CString::new(path.as_str())?;
+                let err = svn_client_import5(
+                    path_cstr.as_ptr(),
+                    url.as_ptr() as *const i8,
+                    depth.into(),
+                    no_ignore.into(),
+                    no_autoprops.into(),
+                    ignore_unknown_node_types.into(),
+                    rps.as_ptr(),
+                    Some(wrap_filter_callback),
+                    filter_callback as *mut std::ffi::c_void,
+                    Some(crate::wrap_commit_callback2),
+                    commit_callback as *mut std::ffi::c_void,
+                    self.ptr,
+                    pool.as_mut_ptr(),
+                );
+                // Free the boxed callbacks to prevent memory leak
+                drop(Box::from_raw(filter_callback));
+                drop(Box::from_raw(commit_callback));
+                Error::from_raw(err)?;
+                Ok(())
+            }
+        })
     }
 
     /// Exports a versioned path to an unversioned path.
@@ -1258,7 +1253,6 @@ impl Context {
         to_path: impl AsCanonicalDirent,
         options: &ExportOptions,
     ) -> Result<Revnum, Error> {
-        let _pool = std::rc::Rc::new(Pool::default());
         let native_eol: Option<&str> = options.native_eol.into();
         let native_eol = native_eol.map(|s| std::ffi::CString::new(s).unwrap());
         let mut revnum = 0;
@@ -1292,65 +1286,66 @@ impl Context {
         revprop_table: std::collections::HashMap<&str, &str>,
         commit_callback: &dyn FnMut(&crate::CommitInfo) -> Result<(), Error>,
     ) -> Result<(), Error> {
-        let mut pool = std::rc::Rc::new(Pool::default());
-        // Convert revprops to BStr objects that live in the pool
-        let svn_strings: Vec<_> = revprop_table
-            .iter()
-            .map(|(k, v)| (*k, crate::string::BStr::from_str(v, &pool)))
-            .collect();
-
-        let rps = apr::hash::Hash::from_iter(
-            &pool,
-            svn_strings
+        with_tmp_pool(|pool| {
+            // Convert revprops to BStr objects that live in the pool
+            let svn_strings: Vec<_> = revprop_table
                 .iter()
-                .map(|(k, v)| (k.as_bytes(), v.as_ptr() as *mut std::ffi::c_void)),
-        );
-
-        unsafe {
-            // Keep CStrings alive for the duration of the function
-            let target_cstrings: Vec<std::ffi::CString> = targets
-                .iter()
-                .map(|t| std::ffi::CString::new(*t).unwrap())
+                .map(|(k, v)| (*k, crate::string::BStr::from_str(v, pool)))
                 .collect();
-            let mut ps = apr::tables::TypedArray::new(&pool, targets.len() as i32);
-            for target in &target_cstrings {
-                ps.push(target.as_ptr() as *mut std::ffi::c_void);
-            }
 
-            let changelist_cstrings: Vec<std::ffi::CString> =
-                if let Some(changelists) = &options.changelists {
-                    changelists
-                        .iter()
-                        .map(|c| std::ffi::CString::new(c.as_str()).unwrap())
-                        .collect()
-                } else {
-                    Vec::new()
-                };
-            let mut cl = apr::tables::TypedArray::new(&pool, changelist_cstrings.len() as i32);
-            for changelist in &changelist_cstrings {
-                cl.push(changelist.as_ptr() as *mut std::ffi::c_void);
-            }
-            let commit_callback = Box::into_raw(Box::new(commit_callback));
-            let err = svn_client_commit6(
-                ps.as_ptr(),
-                options.depth.into(),
-                options.keep_locks.into(),
-                options.keep_changelists.into(),
-                options.commit_as_operations.into(),
-                options.include_file_externals.into(),
-                options.include_dir_externals.into(),
-                cl.as_ptr(),
-                rps.as_ptr(),
-                Some(crate::wrap_commit_callback2),
-                commit_callback as *mut std::ffi::c_void,
-                self.ptr,
-                std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
+            let rps = apr::hash::Hash::from_iter(
+                pool,
+                svn_strings
+                    .iter()
+                    .map(|(k, v)| (k.as_bytes(), v.as_ptr() as *mut std::ffi::c_void)),
             );
-            // Free the boxed callback to prevent memory leak
-            drop(Box::from_raw(commit_callback));
-            Error::from_raw(err)?;
-            Ok(())
-        }
+
+            unsafe {
+                // Keep CStrings alive for the duration of the function
+                let target_cstrings: Vec<std::ffi::CString> = targets
+                    .iter()
+                    .map(|t| std::ffi::CString::new(*t).unwrap())
+                    .collect();
+                let mut ps = apr::tables::TypedArray::new(pool, targets.len() as i32);
+                for target in &target_cstrings {
+                    ps.push(target.as_ptr() as *mut std::ffi::c_void);
+                }
+
+                let changelist_cstrings: Vec<std::ffi::CString> =
+                    if let Some(changelists) = &options.changelists {
+                        changelists
+                            .iter()
+                            .map(|c| std::ffi::CString::new(c.as_str()).unwrap())
+                            .collect()
+                    } else {
+                        Vec::new()
+                    };
+                let mut cl = apr::tables::TypedArray::new(pool, changelist_cstrings.len() as i32);
+                for changelist in &changelist_cstrings {
+                    cl.push(changelist.as_ptr() as *mut std::ffi::c_void);
+                }
+                let commit_callback = Box::into_raw(Box::new(commit_callback));
+                let err = svn_client_commit6(
+                    ps.as_ptr(),
+                    options.depth.into(),
+                    options.keep_locks.into(),
+                    options.keep_changelists.into(),
+                    options.commit_as_operations.into(),
+                    options.include_file_externals.into(),
+                    options.include_dir_externals.into(),
+                    cl.as_ptr(),
+                    rps.as_ptr(),
+                    Some(crate::wrap_commit_callback2),
+                    commit_callback as *mut std::ffi::c_void,
+                    self.ptr,
+                    pool.as_mut_ptr(),
+                );
+                // Free the boxed callback to prevent memory leak
+                drop(Box::from_raw(commit_callback));
+                Error::from_raw(err)?;
+                Ok(())
+            }
+        })
     }
 
     /// Gets the status of a working copy path.
@@ -1360,44 +1355,45 @@ impl Context {
         options: &StatusOptions,
         status_func: &dyn FnMut(&'_ str, &'_ Status) -> Result<(), Error>,
     ) -> Result<Revnum, Error> {
-        let mut pool = std::rc::Rc::new(Pool::default());
-        let changelist_cstrings: Vec<std::ffi::CString> =
-            if let Some(changelists) = &options.changelists {
-                changelists
-                    .iter()
-                    .map(|cl| std::ffi::CString::new(cl.as_str()).unwrap())
-                    .collect()
-            } else {
-                Vec::new()
-            };
-        let mut cl = apr::tables::TypedArray::new(&pool, changelist_cstrings.len() as i32);
-        for changelist in &changelist_cstrings {
-            cl.push(changelist.as_ptr() as *mut std::ffi::c_void);
-        }
+        with_tmp_pool(|pool| {
+            let changelist_cstrings: Vec<std::ffi::CString> =
+                if let Some(changelists) = &options.changelists {
+                    changelists
+                        .iter()
+                        .map(|cl| std::ffi::CString::new(cl.as_str()).unwrap())
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+            let mut cl = apr::tables::TypedArray::new(pool, changelist_cstrings.len() as i32);
+            for changelist in &changelist_cstrings {
+                cl.push(changelist.as_ptr() as *mut std::ffi::c_void);
+            }
 
-        unsafe {
-            let status_func = Box::into_raw(Box::new(status_func));
-            let mut revnum = 0;
-            let err = svn_client_status6(
-                &mut revnum,
-                self.ptr,
-                path.as_ptr() as *const i8,
-                &options.revision.into(),
-                options.depth.into(),
-                options.get_all.into(),
-                options.check_out_of_date.into(),
-                options.check_working_copy.into(),
-                options.no_ignore.into(),
-                options.ignore_externals.into(),
-                options.depth_as_sticky.into(),
-                cl.as_ptr(),
-                Some(wrap_status_func),
-                status_func as *mut std::ffi::c_void,
-                std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
-            );
-            Error::from_raw(err)?;
-            Ok(Revnum::from_raw(revnum).unwrap())
-        }
+            unsafe {
+                let status_func = Box::into_raw(Box::new(status_func));
+                let mut revnum = 0;
+                let err = svn_client_status6(
+                    &mut revnum,
+                    self.ptr,
+                    path.as_ptr() as *const i8,
+                    &options.revision.into(),
+                    options.depth.into(),
+                    options.get_all.into(),
+                    options.check_out_of_date.into(),
+                    options.check_working_copy.into(),
+                    options.no_ignore.into(),
+                    options.ignore_externals.into(),
+                    options.depth_as_sticky.into(),
+                    cl.as_ptr(),
+                    Some(wrap_status_func),
+                    status_func as *mut std::ffi::c_void,
+                    pool.as_mut_ptr(),
+                );
+                Error::from_raw(err)?;
+                Ok(Revnum::from_raw(revnum).unwrap())
+            }
+        })
     }
 
     /// Retrieve log messages for a set of paths.
@@ -1416,28 +1412,24 @@ impl Context {
         revprops: &[&str],
         log_entry_receiver: &dyn FnMut(&LogEntry) -> Result<(), Error>,
     ) -> Result<(), Error> {
-        let mut pool = std::rc::Rc::new(Pool::default());
-
-        unsafe {
-            let pool_mut = std::rc::Rc::get_mut(&mut pool).unwrap();
-
+        with_tmp_pool(|pool| unsafe {
             // Keep CStrings alive for the duration of the function
             let target_cstrings: Vec<std::ffi::CString> = targets
                 .iter()
                 .map(|t| std::ffi::CString::new(*t).unwrap())
                 .collect();
-            let mut ps = apr::tables::TypedArray::new(pool_mut, targets.len() as i32);
+            let mut ps = apr::tables::TypedArray::new(pool, targets.len() as i32);
             for target in &target_cstrings {
                 ps.push(target.as_ptr() as *mut std::ffi::c_void);
             }
 
             let mut rrs =
                 apr::tables::TypedArray::<*mut subversion_sys::svn_opt_revision_range_t>::new(
-                    pool_mut,
+                    pool,
                     revision_ranges.len() as i32,
                 );
             for revision_range in revision_ranges {
-                rrs.push(revision_range.to_c(pool_mut));
+                rrs.push(revision_range.to_c(pool));
             }
 
             // Keep CStrings alive for the duration of the function
@@ -1445,7 +1437,7 @@ impl Context {
                 .iter()
                 .map(|r| std::ffi::CString::new(*r).unwrap())
                 .collect();
-            let mut rps = apr::tables::TypedArray::new(pool_mut, revprops.len() as i32);
+            let mut rps = apr::tables::TypedArray::new(pool, revprops.len() as i32);
             for revprop in &revprop_cstrings {
                 rps.push(revprop.as_ptr() as *mut std::ffi::c_void);
             }
@@ -1461,11 +1453,11 @@ impl Context {
                 Some(crate::wrap_log_entry_receiver),
                 &log_entry_receiver as *const _ as *mut std::ffi::c_void,
                 self.ptr,
-                std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
+                pool.as_mut_ptr(),
             );
             Error::from_raw(err)?;
             Ok(())
-        }
+        })
     }
 
     /// Retrieve log messages with control flow support.
@@ -1606,9 +1598,8 @@ impl Context {
 
     /// Vacuums pristine copies from a working copy.
     pub fn vacuum(&mut self, path: &str, options: &VacuumOptions) -> Result<(), Error> {
-        let mut pool = std::rc::Rc::new(Pool::default());
         let path = std::ffi::CString::new(path).unwrap();
-        unsafe {
+        with_tmp_pool(|pool| unsafe {
             let err = svn_client_vacuum(
                 path.as_ptr(),
                 options.remove_unversioned_items.into(),
@@ -1617,18 +1608,16 @@ impl Context {
                 options.vacuum_pristines.into(),
                 options.include_externals.into(),
                 self.ptr,
-                std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
+                pool.as_mut_ptr(),
             );
-            Error::from_raw(err)?;
-            Ok(())
-        }
+            Error::from_raw(err)
+        })
     }
 
     /// Cleans up a working copy.
     pub fn cleanup(&mut self, path: &str, options: &CleanupOptions) -> Result<(), Error> {
-        let mut pool = std::rc::Rc::new(Pool::default());
         let path = std::ffi::CString::new(path).unwrap();
-        unsafe {
+        with_tmp_pool(|pool| unsafe {
             let err = svn_client_cleanup2(
                 path.as_ptr(),
                 options.break_locks.into(),
@@ -1637,11 +1626,10 @@ impl Context {
                 options.vacuum_pristines.into(),
                 options.include_externals.into(),
                 self.ptr,
-                std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
+                pool.as_mut_ptr(),
             );
-            Error::from_raw(err)?;
-            Ok(())
-        }
+            Error::from_raw(err)
+        })
     }
 
     /// Gets conflict information for a path.
@@ -1674,74 +1662,77 @@ impl Context {
         stream: &mut dyn std::io::Write,
         options: &CatOptions,
     ) -> Result<HashMap<String, Vec<u8>>, Error> {
-        let mut pool = std::rc::Rc::new(Pool::default());
         let path_or_url = std::ffi::CString::new(path_or_url).unwrap();
         let mut s = crate::io::wrap_write(stream)?;
-        let mut props: *mut apr::hash::apr_hash_t = std::ptr::null_mut();
-        unsafe {
-            let err = subversion_sys::svn_client_cat3(
-                &mut props,
-                s.as_mut_ptr(),
-                path_or_url.as_ptr(),
-                &options.peg_revision.into(),
-                &options.revision.into(),
-                options.expand_keywords.into(),
-                self.as_mut_ptr(),
-                std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
-                apr::pool::Pool::new().as_mut_ptr(),
-            );
-            Error::from_raw(err)?;
-            let prop_hash = crate::props::PropHash::from_ptr(props);
-            Ok(prop_hash.to_hashmap())
-        }
+        with_tmp_pool(|result_pool| {
+            with_tmp_pool(|scratch_pool| unsafe {
+                let mut props: *mut apr::hash::apr_hash_t = std::ptr::null_mut();
+                let err = subversion_sys::svn_client_cat3(
+                    &mut props,
+                    s.as_mut_ptr(),
+                    path_or_url.as_ptr(),
+                    &options.peg_revision.into(),
+                    &options.revision.into(),
+                    options.expand_keywords.into(),
+                    self.as_mut_ptr(),
+                    result_pool.as_mut_ptr(),
+                    scratch_pool.as_mut_ptr(),
+                );
+                Error::from_raw(err)?;
+                let prop_hash = crate::props::PropHash::from_ptr(props);
+                Ok(prop_hash.to_hashmap())
+            })
+        })
     }
 
     /// Locks paths in the repository.
     pub fn lock(&mut self, targets: &[&str], comment: &str, steal_lock: bool) -> Result<(), Error> {
-        let mut pool = std::rc::Rc::new(Pool::default());
-        let targets = targets
-            .iter()
-            .map(|s| std::ffi::CString::new(*s).unwrap())
-            .collect::<Vec<_>>();
-        let mut targets_array = apr::tables::TypedArray::<*const i8>::new(&pool, 10);
-        for target in targets.iter() {
-            targets_array.push(target.as_ptr());
-        }
-        let comment = std::ffi::CString::new(comment).unwrap();
-        unsafe {
-            let err = subversion_sys::svn_client_lock(
-                targets_array.as_ptr(),
-                comment.as_ptr(),
-                steal_lock.into(),
-                self.as_mut_ptr(),
-                std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
-            );
-            Error::from_raw(err)?;
-            Ok(())
-        }
+        with_tmp_pool(|pool| {
+            let targets = targets
+                .iter()
+                .map(|s| std::ffi::CString::new(*s).unwrap())
+                .collect::<Vec<_>>();
+            let mut targets_array = apr::tables::TypedArray::<*const i8>::new(pool, 10);
+            for target in targets.iter() {
+                targets_array.push(target.as_ptr());
+            }
+            let comment = std::ffi::CString::new(comment).unwrap();
+            unsafe {
+                let err = subversion_sys::svn_client_lock(
+                    targets_array.as_ptr(),
+                    comment.as_ptr(),
+                    steal_lock.into(),
+                    self.as_mut_ptr(),
+                    pool.as_mut_ptr(),
+                );
+                Error::from_raw(err)?;
+                Ok(())
+            }
+        })
     }
 
     /// Unlocks paths in the repository.
     pub fn unlock(&mut self, targets: &[&str], break_lock: bool) -> Result<(), Error> {
-        let mut pool = std::rc::Rc::new(Pool::default());
-        let targets = targets
-            .iter()
-            .map(|s| std::ffi::CString::new(*s).unwrap())
-            .collect::<Vec<_>>();
-        let mut targets_array = apr::tables::TypedArray::<*const i8>::new(&pool, 10);
-        for target in targets.iter() {
-            targets_array.push(target.as_ptr());
-        }
-        unsafe {
-            let err = subversion_sys::svn_client_unlock(
-                targets_array.as_ptr(),
-                break_lock.into(),
-                self.as_mut_ptr(),
-                std::rc::Rc::get_mut(&mut pool).unwrap().as_mut_ptr(),
-            );
-            Error::from_raw(err)?;
-            Ok(())
-        }
+        with_tmp_pool(|pool| {
+            let targets = targets
+                .iter()
+                .map(|s| std::ffi::CString::new(*s).unwrap())
+                .collect::<Vec<_>>();
+            let mut targets_array = apr::tables::TypedArray::<*const i8>::new(pool, 10);
+            for target in targets.iter() {
+                targets_array.push(target.as_ptr());
+            }
+            unsafe {
+                let err = subversion_sys::svn_client_unlock(
+                    targets_array.as_ptr(),
+                    break_lock.into(),
+                    self.as_mut_ptr(),
+                    pool.as_mut_ptr(),
+                );
+                Error::from_raw(err)?;
+                Ok(())
+            }
+        })
     }
 
     /// Gets the root of the working copy.
@@ -1749,7 +1740,6 @@ impl Context {
         &mut self,
         path: impl AsCanonicalDirent,
     ) -> Result<std::path::PathBuf, Error> {
-        let _pool = std::rc::Rc::new(Pool::default());
         let path = path.as_canonical_dirent()?;
         let mut wc_root: *const i8 = std::ptr::null();
         with_tmp_pool(|tmp_pool| unsafe {
@@ -1796,12 +1786,10 @@ impl Context {
 
     /// Gets the URL for a working copy path.
     pub fn url_from_path(&mut self, path: impl AsCanonicalUri) -> Result<String, Error> {
-        let pool = Pool::default();
-
         // Canonicalize input
         let path = path.as_canonical_uri()?;
 
-        with_tmp_pool(|_tmp_pool| unsafe {
+        with_tmp_pool(|pool| unsafe {
             let mut url: *const i8 = std::ptr::null();
             let path_cstr = std::ffi::CString::new(path.as_str())?;
 
@@ -1819,11 +1807,10 @@ impl Context {
 
     /// Gets the repository root URL and UUID for a path or URL.
     pub fn get_repos_root(&mut self, path_or_url: &str) -> Result<(String, String), Error> {
-        let pool = Pool::default();
         let path_or_url = std::ffi::CString::new(path_or_url).unwrap();
-        let mut repos_root: *const i8 = std::ptr::null();
-        let mut repos_uuid: *const i8 = std::ptr::null();
-        unsafe {
+        with_tmp_pool(|pool| unsafe {
+            let mut repos_root: *const i8 = std::ptr::null();
+            let mut repos_uuid: *const i8 = std::ptr::null();
             let err = subversion_sys::svn_client_get_repos_root(
                 &mut repos_root,
                 &mut repos_uuid,
@@ -1843,7 +1830,7 @@ impl Context {
                     .unwrap()
                     .into(),
             ))
-        }
+        })
     }
 
     #[cfg(feature = "ra")]
@@ -1885,40 +1872,41 @@ impl Context {
         changelists: Option<&[&str]>,
         receiver: &dyn FnMut(&Info) -> Result<(), Error>,
     ) -> Result<(), Error> {
-        let pool = Pool::default();
-        let abspath_or_url = std::ffi::CString::new(abspath_or_url).unwrap();
-        let changelists = changelists.map(|cl| {
-            cl.iter()
-                .map(|cl| std::ffi::CString::new(*cl).unwrap())
-                .collect::<Vec<_>>()
-        });
-        let changelists = changelists.as_ref().map(|cl| {
-            let mut array = apr::tables::TypedArray::<*const i8>::new(&pool, 10);
-            for item in cl.iter() {
-                array.push(item.as_ptr());
+        with_tmp_pool(|pool| {
+            let abspath_or_url = std::ffi::CString::new(abspath_or_url).unwrap();
+            let changelists = changelists.map(|cl| {
+                cl.iter()
+                    .map(|cl| std::ffi::CString::new(*cl).unwrap())
+                    .collect::<Vec<_>>()
+            });
+            let changelists = changelists.as_ref().map(|cl| {
+                let mut array = apr::tables::TypedArray::<*const i8>::new(&pool, 10);
+                for item in cl.iter() {
+                    array.push(item.as_ptr());
+                }
+                array
+            });
+            let mut receiver = receiver;
+            let receiver = &mut receiver as *mut _ as *mut std::ffi::c_void;
+            unsafe {
+                let err = subversion_sys::svn_client_info4(
+                    abspath_or_url.as_ptr(),
+                    &peg_revision.into(),
+                    &revision.into(),
+                    depth.into(),
+                    fetch_excluded as i32,
+                    fetch_actual_only as i32,
+                    include_externals as i32,
+                    changelists.map_or(std::ptr::null(), |cl| cl.as_ptr()),
+                    Some(wrap_info_receiver2),
+                    receiver,
+                    self.as_mut_ptr(),
+                    pool.as_mut_ptr(),
+                );
+                Error::from_raw(err)?;
+                Ok(())
             }
-            array
-        });
-        let mut receiver = receiver;
-        let receiver = &mut receiver as *mut _ as *mut std::ffi::c_void;
-        unsafe {
-            let err = subversion_sys::svn_client_info4(
-                abspath_or_url.as_ptr(),
-                &peg_revision.into(),
-                &revision.into(),
-                depth.into(),
-                fetch_excluded as i32,
-                fetch_actual_only as i32,
-                include_externals as i32,
-                changelists.map_or(std::ptr::null(), |cl| cl.as_ptr()),
-                Some(wrap_info_receiver2),
-                receiver,
-                self.as_mut_ptr(),
-                pool.as_mut_ptr(),
-            );
-            Error::from_raw(err)?;
-            Ok(())
-        }
+        })
     }
 
     /// Blame/annotate a file, showing revision information for each line
@@ -1933,66 +1921,67 @@ impl Context {
         include_merged_revisions: bool,
         receiver: &mut dyn FnMut(BlameInfo) -> Result<(), Error>,
     ) -> Result<(Revnum, Revnum), Error> {
-        let pool = Pool::default();
-        let path_or_url = std::ffi::CString::new(path_or_url).unwrap();
+        with_tmp_pool(|pool| {
+            let path_or_url = std::ffi::CString::new(path_or_url).unwrap();
 
-        // Convert diff options to C strings
-        // Create diff file options struct
-        let diff_file_options =
-            unsafe { subversion_sys::svn_diff_file_options_create(pool.as_mut_ptr()) };
+            // Convert diff options to C strings
+            // Create diff file options struct
+            let diff_file_options =
+                unsafe { subversion_sys::svn_diff_file_options_create(pool.as_mut_ptr()) };
 
-        if !diff_options.is_empty() {
-            let diff_options_cstrings: Vec<std::ffi::CString> = diff_options
-                .iter()
-                .map(|opt| std::ffi::CString::new(opt.as_str()).unwrap())
-                .collect();
+            if !diff_options.is_empty() {
+                let diff_options_cstrings: Vec<std::ffi::CString> = diff_options
+                    .iter()
+                    .map(|opt| std::ffi::CString::new(opt.as_str()).unwrap())
+                    .collect();
 
-            // Create APR array of diff options for parsing
-            let mut diff_opts_array = apr::tables::TypedArray::<*const i8>::new(&pool, 10);
-            for opt in diff_options_cstrings.iter() {
-                diff_opts_array.push(opt.as_ptr());
+                // Create APR array of diff options for parsing
+                let mut diff_opts_array = apr::tables::TypedArray::<*const i8>::new(pool, 10);
+                for opt in diff_options_cstrings.iter() {
+                    diff_opts_array.push(opt.as_ptr());
+                }
+
+                // Parse the options into the diff_file_options struct
+                let parse_err = unsafe {
+                    subversion_sys::svn_diff_file_options_parse(
+                        diff_file_options,
+                        diff_opts_array.as_ptr(),
+                        pool.as_mut_ptr(),
+                    )
+                };
+                Error::from_raw(parse_err)?;
             }
 
-            // Parse the options into the diff_file_options struct
-            let parse_err = unsafe {
-                subversion_sys::svn_diff_file_options_parse(
+            // Output parameters for resolved revision numbers
+            let mut start_revnum: subversion_sys::svn_revnum_t = 0;
+            let mut end_revnum: subversion_sys::svn_revnum_t = 0;
+
+            // Wrap the receiver callback
+            let receiver_baton = receiver as *mut _ as *mut std::ffi::c_void;
+
+            unsafe {
+                let err = subversion_sys::svn_client_blame6(
+                    &mut start_revnum,
+                    &mut end_revnum,
+                    path_or_url.as_ptr(),
+                    &peg_revision.into(),
+                    &start_revision.into(),
+                    &end_revision.into(),
                     diff_file_options,
-                    diff_opts_array.as_ptr(),
+                    ignore_mime_type as subversion_sys::svn_boolean_t,
+                    include_merged_revisions as subversion_sys::svn_boolean_t,
+                    Some(blame_receiver_wrapper),
+                    receiver_baton,
+                    self.as_mut_ptr(),
                     pool.as_mut_ptr(),
-                )
-            };
-            Error::from_raw(parse_err)?;
-        }
-
-        // Output parameters for resolved revision numbers
-        let mut start_revnum: subversion_sys::svn_revnum_t = 0;
-        let mut end_revnum: subversion_sys::svn_revnum_t = 0;
-
-        // Wrap the receiver callback
-        let receiver_baton = receiver as *mut _ as *mut std::ffi::c_void;
-
-        unsafe {
-            let err = subversion_sys::svn_client_blame6(
-                &mut start_revnum,
-                &mut end_revnum,
-                path_or_url.as_ptr(),
-                &peg_revision.into(),
-                &start_revision.into(),
-                &end_revision.into(),
-                diff_file_options,
-                ignore_mime_type as subversion_sys::svn_boolean_t,
-                include_merged_revisions as subversion_sys::svn_boolean_t,
-                Some(blame_receiver_wrapper),
-                receiver_baton,
-                self.as_mut_ptr(),
-                pool.as_mut_ptr(),
-            );
-            Error::from_raw(err)?;
-            Ok((
-                Revnum::from_raw(start_revnum).unwrap(),
-                Revnum::from_raw(end_revnum).unwrap(),
-            ))
-        }
+                );
+                Error::from_raw(err)?;
+                Ok((
+                    Revnum::from_raw(start_revnum).unwrap(),
+                    Revnum::from_raw(end_revnum).unwrap(),
+                ))
+            }
+        })
     }
 
     /// Copy or move a file or directory
