@@ -81,11 +81,11 @@ impl DiffHunk {
 /// A diff between two files
 pub struct Diff {
     ptr: *mut subversion_sys::svn_diff_t,
-    _pool: apr::Pool,
+    _pool: apr::Pool<'static>,
 }
 
 impl Diff {
-    unsafe fn from_raw(ptr: *mut subversion_sys::svn_diff_t, pool: apr::Pool) -> Self {
+    unsafe fn from_raw(ptr: *mut subversion_sys::svn_diff_t, pool: apr::Pool<'static>) -> Self {
         Self { ptr, _pool: pool }
     }
 

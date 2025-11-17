@@ -5,13 +5,16 @@ use subversion_sys::svn_mergeinfo_t;
 #[allow(dead_code)]
 pub struct Mergeinfo {
     ptr: *mut svn_mergeinfo_t,
-    pool: apr::Pool,
+    pool: apr::Pool<'static>,
     _phantom: PhantomData<*mut ()>, // !Send + !Sync
 }
 
 impl Mergeinfo {
     #[allow(dead_code)]
-    pub(crate) unsafe fn from_ptr_and_pool(ptr: *mut svn_mergeinfo_t, pool: apr::Pool) -> Self {
+    pub(crate) unsafe fn from_ptr_and_pool(
+        ptr: *mut svn_mergeinfo_t,
+        pool: apr::Pool<'static>,
+    ) -> Self {
         Self {
             ptr,
             pool,

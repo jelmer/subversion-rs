@@ -71,7 +71,7 @@ impl From<AuthzAccess> for subversion_sys::svn_repos_authz_access_t {
 /// Authorization data structure
 pub struct Authz {
     ptr: *mut subversion_sys::svn_authz_t,
-    _pool: apr::Pool,
+    _pool: apr::Pool<'static>,
 }
 
 impl Authz {
@@ -202,7 +202,7 @@ pub fn find_root_path(path: &std::path::Path) -> Option<std::path::PathBuf> {
 /// Repository handle with RAII cleanup
 pub struct Repos {
     ptr: *mut svn_repos_t,
-    _pool: apr::Pool,
+    _pool: apr::Pool<'static>,
     _phantom: PhantomData<*mut ()>, // !Send + !Sync
 }
 
@@ -411,17 +411,17 @@ impl Repos {
     }
 
     /// Gets the filesystem object for this repository.
-    pub fn fs(&self) -> Option<crate::fs::Fs> {
+    pub fn fs(&self) -> Option<crate::fs::Fs<'static>> {
         let fs_ptr = unsafe { subversion_sys::svn_repos_fs(self.ptr) };
 
         if fs_ptr.is_null() {
             None
         } else {
-            // Create a subpool from the repos pool
+            // Create a new root pool for the Fs
             // The fs_ptr is owned by repos and valid as long as repos exists
-            // The subpool ensures proper cleanup order
-            let child_pool = self._pool.subpool();
-            Some(unsafe { crate::fs::Fs::from_ptr_and_pool(fs_ptr, child_pool) })
+            // Using a new root pool ensures the Fs can be safely returned
+            let pool = apr::Pool::new();
+            Some(unsafe { crate::fs::Fs::from_ptr_and_pool(fs_ptr, pool) })
         }
     }
 
@@ -1713,7 +1713,7 @@ impl Repos {
             let author_cstr = if !info.author.is_null() {
                 unsafe { std::ffi::CStr::from_ptr(info.author) }
             } else {
-                std::ffi::CStr::from_bytes_with_nul(b"\0").unwrap()
+                c""
             };
 
             callback(
@@ -1828,7 +1828,7 @@ impl Repos {
 /// Repository report handle for update/switch operations
 pub struct Report {
     baton: *mut std::ffi::c_void,
-    pool: apr::Pool,
+    pool: apr::Pool<'static>,
 }
 
 impl Report {

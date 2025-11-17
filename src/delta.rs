@@ -20,7 +20,7 @@ pub fn version() -> crate::Version {
 /// Creates a default/no-op delta editor.
 ///
 /// This editor does nothing but can be used for testing or as a placeholder.
-pub fn default_editor(pool: &Pool) -> WrapEditor<'_> {
+pub fn default_editor<'a>(pool: &'a Pool<'static>) -> WrapEditor<'a> {
     let editor = unsafe { subversion_sys::svn_delta_default_editor(pool.as_mut_ptr()) };
     // The default editor uses null baton
     let baton = std::ptr::null_mut();
@@ -35,7 +35,7 @@ pub fn default_editor(pool: &Pool) -> WrapEditor<'_> {
 pub struct WrapEditor<'pool> {
     pub(crate) editor: *const subversion_sys::svn_delta_editor_t,
     pub(crate) baton: *mut std::ffi::c_void,
-    pub(crate) _pool: std::marker::PhantomData<&'pool apr::Pool>,
+    pub(crate) _pool: std::marker::PhantomData<&'pool apr::Pool<'static>>,
 }
 unsafe impl Send for WrapEditor<'_> {}
 
@@ -105,7 +105,7 @@ impl<'pool> Editor for WrapEditor<'pool> {
 pub struct WrapDirectoryEditor<'pool> {
     pub(crate) editor: *const subversion_sys::svn_delta_editor_t,
     pub(crate) baton: *mut std::ffi::c_void,
-    pub(crate) _pool: std::marker::PhantomData<&'pool apr::Pool>,
+    pub(crate) _pool: std::marker::PhantomData<&'pool apr::Pool<'static>>,
 }
 
 impl<'pool> DirectoryEditor for WrapDirectoryEditor<'pool> {
@@ -288,7 +288,7 @@ impl<'pool> DirectoryEditor for WrapDirectoryEditor<'pool> {
 pub struct WrapFileEditor {
     editor: *const subversion_sys::svn_delta_editor_t,
     baton: *mut std::ffi::c_void,
-    pool: apr::Pool,
+    pool: apr::Pool<'static>,
 }
 
 impl Drop for WrapFileEditor {
@@ -299,7 +299,7 @@ impl Drop for WrapFileEditor {
 
 impl WrapFileEditor {
     /// Get a reference to the underlying pool
-    pub fn pool(&self) -> &apr::Pool {
+    pub fn pool(&self) -> &apr::Pool<'_> {
         &self.pool
     }
 }
@@ -309,7 +309,7 @@ impl WrapFileEditor {
 pub struct WrapTxdeltaWindowHandler {
     handler: *mut subversion_sys::svn_txdelta_window_handler_t,
     baton: *mut std::ffi::c_void,
-    pool: apr::Pool,
+    pool: apr::Pool<'static>,
     _phantom: PhantomData<*mut ()>,
 }
 
@@ -489,7 +489,7 @@ pub trait FileEditor {
 /// TxDelta window with RAII cleanup
 pub struct TxDeltaWindow {
     ptr: *mut subversion_sys::svn_txdelta_window_t,
-    pool: apr::Pool,
+    pool: apr::Pool<'static>,
     _phantom: PhantomData<*mut ()>, // !Send + !Sync
 }
 
@@ -507,7 +507,7 @@ impl Default for TxDeltaWindow {
 
 impl TxDeltaWindow {
     /// Get a reference to the underlying pool
-    pub fn pool(&self) -> &apr::Pool {
+    pub fn pool(&self) -> &apr::Pool<'_> {
         &self.pool
     }
 
@@ -1052,7 +1052,7 @@ pub(crate) static WRAP_EDITOR: subversion_sys::svn_delta_editor_t =
 /// Txdelta stream for generating delta windows
 pub struct TxDeltaStream {
     ptr: *mut subversion_sys::svn_txdelta_stream_t,
-    _pool: apr::Pool,
+    _pool: apr::Pool<'static>,
 }
 
 impl TxDeltaStream {
@@ -1276,7 +1276,7 @@ pub fn apply(
 /// it will be parsed and the provided handler will be called for each delta window.
 ///
 /// The handler must outlive the returned stream.
-pub fn parse_svndiff<'a, F>(handler: &'a mut F) -> Result<crate::io::Stream, crate::Error>
+pub fn parse_svndiff<F>(handler: &mut F) -> Result<crate::io::Stream, crate::Error>
 where
     F: FnMut(&mut TxDeltaWindow) -> Result<(), crate::Error>,
 {

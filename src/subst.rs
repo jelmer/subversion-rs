@@ -198,20 +198,28 @@ pub fn keywords_differ(
 ) -> Result<bool, Error> {
     with_tmp_pool(|pool| {
         // Keep c_strings alive until after the FFI call
-        let c_strings_a: Vec<_> = match a {
+        // Store key AND CString value together to ensure iteration order matches
+        // Sort by key to ensure deterministic order regardless of HashMap iteration
+        let mut c_strings_a: Vec<_> = match a {
             Some(kw) => kw
                 .iter()
                 .map(|(k, v)| (k.as_str(), std::ffi::CString::new(v.as_str()).unwrap()))
                 .collect(),
             None => Vec::new(),
         };
+        c_strings_a.sort_by(|a, b| a.0.cmp(b.0));
 
         let hash_a = match a {
-            Some(kw) => {
+            Some(_kw) => {
                 let mut hash = apr::hash::Hash::new(pool);
-                for ((k, _), (_, v_cstr)) in kw.iter().zip(c_strings_a.iter()) {
+                // Use c_strings_a directly instead of re-iterating over HashMap
+                // to ensure consistent iteration order
+                for (k, v_cstr) in c_strings_a.iter() {
                     unsafe {
-                        hash.insert(k.as_bytes(), v_cstr.as_ptr() as *mut std::ffi::c_void);
+                        // Create svn_string_t for the value (SVN expects svn_string_t*, not const char*)
+                        let svn_str =
+                            subversion_sys::svn_string_create(v_cstr.as_ptr(), pool.as_mut_ptr());
+                        hash.insert(k.as_bytes(), svn_str as *mut std::ffi::c_void);
                     }
                 }
                 unsafe { hash.as_mut_ptr() }
@@ -220,20 +228,28 @@ pub fn keywords_differ(
         };
 
         // Keep c_strings alive until after the FFI call
-        let c_strings_b: Vec<_> = match b {
+        // Store key AND CString value together to ensure iteration order matches
+        // Sort by key to ensure deterministic order regardless of HashMap iteration
+        let mut c_strings_b: Vec<_> = match b {
             Some(kw) => kw
                 .iter()
                 .map(|(k, v)| (k.as_str(), std::ffi::CString::new(v.as_str()).unwrap()))
                 .collect(),
             None => Vec::new(),
         };
+        c_strings_b.sort_by(|a, b| a.0.cmp(b.0));
 
         let hash_b = match b {
-            Some(kw) => {
+            Some(_kw) => {
                 let mut hash = apr::hash::Hash::new(pool);
-                for ((k, _), (_, v_cstr)) in kw.iter().zip(c_strings_b.iter()) {
+                // Use c_strings_b directly instead of re-iterating over HashMap
+                // to ensure consistent iteration order
+                for (k, v_cstr) in c_strings_b.iter() {
                     unsafe {
-                        hash.insert(k.as_bytes(), v_cstr.as_ptr() as *mut std::ffi::c_void);
+                        // Create svn_string_t for the value (SVN expects svn_string_t*, not const char*)
+                        let svn_str =
+                            subversion_sys::svn_string_create(v_cstr.as_ptr(), pool.as_mut_ptr());
+                        hash.insert(k.as_bytes(), svn_str as *mut std::ffi::c_void);
                     }
                 }
                 unsafe { hash.as_mut_ptr() }
@@ -264,51 +280,48 @@ pub fn stream_translated(
     keywords: Option<&HashMap<String, String>>,
     expand: bool,
 ) -> Result<crate::io::Stream, Error> {
-    with_tmp_pool(|pool| {
-        let eol_cstr = eol_str.map(|s| std::ffi::CString::new(s).unwrap());
-        let eol_ptr = eol_cstr
-            .as_ref()
-            .map(|c| c.as_ptr())
-            .unwrap_or(std::ptr::null());
+    // Create result_pool OUTSIDE with_tmp_pool so it survives
+    let result_pool = apr::Pool::new();
 
-        let keywords_hash = match keywords {
-            Some(kw) => {
-                // Create C strings that will live for the duration of the call
-                let c_strings: Vec<_> = kw
-                    .iter()
-                    .map(|(k, v)| {
-                        (
-                            std::ffi::CString::new(k.as_str()).unwrap(),
-                            std::ffi::CString::new(v.as_str()).unwrap(),
-                        )
-                    })
-                    .collect();
-                let mut hash = apr::hash::Hash::new(pool);
-                for ((k, _), (_, v_cstr)) in kw.iter().zip(c_strings.iter()) {
-                    unsafe {
-                        hash.insert(k.as_bytes(), v_cstr.as_ptr() as *mut std::ffi::c_void);
-                    }
+    // Copy eol_str into result_pool so it survives
+    let eol_ptr = match eol_str {
+        Some(s) => unsafe { apr::strings::pstrdup_raw(s, &result_pool)? },
+        None => std::ptr::null(),
+    };
+
+    // Allocate keywords_hash in result_pool, not temporary pool
+    let keywords_hash = match keywords {
+        Some(kw) => {
+            // Create C strings and copy them into the result_pool using apr::strings::pstrdup
+            let mut hash = apr::hash::Hash::new(&result_pool);
+            for (k, v) in kw.iter() {
+                unsafe {
+                    // Copy both key and value into result_pool
+                    let key_ptr = apr::strings::pstrdup_raw(k, &result_pool)?;
+                    let val_ptr = apr::strings::pstrdup_raw(v, &result_pool)?;
+                    hash.insert(
+                        std::slice::from_raw_parts(key_ptr as *const u8, k.len()),
+                        val_ptr as *mut std::ffi::c_void,
+                    );
                 }
-                unsafe { hash.as_mut_ptr() }
             }
-            None => std::ptr::null_mut(),
-        };
-
-        let result_pool = apr::Pool::new();
-
-        unsafe {
-            let translated_stream = subversion_sys::svn_subst_stream_translated(
-                source_stream.as_mut_ptr(),
-                eol_ptr,
-                if repair { 1 } else { 0 },
-                keywords_hash,
-                if expand { 1 } else { 0 },
-                result_pool.as_mut_ptr(),
-            );
-
-            Ok(crate::io::Stream::from_ptr(translated_stream, result_pool))
+            unsafe { hash.as_mut_ptr() }
         }
-    })
+        None => std::ptr::null_mut(),
+    };
+
+    unsafe {
+        let translated_stream = subversion_sys::svn_subst_stream_translated(
+            source_stream.as_mut_ptr(),
+            eol_ptr,
+            if repair { 1 } else { 0 },
+            keywords_hash,
+            if expand { 1 } else { 0 },
+            result_pool.as_mut_ptr(),
+        );
+
+        Ok(crate::io::Stream::from_ptr(translated_stream, result_pool))
+    }
 }
 
 /// Create a translated stream for converting to normal form
@@ -322,54 +335,51 @@ pub fn stream_translated_to_normal_form(
     always_repair_eols: bool,
     keywords: Option<&HashMap<String, String>>,
 ) -> Result<crate::io::Stream, Error> {
-    with_tmp_pool(|pool| {
-        let eol_cstr = eol_str.map(|s| std::ffi::CString::new(s).unwrap());
-        let eol_ptr = eol_cstr
-            .as_ref()
-            .map(|c| c.as_ptr())
-            .unwrap_or(std::ptr::null());
+    // Create result_pool OUTSIDE with_tmp_pool so it survives
+    let result_pool = apr::Pool::new();
 
-        let keywords_hash = match keywords {
-            Some(kw) => {
-                // Create C strings that will live for the duration of the call
-                let c_strings: Vec<_> = kw
-                    .iter()
-                    .map(|(k, v)| {
-                        (
-                            std::ffi::CString::new(k.as_str()).unwrap(),
-                            std::ffi::CString::new(v.as_str()).unwrap(),
-                        )
-                    })
-                    .collect();
-                let mut hash = apr::hash::Hash::new(pool);
-                for ((k, _), (_, v_cstr)) in kw.iter().zip(c_strings.iter()) {
-                    unsafe {
-                        hash.insert(k.as_bytes(), v_cstr.as_ptr() as *mut std::ffi::c_void);
-                    }
+    // Copy eol_str into result_pool so it survives
+    let eol_ptr = match eol_str {
+        Some(s) => unsafe { apr::strings::pstrdup_raw(s, &result_pool)? },
+        None => std::ptr::null(),
+    };
+
+    // Allocate keywords_hash in result_pool, not temporary pool
+    let keywords_hash = match keywords {
+        Some(kw) => {
+            // Create C strings and copy them into the result_pool using apr::strings::pstrdup
+            let mut hash = apr::hash::Hash::new(&result_pool);
+            for (k, v) in kw.iter() {
+                unsafe {
+                    // Copy both key and value into result_pool
+                    let key_ptr = apr::strings::pstrdup_raw(k, &result_pool)?;
+                    let val_ptr = apr::strings::pstrdup_raw(v, &result_pool)?;
+                    hash.insert(
+                        std::slice::from_raw_parts(key_ptr as *const u8, k.len()),
+                        val_ptr as *mut std::ffi::c_void,
+                    );
                 }
-                unsafe { hash.as_mut_ptr() }
             }
-            None => std::ptr::null_mut(),
-        };
-
-        let result_pool = apr::Pool::new();
-
-        unsafe {
-            let mut translated_stream: *mut subversion_sys::svn_stream_t = std::ptr::null_mut();
-            let err = subversion_sys::svn_subst_stream_translated_to_normal_form(
-                &mut translated_stream,
-                source_stream.as_mut_ptr(),
-                eol_style.into(),
-                eol_ptr,
-                if always_repair_eols { 1 } else { 0 },
-                keywords_hash,
-                result_pool.as_mut_ptr(),
-            );
-            Error::from_raw(err)?;
-
-            Ok(crate::io::Stream::from_ptr(translated_stream, result_pool))
+            unsafe { hash.as_mut_ptr() }
         }
-    })
+        None => std::ptr::null_mut(),
+    };
+
+    unsafe {
+        let mut translated_stream: *mut subversion_sys::svn_stream_t = std::ptr::null_mut();
+        let err = subversion_sys::svn_subst_stream_translated_to_normal_form(
+            &mut translated_stream,
+            source_stream.as_mut_ptr(),
+            eol_style.into(),
+            eol_ptr,
+            if always_repair_eols { 1 } else { 0 },
+            keywords_hash,
+            result_pool.as_mut_ptr(),
+        );
+        Error::from_raw(err)?;
+
+        Ok(crate::io::Stream::from_ptr(translated_stream, result_pool))
+    }
 }
 
 /// Copy and translate a file with keyword and EOL substitution

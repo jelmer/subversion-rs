@@ -520,9 +520,9 @@ pub fn mergeinfo_intersect(
 }
 
 // Helper function to convert Rust HashMap to APR hash
-unsafe fn hashmap_to_mergeinfo_hash(
+unsafe fn hashmap_to_mergeinfo_hash<'p>(
     mergeinfo: &std::collections::HashMap<String, Vec<crate::RevisionRange>>,
-    pool: &apr::Pool,
+    pool: &'p apr::Pool<'p>,
 ) -> Result<*mut apr_sys::apr_hash_t, Error> {
     let hash = apr_sys::apr_hash_make(pool.as_mut_ptr());
 

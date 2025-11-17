@@ -124,13 +124,11 @@ impl CertificateInfo {
                 return true;
             }
             // Support wildcard matching
-            if san.starts_with("*.") {
-                let wildcard_domain = &san[2..];
+            if let Some(wildcard_domain) = san.strip_prefix("*.") {
                 if hostname.ends_with(wildcard_domain) && hostname.len() > wildcard_domain.len() {
                     // Check if there's exactly one dot separating the prefix from the wildcard domain
                     let prefix_with_dot = &hostname[..hostname.len() - wildcard_domain.len()];
-                    if prefix_with_dot.ends_with('.') {
-                        let prefix = &prefix_with_dot[..prefix_with_dot.len() - 1];
+                    if let Some(prefix) = prefix_with_dot.strip_suffix('.') {
                         // Wildcard should only match one level (no dots in prefix)
                         if !prefix.contains('.') && !prefix.is_empty() {
                             return true;

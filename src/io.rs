@@ -58,7 +58,7 @@ impl From<subversion_sys::svn_io_file_del_t> for FileDel {
 /// Stream mark with RAII cleanup
 pub struct Mark {
     ptr: *mut subversion_sys::svn_stream_mark_t,
-    _pool: apr::Pool,
+    _pool: apr::Pool<'static>,
     _phantom: PhantomData<*mut ()>, // !Send + !Sync
 }
 
@@ -81,7 +81,7 @@ impl Mark {
 
     pub(crate) unsafe fn from_ptr_and_pool(
         ptr: *mut subversion_sys::svn_stream_mark_t,
-        pool: apr::Pool,
+        pool: apr::Pool<'static>,
     ) -> Self {
         Self {
             ptr,
@@ -94,7 +94,7 @@ impl Mark {
 /// String buffer for stream operations
 pub struct StringBuf {
     ptr: *mut subversion_sys::svn_stringbuf_t,
-    _pool: apr::Pool,
+    _pool: apr::Pool<'static>,
     _phantom: PhantomData<*mut ()>, // !Send + !Sync
 }
 
@@ -165,7 +165,7 @@ impl StringBuf {
 /// Stream handle with RAII cleanup
 pub struct Stream {
     ptr: *mut subversion_sys::svn_stream_t,
-    _pool: apr::Pool,
+    _pool: apr::Pool<'static>,
     backend: Option<*mut std::ffi::c_void>, // Boxed backend for manual cleanup (not used by from_backend)
     _phantom: PhantomData<*mut ()>,         // !Send + !Sync
 }
@@ -224,7 +224,7 @@ impl Stream {
     }
 
     /// Create a Stream from a raw pointer and pool
-    pub fn from_ptr(ptr: *mut subversion_sys::svn_stream_t, pool: apr::Pool) -> Self {
+    pub fn from_ptr(ptr: *mut subversion_sys::svn_stream_t, pool: apr::Pool<'static>) -> Self {
         Self {
             ptr,
             _pool: pool,
@@ -475,7 +475,7 @@ impl Stream {
     /// Creates a Stream from a raw pointer and pool.
     pub(crate) unsafe fn from_ptr_and_pool(
         ptr: *mut subversion_sys::svn_stream_t,
-        pool: apr::Pool,
+        pool: apr::Pool<'static>,
     ) -> Self {
         Self {
             ptr,
@@ -546,6 +546,7 @@ impl Stream {
         let mut stream = std::ptr::null_mut();
         let mut path = std::ptr::null();
         let pool = apr::pool::Pool::new();
+        let scratch_pool = apr::pool::Pool::new();
         let err = unsafe {
             subversion_sys::svn_stream_open_unique(
                 &mut stream,
@@ -553,7 +554,7 @@ impl Stream {
                 dirpath.as_ptr(),
                 when.into(),
                 pool.as_mut_ptr(),
-                apr::pool::Pool::new().as_mut_ptr(),
+                scratch_pool.as_mut_ptr(),
             )
         };
         Error::from_raw(err)?;
@@ -659,13 +660,14 @@ impl Stream {
     ) -> Result<crate::Checksum<'_>, Error> {
         let mut checksum = std::ptr::null_mut();
         let pool = apr::pool::Pool::new();
+        let scratch_pool = apr::pool::Pool::new();
         let err = unsafe {
             subversion_sys::svn_stream_contents_checksum(
                 &mut checksum,
                 self.ptr,
                 checksum_kind.into(),
                 pool.as_mut_ptr(),
-                apr::pool::Pool::new().as_mut_ptr(),
+                scratch_pool.as_mut_ptr(),
             )
         };
         Error::from_raw(err)?;
@@ -1187,13 +1189,10 @@ impl From<Vec<u8>> for Stream {
 
 /// Removes a file from the filesystem.
 pub fn remove_file(path: &std::path::Path, ignore_enoent: bool) -> Result<(), Error> {
+    let pool = apr::pool::Pool::new();
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     let err = unsafe {
-        subversion_sys::svn_io_remove_file2(
-            path.as_ptr(),
-            ignore_enoent as i32,
-            apr::pool::Pool::new().as_mut_ptr(),
-        )
+        subversion_sys::svn_io_remove_file2(path.as_ptr(), ignore_enoent as i32, pool.as_mut_ptr())
     };
     Error::from_raw(err)?;
     Ok(())
@@ -1279,14 +1278,11 @@ pub fn create_uniqe_link(
 
 /// Reads the target of a symbolic link.
 pub fn read_link(path: &std::path::Path) -> Result<std::path::PathBuf, Error> {
+    let scratch_pool = apr::pool::Pool::new();
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     let mut target = std::ptr::null_mut();
     let err = unsafe {
-        subversion_sys::svn_io_read_link(
-            &mut target,
-            path.as_ptr(),
-            apr::pool::Pool::new().as_mut_ptr(),
-        )
+        subversion_sys::svn_io_read_link(&mut target, path.as_ptr(), scratch_pool.as_mut_ptr())
     };
     Error::from_raw(err)?;
 
@@ -1316,6 +1312,7 @@ pub fn copy_file(
     dest: &std::path::Path,
     copy_perms: bool,
 ) -> Result<(), Error> {
+    let scratch_pool = apr::pool::Pool::new();
     let src = std::ffi::CString::new(src.to_str().unwrap()).unwrap();
     let dest = std::ffi::CString::new(dest.to_str().unwrap()).unwrap();
     let err = unsafe {
@@ -1323,7 +1320,7 @@ pub fn copy_file(
             src.as_ptr(),
             dest.as_ptr(),
             copy_perms as i32,
-            apr::pool::Pool::new().as_mut_ptr(),
+            scratch_pool.as_mut_ptr(),
         )
     };
     Error::from_raw(err)?;
@@ -1332,14 +1329,11 @@ pub fn copy_file(
 
 /// Copies file permissions from source to destination.
 pub fn copy_perms(src: &std::path::Path, dest: &std::path::Path) -> Result<(), Error> {
+    let scratch_pool = apr::pool::Pool::new();
     let src = std::ffi::CString::new(src.to_str().unwrap()).unwrap();
     let dest = std::ffi::CString::new(dest.to_str().unwrap()).unwrap();
     let err = unsafe {
-        subversion_sys::svn_io_copy_perms(
-            src.as_ptr(),
-            dest.as_ptr(),
-            apr::pool::Pool::new().as_mut_ptr(),
-        )
+        subversion_sys::svn_io_copy_perms(src.as_ptr(), dest.as_ptr(), scratch_pool.as_mut_ptr())
     };
     Error::from_raw(err)?;
     Ok(())
@@ -1347,14 +1341,11 @@ pub fn copy_perms(src: &std::path::Path, dest: &std::path::Path) -> Result<(), E
 
 /// Copies a symbolic link from source to destination.
 pub fn copy_link(src: &std::path::Path, dest: &std::path::Path) -> Result<(), Error> {
+    let scratch_pool = apr::pool::Pool::new();
     let src = std::ffi::CString::new(src.to_str().unwrap()).unwrap();
     let dest = std::ffi::CString::new(dest.to_str().unwrap()).unwrap();
     let err = unsafe {
-        subversion_sys::svn_io_copy_link(
-            src.as_ptr(),
-            dest.as_ptr(),
-            apr::pool::Pool::new().as_mut_ptr(),
-        )
+        subversion_sys::svn_io_copy_link(src.as_ptr(), dest.as_ptr(), scratch_pool.as_mut_ptr())
     };
     Error::from_raw(err)?;
     Ok(())
@@ -1368,6 +1359,7 @@ pub fn copy_dir_recursively(
     copy_perms: bool,
     cancel_func: Option<&impl Fn() -> Result<(), Error>>,
 ) -> Result<(), Error> {
+    let scratch_pool = apr::pool::Pool::new();
     use std::os::unix::ffi::OsStrExt;
     let src = std::ffi::CString::new(src.to_str().unwrap()).unwrap();
     let dst_path = std::ffi::CString::new(dst_path.to_str().unwrap()).unwrap();
@@ -1388,7 +1380,7 @@ pub fn copy_dir_recursively(
             } else {
                 std::ptr::null_mut()
             },
-            apr::pool::Pool::new().as_mut_ptr(),
+            scratch_pool.as_mut_ptr(),
         )
     };
     Error::from_raw(err)?;
@@ -1397,12 +1389,10 @@ pub fn copy_dir_recursively(
 
 /// Creates a directory and all necessary parent directories.
 pub fn make_dir_recursively(path: &std::path::Path) -> Result<(), Error> {
+    let scratch_pool = apr::pool::Pool::new();
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     let err = unsafe {
-        subversion_sys::svn_io_make_dir_recursively(
-            path.as_ptr(),
-            apr::pool::Pool::new().as_mut_ptr(),
-        )
+        subversion_sys::svn_io_make_dir_recursively(path.as_ptr(), scratch_pool.as_mut_ptr())
     };
     Error::from_raw(err)?;
     Ok(())
@@ -1410,14 +1400,11 @@ pub fn make_dir_recursively(path: &std::path::Path) -> Result<(), Error> {
 
 /// Checks if a directory is empty.
 pub fn dir_empty(path: &std::path::Path) -> Result<bool, Error> {
+    let scratch_pool = apr::pool::Pool::new();
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     let mut empty = 0;
     let err = unsafe {
-        subversion_sys::svn_io_dir_empty(
-            &mut empty,
-            path.as_ptr(),
-            apr::pool::Pool::new().as_mut_ptr(),
-        )
+        subversion_sys::svn_io_dir_empty(&mut empty, path.as_ptr(), scratch_pool.as_mut_ptr())
     };
     Error::from_raw(err)?;
     Ok(empty != 0)
@@ -1425,14 +1412,11 @@ pub fn dir_empty(path: &std::path::Path) -> Result<bool, Error> {
 
 /// Appends the contents of one file to another.
 pub fn append_file(src: &std::path::Path, dest: &std::path::Path) -> Result<(), Error> {
+    let scratch_pool = apr::pool::Pool::new();
     let src = std::ffi::CString::new(src.to_str().unwrap()).unwrap();
     let dest = std::ffi::CString::new(dest.to_str().unwrap()).unwrap();
     let err = unsafe {
-        subversion_sys::svn_io_append_file(
-            src.as_ptr(),
-            dest.as_ptr(),
-            apr::pool::Pool::new().as_mut_ptr(),
-        )
+        subversion_sys::svn_io_append_file(src.as_ptr(), dest.as_ptr(), scratch_pool.as_mut_ptr())
     };
     Error::from_raw(err)?;
     Ok(())
@@ -1440,13 +1424,14 @@ pub fn append_file(src: &std::path::Path, dest: &std::path::Path) -> Result<(), 
 
 /// Sets a file to read-only mode.
 pub fn set_file_read_only(path: &std::path::Path, ignore_enoent: bool) -> Result<(), Error> {
+    let scratch_pool = apr::pool::Pool::new();
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
 
     let err = unsafe {
         subversion_sys::svn_io_set_file_read_only(
             path.as_ptr(),
             ignore_enoent as i32,
-            apr::pool::Pool::new().as_mut_ptr(),
+            scratch_pool.as_mut_ptr(),
         )
     };
     Error::from_raw(err)?;
@@ -1455,13 +1440,14 @@ pub fn set_file_read_only(path: &std::path::Path, ignore_enoent: bool) -> Result
 
 /// Sets a file to read-write mode.
 pub fn set_file_read_write(path: &std::path::Path, ignore_enoent: bool) -> Result<(), Error> {
+    let scratch_pool = apr::pool::Pool::new();
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
 
     let err = unsafe {
         subversion_sys::svn_io_set_file_read_write(
             path.as_ptr(),
             ignore_enoent as i32,
-            apr::pool::Pool::new().as_mut_ptr(),
+            scratch_pool.as_mut_ptr(),
         )
     };
     Error::from_raw(err)?;
@@ -1470,13 +1456,14 @@ pub fn set_file_read_write(path: &std::path::Path, ignore_enoent: bool) -> Resul
 
 /// Checks if a file is executable.
 pub fn is_file_executable(path: &std::path::Path) -> Result<bool, Error> {
+    let scratch_pool = apr::pool::Pool::new();
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     let mut executable = 0;
     let err = unsafe {
         subversion_sys::svn_io_is_file_executable(
             &mut executable,
             path.as_ptr(),
-            apr::pool::Pool::new().as_mut_ptr(),
+            scratch_pool.as_mut_ptr(),
         )
     };
     Error::from_raw(err)?;
@@ -1485,13 +1472,14 @@ pub fn is_file_executable(path: &std::path::Path) -> Result<bool, Error> {
 
 /// Gets the last affected time of a file.
 pub fn file_affected_time(path: &std::path::Path) -> Result<apr::time::Time, Error> {
+    let scratch_pool = apr::pool::Pool::new();
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     let mut affected_time = 0;
     let err = unsafe {
         subversion_sys::svn_io_file_affected_time(
             &mut affected_time,
             path.as_ptr(),
-            apr::pool::Pool::new().as_mut_ptr(),
+            scratch_pool.as_mut_ptr(),
         )
     };
     Error::from_raw(err)?;
@@ -1503,13 +1491,14 @@ pub fn set_file_affected_time(
     path: &std::path::Path,
     affected_time: apr::time::Time,
 ) -> Result<(), Error> {
+    let scratch_pool = apr::pool::Pool::new();
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     let affected_time = affected_time.into();
     let err = unsafe {
         subversion_sys::svn_io_set_file_affected_time(
             affected_time,
             path.as_ptr(),
-            apr::pool::Pool::new().as_mut_ptr(),
+            scratch_pool.as_mut_ptr(),
         )
     };
     Error::from_raw(err)?;
@@ -1518,13 +1507,9 @@ pub fn set_file_affected_time(
 
 /// Sleeps until the next timestamp change for the given path.
 pub fn sleep_for_timestamps(path: &std::path::Path) {
+    let scratch_pool = apr::pool::Pool::new();
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
-    unsafe {
-        subversion_sys::svn_io_sleep_for_timestamps(
-            path.as_ptr(),
-            apr::pool::Pool::new().as_mut_ptr(),
-        )
-    }
+    unsafe { subversion_sys::svn_io_sleep_for_timestamps(path.as_ptr(), scratch_pool.as_mut_ptr()) }
 }
 
 /// Checks if two files have different sizes.
@@ -1532,6 +1517,7 @@ pub fn filesizes_different_p(
     file1: &std::path::Path,
     file2: &std::path::Path,
 ) -> Result<bool, Error> {
+    let scratch_pool = apr::pool::Pool::new();
     let file1 = std::ffi::CString::new(file1.to_str().unwrap()).unwrap();
     let file2 = std::ffi::CString::new(file2.to_str().unwrap()).unwrap();
     let mut different = 0;
@@ -1540,7 +1526,7 @@ pub fn filesizes_different_p(
             &mut different,
             file1.as_ptr(),
             file2.as_ptr(),
-            apr::pool::Pool::new().as_mut_ptr(),
+            scratch_pool.as_mut_ptr(),
         )
     };
     Error::from_raw(err)?;
@@ -1553,6 +1539,7 @@ pub fn filesizes_three_different_p(
     file2: &std::path::Path,
     file3: &std::path::Path,
 ) -> Result<(bool, bool, bool), Error> {
+    let scratch_pool = apr::pool::Pool::new();
     let file1 = std::ffi::CString::new(file1.to_str().unwrap()).unwrap();
     let file2 = std::ffi::CString::new(file2.to_str().unwrap()).unwrap();
     let file3 = std::ffi::CString::new(file3.to_str().unwrap()).unwrap();
@@ -1567,7 +1554,7 @@ pub fn filesizes_three_different_p(
             file1.as_ptr(),
             file2.as_ptr(),
             file3.as_ptr(),
-            apr::pool::Pool::new().as_mut_ptr(),
+            scratch_pool.as_mut_ptr(),
         )
     };
     Error::from_raw(err)?;
@@ -1602,6 +1589,7 @@ pub fn files_contents_same_p(
     file1: &std::path::Path,
     file2: &std::path::Path,
 ) -> Result<bool, Error> {
+    let scratch_pool = apr::pool::Pool::new();
     let file1 = std::ffi::CString::new(file1.to_str().unwrap()).unwrap();
     let file2 = std::ffi::CString::new(file2.to_str().unwrap()).unwrap();
     let mut same = 0;
@@ -1610,7 +1598,7 @@ pub fn files_contents_same_p(
             &mut same,
             file1.as_ptr(),
             file2.as_ptr(),
-            apr::pool::Pool::new().as_mut_ptr(),
+            scratch_pool.as_mut_ptr(),
         )
     };
     Error::from_raw(err)?;
@@ -1623,6 +1611,7 @@ pub fn files_contents_three_same_p(
     file2: &std::path::Path,
     file3: &std::path::Path,
 ) -> Result<(bool, bool, bool), Error> {
+    let scratch_pool = apr::pool::Pool::new();
     let file1 = std::ffi::CString::new(file1.to_str().unwrap()).unwrap();
     let file2 = std::ffi::CString::new(file2.to_str().unwrap()).unwrap();
     let file3 = std::ffi::CString::new(file3.to_str().unwrap()).unwrap();
@@ -1637,7 +1626,7 @@ pub fn files_contents_three_same_p(
             file1.as_ptr(),
             file2.as_ptr(),
             file3.as_ptr(),
-            apr::pool::Pool::new().as_mut_ptr(),
+            scratch_pool.as_mut_ptr(),
         )
     };
     Error::from_raw(err)?;
@@ -1646,13 +1635,14 @@ pub fn files_contents_three_same_p(
 
 /// Creates a file with the specified string contents.
 pub fn file_create(path: &std::path::Path, contents: &str) -> Result<(), Error> {
+    let scratch_pool = apr::pool::Pool::new();
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     let contents = std::ffi::CString::new(contents).unwrap();
     let err = unsafe {
         subversion_sys::svn_io_file_create(
             path.as_ptr(),
             contents.as_ptr(),
-            apr::pool::Pool::new().as_mut_ptr(),
+            scratch_pool.as_mut_ptr(),
         )
     };
     Error::from_raw(err)?;
@@ -1661,13 +1651,14 @@ pub fn file_create(path: &std::path::Path, contents: &str) -> Result<(), Error> 
 
 /// Creates a file with the specified byte contents.
 pub fn file_create_bytes(path: &std::path::Path, contents: &[u8]) -> Result<(), Error> {
+    let scratch_pool = apr::pool::Pool::new();
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     let err = unsafe {
         subversion_sys::svn_io_file_create_bytes(
             path.as_ptr(),
             contents.as_ptr() as *const std::ffi::c_void,
             contents.len(),
-            apr::pool::Pool::new().as_mut_ptr(),
+            scratch_pool.as_mut_ptr(),
         )
     };
     Error::from_raw(err)?;
@@ -1676,9 +1667,10 @@ pub fn file_create_bytes(path: &std::path::Path, contents: &[u8]) -> Result<(), 
 
 /// Creates an empty file.
 pub fn file_create_empty(path: &std::path::Path) -> Result<(), Error> {
+    let scratch_pool = apr::pool::Pool::new();
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     let err = unsafe {
-        subversion_sys::svn_io_file_create_empty(path.as_ptr(), apr::pool::Pool::new().as_mut_ptr())
+        subversion_sys::svn_io_file_create_empty(path.as_ptr(), scratch_pool.as_mut_ptr())
     };
     Error::from_raw(err)?;
     Ok(())
@@ -1686,13 +1678,14 @@ pub fn file_create_empty(path: &std::path::Path) -> Result<(), Error> {
 
 /// Locks a file.
 pub fn file_lock(path: &std::path::Path, exclusive: bool, nonblocking: bool) -> Result<(), Error> {
+    let scratch_pool = apr::pool::Pool::new();
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     let err = unsafe {
         subversion_sys::svn_io_file_lock2(
             path.as_ptr(),
             exclusive as i32,
             nonblocking as i32,
-            apr::pool::Pool::new().as_mut_ptr(),
+            scratch_pool.as_mut_ptr(),
         )
     };
     Error::from_raw(err)?;
@@ -1705,6 +1698,7 @@ pub fn dir_file_copy(
     dest_path: &std::path::Path,
     file: &std::ffi::OsStr,
 ) -> Result<(), Error> {
+    let scratch_pool = apr::pool::Pool::new();
     use std::os::unix::ffi::OsStrExt;
     let src_path = std::ffi::CString::new(src_path.to_str().unwrap()).unwrap();
     let dest_path = std::ffi::CString::new(dest_path.to_str().unwrap()).unwrap();
@@ -1714,7 +1708,7 @@ pub fn dir_file_copy(
             src_path.as_ptr(),
             dest_path.as_ptr(),
             file.as_ptr(),
-            apr::pool::Pool::new().as_mut_ptr(),
+            scratch_pool.as_mut_ptr(),
         )
     };
     Error::from_raw(err)?;
@@ -1727,6 +1721,7 @@ pub fn stream_copy(
     to: &mut Stream,
     cancel_func: Option<&impl Fn() -> Result<(), Error>>,
 ) -> Result<(), Error> {
+    let scratch_pool = apr::pool::Pool::new();
     let err = unsafe {
         subversion_sys::svn_stream_copy3(
             from.ptr,
@@ -1741,7 +1736,7 @@ pub fn stream_copy(
             } else {
                 std::ptr::null_mut()
             },
-            apr::pool::Pool::new().as_mut_ptr(),
+            scratch_pool.as_mut_ptr(),
         )
     };
     Error::from_raw(err)?;
@@ -1750,13 +1745,14 @@ pub fn stream_copy(
 
 /// Checks if two streams have the same contents.
 pub fn stream_contents_same(stream1: &mut Stream, stream2: &mut Stream) -> Result<bool, Error> {
+    let scratch_pool = apr::pool::Pool::new();
     let mut same = 0;
     let err = unsafe {
         subversion_sys::svn_stream_contents_same(
             &mut same,
             stream1.ptr,
             stream2.ptr,
-            apr::pool::Pool::new().as_mut_ptr(),
+            scratch_pool.as_mut_ptr(),
         )
     };
     Error::from_raw(err)?;
@@ -1772,7 +1768,7 @@ pub fn string_from_stream(stream: &mut Stream) -> Result<String, Error> {
             &mut str,
             stream.ptr,
             pool.as_mut_ptr(),
-            apr::pool::Pool::new().as_mut_ptr(),
+            pool.as_mut_ptr(),
         )
     };
     Error::from_raw(err)?;
@@ -1791,6 +1787,7 @@ pub fn remove_dir(
     ignore_enoent: bool,
     cancel_func: Option<&impl Fn() -> Result<(), Error>>,
 ) -> Result<(), Error> {
+    let scratch_pool = apr::pool::Pool::new();
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     let err = unsafe {
         subversion_sys::svn_io_remove_dir2(
@@ -1806,7 +1803,7 @@ pub fn remove_dir(
             } else {
                 std::ptr::null_mut()
             },
-            apr::pool::Pool::new().as_mut_ptr(),
+            scratch_pool.as_mut_ptr(),
         )
     };
     Error::from_raw(err)?;

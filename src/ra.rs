@@ -166,7 +166,7 @@ unsafe impl Send for Dirent {}
 /// Repository access session handle with automatic cleanup.
 pub struct Session<'a> {
     ptr: *mut svn_ra_session_t,
-    _pool: apr::Pool,
+    _pool: apr::Pool<'static>,
     // Keep a reference to callbacks to ensure they outlive the session
     _callbacks: Option<&'a mut Callbacks>,
     _phantom: PhantomData<*mut ()>, // !Send + !Sync
@@ -289,7 +289,10 @@ impl<'a> DoDiffOptions<'a> {
 
 impl<'a> Session<'a> {
     /// Creates a Session from a raw pointer and pool.
-    pub(crate) unsafe fn from_ptr_and_pool(ptr: *mut svn_ra_session_t, pool: apr::Pool) -> Self {
+    pub(crate) unsafe fn from_ptr_and_pool(
+        ptr: *mut svn_ra_session_t,
+        pool: apr::Pool<'static>,
+    ) -> Self {
         Self {
             ptr,
             _pool: pool,
@@ -1683,8 +1686,7 @@ impl<'a> Session<'a> {
     ) -> Result<Vec<(String, HashMap<String, Vec<u8>>)>, Error> {
         let path_cstr = std::ffi::CString::new(path)?;
         let pool = Pool::new();
-        let mut inherited_props_array: *mut apr_sys::apr_array_header_t =
-            std::ptr::null_mut();
+        let mut inherited_props_array: *mut apr_sys::apr_array_header_t = std::ptr::null_mut();
 
         let scratch_pool = Pool::new();
         let err = unsafe {
@@ -1916,7 +1918,7 @@ pub fn modules() -> Result<String, Error> {
 pub struct WrapReporter {
     reporter: *const subversion_sys::svn_ra_reporter3_t,
     baton: *mut std::ffi::c_void,
-    _pool: apr::Pool,
+    _pool: apr::Pool<'static>,
     _phantom: PhantomData<*mut ()>,
 }
 
@@ -2062,7 +2064,7 @@ pub trait Reporter {
 /// RA callbacks with RAII cleanup
 pub struct Callbacks {
     ptr: *mut subversion_sys::svn_ra_callbacks2_t,
-    _pool: apr::Pool,
+    _pool: apr::Pool<'static>,
     // Keep auth_baton alive for the lifetime of the callbacks, pinned to ensure stable address
     auth_baton: Option<std::pin::Pin<Box<crate::auth::AuthBaton>>>,
     _phantom: PhantomData<*mut ()>,

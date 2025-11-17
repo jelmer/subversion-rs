@@ -4,7 +4,7 @@ use subversion_sys::svn_string_t;
 /// Borrowed view of an SVN string tied to pool lifetime
 pub struct BStr<'pool> {
     ptr: *const svn_string_t,
-    _pool: PhantomData<&'pool apr::Pool>,
+    _pool: PhantomData<&'pool apr::Pool<'static>>,
 }
 
 impl<'pool> BStr<'pool> {
@@ -17,7 +17,7 @@ impl<'pool> BStr<'pool> {
     }
 
     /// Create SVN string in pool from bytes
-    pub fn from_bytes(data: &[u8], pool: &'pool apr::Pool) -> Self {
+    pub fn from_bytes(data: &[u8], pool: &'pool apr::Pool<'pool>) -> Self {
         let ptr = unsafe {
             subversion_sys::svn_string_ncreate(
                 data.as_ptr() as *const i8,
@@ -29,7 +29,7 @@ impl<'pool> BStr<'pool> {
     }
 
     /// Create SVN string in pool from str
-    pub fn from_str(s: &str, pool: &'pool apr::Pool) -> Self {
+    pub fn from_str(s: &str, pool: &'pool apr::Pool<'pool>) -> Self {
         Self::from_bytes(s.as_bytes(), pool)
     }
 

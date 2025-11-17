@@ -194,7 +194,7 @@ impl From<subversion_sys::svn_wc_schedule_t> for Schedule {
 /// Working copy context with RAII cleanup
 pub struct Context {
     ptr: *mut svn_wc_context_t,
-    pool: apr::Pool,
+    pool: apr::Pool<'static>,
     _phantom: PhantomData<*mut ()>, // !Send + !Sync
 }
 
@@ -206,7 +206,7 @@ impl Drop for Context {
 
 impl Context {
     /// Get a reference to the underlying pool
-    pub fn pool(&self) -> &apr::Pool {
+    pub fn pool(&self) -> &apr::Pool<'_> {
         &self.pool
     }
 
@@ -270,6 +270,7 @@ impl Context {
 
     /// Checks the working copy format version.
     pub fn check_wc(&mut self, path: &str) -> Result<i32, crate::Error> {
+        let scratch_pool = apr::pool::Pool::new();
         let path = std::ffi::CString::new(path).unwrap();
         let mut wc_format = 0;
         let err = unsafe {
@@ -277,7 +278,7 @@ impl Context {
                 &mut wc_format,
                 self.ptr,
                 path.as_ptr(),
-                apr::pool::Pool::new().as_mut_ptr(),
+                scratch_pool.as_mut_ptr(),
             )
         };
         Error::from_raw(err)?;
@@ -286,6 +287,7 @@ impl Context {
 
     /// Checks if a file's text content has been modified.
     pub fn text_modified(&mut self, path: &str) -> Result<bool, crate::Error> {
+        let scratch_pool = apr::pool::Pool::new();
         let path = std::ffi::CString::new(path).unwrap();
         let mut modified = 0;
         let err = unsafe {
@@ -294,7 +296,7 @@ impl Context {
                 self.ptr,
                 path.as_ptr(),
                 0,
-                apr::pool::Pool::new().as_mut_ptr(),
+                scratch_pool.as_mut_ptr(),
             )
         };
         Error::from_raw(err)?;
@@ -303,6 +305,7 @@ impl Context {
 
     /// Checks if a file's properties have been modified.
     pub fn props_modified(&mut self, path: &str) -> Result<bool, crate::Error> {
+        let scratch_pool = apr::pool::Pool::new();
         let path = std::ffi::CString::new(path).unwrap();
         let mut modified = 0;
         let err = unsafe {
@@ -310,7 +313,7 @@ impl Context {
                 &mut modified,
                 self.ptr,
                 path.as_ptr(),
-                apr::pool::Pool::new().as_mut_ptr(),
+                scratch_pool.as_mut_ptr(),
             )
         };
         Error::from_raw(err)?;
@@ -319,6 +322,7 @@ impl Context {
 
     /// Checks if a path has conflicts (text, property, tree).
     pub fn conflicted(&mut self, path: &str) -> Result<(bool, bool, bool), crate::Error> {
+        let scratch_pool = apr::pool::Pool::new();
         let path = std::ffi::CString::new(path).unwrap();
         let mut text_conflicted = 0;
         let mut prop_conflicted = 0;
@@ -330,7 +334,7 @@ impl Context {
                 &mut tree_conflicted,
                 self.ptr,
                 path.as_ptr(),
-                apr::pool::Pool::new().as_mut_ptr(),
+                scratch_pool.as_mut_ptr(),
             )
         };
         Error::from_raw(err)?;
@@ -351,6 +355,7 @@ impl Context {
         revision: crate::Revnum,
         depth: crate::Depth,
     ) -> Result<(), crate::Error> {
+        let scratch_pool = apr::pool::Pool::new();
         let local_abspath = std::ffi::CString::new(local_abspath).unwrap();
         let url = std::ffi::CString::new(url).unwrap();
         let repos_root_url = std::ffi::CString::new(repos_root_url).unwrap();
@@ -364,7 +369,7 @@ impl Context {
                 repos_uuid.as_ptr(),
                 revision.0,
                 depth.into(),
-                apr::pool::Pool::new().as_mut_ptr(),
+                scratch_pool.as_mut_ptr(),
             )
         };
         Error::from_raw(err)?;
@@ -401,10 +406,10 @@ impl Context {
 
 /// Sets the name of the administrative directory (typically ".svn").
 pub fn set_adm_dir(name: &str) -> Result<(), crate::Error> {
+    let scratch_pool = apr::pool::Pool::new();
     let name = std::ffi::CString::new(name).unwrap();
-    let err = unsafe {
-        subversion_sys::svn_wc_set_adm_dir(name.as_ptr(), apr::pool::Pool::new().as_mut_ptr())
-    };
+    let err =
+        unsafe { subversion_sys::svn_wc_set_adm_dir(name.as_ptr(), scratch_pool.as_mut_ptr()) };
     Error::from_raw(err)?;
     Ok(())
 }
@@ -624,7 +629,7 @@ pub fn get_update_editor4(
 pub struct UpdateEditor {
     editor: *const subversion_sys::svn_delta_editor_t,
     edit_baton: *mut std::ffi::c_void,
-    _pool: apr::Pool,
+    _pool: apr::Pool<'static>,
     target_revision: crate::Revnum,
 }
 
@@ -1668,7 +1673,7 @@ extern "C" fn wrap_notify_func(
 /// Represents a queue of committed items
 pub struct CommittedQueue {
     ptr: *mut subversion_sys::svn_wc_committed_queue_t,
-    _pool: apr::Pool,
+    _pool: apr::Pool<'static>,
 }
 
 impl Default for CommittedQueue {

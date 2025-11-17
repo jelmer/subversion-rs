@@ -700,7 +700,10 @@ impl<'a> FsDirentHash<'a> {
     }
 
     /// Convert the dirents to a HashMap<String, FsDirEntry>
-    pub fn to_hashmap(&self, pool: apr::SharedPool) -> HashMap<String, crate::fs::FsDirEntry> {
+    pub fn to_hashmap(
+        &self,
+        pool: apr::SharedPool<'static>,
+    ) -> HashMap<String, crate::fs::FsDirEntry> {
         let mut result = HashMap::new();
         for (k, v) in self.inner.iter() {
             let name = String::from_utf8_lossy(k).into_owned();

@@ -183,12 +183,15 @@ impl FsPathChange {
 /// Represents a directory entry in the filesystem
 pub struct FsDirEntry {
     ptr: *const subversion_sys::svn_fs_dirent_t,
-    _pool: apr::SharedPool,
+    _pool: apr::SharedPool<'static>,
 }
 
 impl FsDirEntry {
     /// Creates an FsDirEntry from a raw pointer with a shared pool.
-    pub fn from_raw(ptr: *mut subversion_sys::svn_fs_dirent_t, pool: apr::SharedPool) -> Self {
+    pub fn from_raw(
+        ptr: *mut subversion_sys::svn_fs_dirent_t,
+        pool: apr::SharedPool<'static>,
+    ) -> Self {
         Self { ptr, _pool: pool }
     }
 
@@ -227,22 +230,22 @@ impl FsDirEntry {
 }
 
 /// Filesystem handle with RAII cleanup
-pub struct Fs {
+pub struct Fs<'pool> {
     fs_ptr: *mut subversion_sys::svn_fs_t,
-    pool: apr::Pool, // Keep pool alive for fs lifetime
+    pool: apr::Pool<'pool>, // Keep pool alive for fs lifetime
 }
 
-unsafe impl Send for Fs {}
+unsafe impl Send for Fs<'_> {}
 
-impl Drop for Fs {
+impl Drop for Fs<'_> {
     fn drop(&mut self) {
         // Pool drop will clean up fs
     }
 }
 
-impl Fs {
+impl<'pool> Fs<'pool> {
     /// Get a reference to the underlying pool
-    pub fn pool(&self) -> &apr::Pool {
+    pub fn pool(&self) -> &apr::Pool<'_> {
         &self.pool
     }
 
@@ -258,13 +261,13 @@ impl Fs {
     /// Create Fs from existing pointer with shared pool (for repos integration)
     pub(crate) unsafe fn from_ptr_and_pool(
         fs_ptr: *mut subversion_sys::svn_fs_t,
-        pool: apr::Pool,
+        pool: apr::Pool<'pool>,
     ) -> Self {
         Self { fs_ptr, pool }
     }
 
     /// Creates a new filesystem at the specified path.
-    pub fn create(path: &std::path::Path) -> Result<Fs, Error> {
+    pub fn create(path: &std::path::Path) -> Result<Fs<'static>, Error> {
         // Ensure SVN libraries are initialized
         crate::init::initialize()?;
 
@@ -293,7 +296,7 @@ impl Fs {
     }
 
     /// Opens an existing filesystem at the specified path.
-    pub fn open(path: &std::path::Path) -> Result<Fs, Error> {
+    pub fn open(path: &std::path::Path) -> Result<Fs<'static>, Error> {
         // Ensure SVN libraries are initialized
         crate::init::initialize()?;
         let pool = apr::Pool::new();
@@ -413,12 +416,13 @@ impl Fs {
 
     /// Sets the UUID of the filesystem.
     pub fn set_uuid(&mut self, uuid: &str) -> Result<(), Error> {
+        let scratch_pool = apr::pool::Pool::new();
         unsafe {
             let uuid = std::ffi::CString::new(uuid).unwrap();
             let err = subversion_sys::svn_fs_set_uuid(
                 self.fs_ptr,
                 uuid.as_ptr(),
-                apr::pool::Pool::new().as_mut_ptr(),
+                scratch_pool.as_mut_ptr(),
             );
             svn_result(err)?;
             Ok(())
@@ -682,10 +686,10 @@ pub fn fs_type(path: &std::path::Path) -> Result<String, Error> {
 
 /// Deletes a filesystem at the given path.
 pub fn delete_fs(path: &std::path::Path) -> Result<(), Error> {
+    let scratch_pool = apr::pool::Pool::new();
     let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     unsafe {
-        let err =
-            subversion_sys::svn_fs_delete_fs(path.as_ptr(), apr::pool::Pool::new().as_mut_ptr());
+        let err = subversion_sys::svn_fs_delete_fs(path.as_ptr(), scratch_pool.as_mut_ptr());
         svn_result(err)?;
         Ok(())
     }
@@ -731,9 +735,9 @@ pub fn pack(
     let err = unsafe {
         subversion_sys::svn_fs_pack(
             path_cstr.as_ptr(),
-            notify_baton.map_or(None, |_| Some(notify_wrapper as _)),
+            notify_baton.map(|_| notify_wrapper as _),
             notify_baton.unwrap_or(std::ptr::null_mut()),
-            cancel_baton.map_or(None, |_| Some(cancel_wrapper as _)),
+            cancel_baton.map(|_| cancel_wrapper as _),
             cancel_baton.unwrap_or(std::ptr::null_mut()),
             pool.as_mut_ptr(),
         )
@@ -800,9 +804,9 @@ pub fn verify(
             std::ptr::null_mut(), // config
             start_rev,
             end_rev,
-            notify_baton.map_or(None, |_| Some(notify_wrapper as _)),
+            notify_baton.map(|_| notify_wrapper as _),
             notify_baton.unwrap_or(std::ptr::null_mut()),
-            cancel_baton.map_or(None, |_| Some(cancel_wrapper as _)),
+            cancel_baton.map(|_| cancel_wrapper as _),
             cancel_baton.unwrap_or(std::ptr::null_mut()),
             pool.as_mut_ptr(),
         )
@@ -872,9 +876,9 @@ pub fn hotcopy(
             dst_cstr.as_ptr(),
             clean as i32,
             incremental as i32,
-            notify_baton.map_or(None, |_| Some(notify_wrapper as _)),
+            notify_baton.map(|_| notify_wrapper as _),
             notify_baton.unwrap_or(std::ptr::null_mut()),
-            cancel_baton.map_or(None, |_| Some(cancel_wrapper as _)),
+            cancel_baton.map(|_| cancel_wrapper as _),
             cancel_baton.unwrap_or(std::ptr::null_mut()),
             pool.as_mut_ptr(),
         )
@@ -919,7 +923,7 @@ pub fn recover(
     let err = unsafe {
         subversion_sys::svn_fs_recover(
             path_cstr.as_ptr(),
-            cancel_baton.map_or(None, |_| Some(cancel_wrapper as _)),
+            cancel_baton.map(|_| cancel_wrapper as _),
             cancel_baton.unwrap_or(std::ptr::null_mut()),
             pool.as_mut_ptr(),
         )
@@ -947,7 +951,7 @@ pub struct FsInfo {
 #[allow(dead_code)]
 pub struct Root {
     ptr: *mut subversion_sys::svn_fs_root_t,
-    pool: apr::Pool, // Keep pool alive for root lifetime
+    pool: apr::Pool<'static>, // Keep pool alive for root lifetime
 }
 
 unsafe impl Send for Root {}
@@ -1283,7 +1287,7 @@ impl Root {
 /// Represents the history of a node in the filesystem
 pub struct NodeHistory {
     ptr: *mut subversion_sys::svn_fs_history_t,
-    pool: apr::Pool, // Pool used for all history allocations
+    pool: apr::Pool<'static>, // Pool used for all history allocations
 }
 
 impl NodeHistory {
@@ -1340,7 +1344,7 @@ impl Drop for NodeHistory {
 /// Represents a node ID in the filesystem
 pub struct NodeId {
     ptr: *const subversion_sys::svn_fs_id_t,
-    pool: apr::Pool, // Keep the pool alive for the lifetime of the NodeId
+    pool: apr::Pool<'static>, // Keep the pool alive for the lifetime of the NodeId
 }
 
 impl NodeId {
@@ -1376,7 +1380,7 @@ impl NodeId {
 pub struct Transaction {
     ptr: *mut subversion_sys::svn_fs_txn_t,
     #[allow(dead_code)]
-    pool: apr::Pool,
+    pool: apr::Pool<'static>,
     _phantom: std::marker::PhantomData<*mut ()>, // !Send + !Sync
 }
 
@@ -1390,7 +1394,7 @@ impl Transaction {
     /// Create Transaction from existing pointer with pool (for repos integration)
     pub(crate) unsafe fn from_ptr_and_pool(
         ptr: *mut subversion_sys::svn_fs_txn_t,
-        pool: apr::Pool,
+        pool: apr::Pool<'static>,
     ) -> Self {
         Self {
             ptr,
@@ -1553,7 +1557,7 @@ impl Transaction {
 /// Transaction root for making changes
 pub struct TxnRoot {
     ptr: *mut subversion_sys::svn_fs_root_t,
-    _pool: apr::Pool,
+    _pool: apr::Pool<'static>,
 }
 
 impl TxnRoot {
@@ -1716,7 +1720,7 @@ impl TxnRoot {
             let bytes_written = subversion_sys::svn_stream_write(
                 stream,
                 contents.as_ptr() as *const std::ffi::c_char,
-                &mut (contents.len() as usize),
+                &mut { contents.len() },
             );
             Error::from_raw(bytes_written)?;
 
@@ -1773,7 +1777,7 @@ impl TxnRoot {
     }
 }
 
-impl Fs {
+impl<'pool> Fs<'pool> {
     /// Begin a new transaction
     pub fn begin_txn(&self, base_rev: Revnum, flags: u32) -> Result<Transaction, Error> {
         let pool = apr::Pool::new();

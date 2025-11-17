@@ -778,7 +778,7 @@ impl StatusOptions {
 /// Client context for performing Subversion operations.
 pub struct Context {
     ptr: *mut svn_client_ctx_t,
-    pool: apr::Pool,
+    pool: apr::Pool<'static>,
     _phantom: std::marker::PhantomData<*mut ()>,
     conflict_resolver: Option<Box<crate::conflict::ConflictResolverBaton>>,
     cancel_handler: Option<Box<dyn FnMut() -> bool + Send>>,
@@ -916,7 +916,7 @@ impl Context {
     }
 
     /// Get a reference to the underlying pool
-    pub fn pool(&self) -> &apr::Pool {
+    pub fn pool(&self) -> &apr::Pool<'_> {
         &self.pool
     }
 
@@ -1165,7 +1165,7 @@ impl Context {
                     .collect::<Vec<_>>()
             });
             let changelists = changelists.as_ref().map(|cl| {
-                let mut array = apr::tables::TypedArray::<*const i8>::new(&pool, 10);
+                let mut array = apr::tables::TypedArray::<*const i8>::new(pool, 10);
                 for item in cl.iter() {
                     array.push(item.as_ptr() as *const i8);
                 }
@@ -1883,7 +1883,7 @@ impl Context {
                     .collect::<Vec<_>>()
             });
             let changelists = changelists.as_ref().map(|cl| {
-                let mut array = apr::tables::TypedArray::<*const i8>::new(&pool, 10);
+                let mut array = apr::tables::TypedArray::<*const i8>::new(pool, 10);
                 for item in cl.iter() {
                     array.push(item.as_ptr());
                 }
@@ -3560,9 +3560,9 @@ impl Context {
         let err = unsafe {
             subversion_sys::svn_client_merge5(
                 source1.as_ptr(),
-                &revision1.clone().into(),
+                &(*revision1).into(),
                 source2.as_ptr(),
-                &revision2.clone().into(),
+                &(*revision2).into(),
                 target_wcpath.as_ptr(),
                 depth.into(),
                 ignore_ancestry as i32,
@@ -4259,7 +4259,7 @@ impl Status {
 /// Represents a conflict in the working copy.
 pub struct Conflict {
     ptr: *mut subversion_sys::svn_client_conflict_t,
-    pool: apr::Pool,
+    pool: apr::Pool<'static>,
     _phantom: std::marker::PhantomData<*mut ()>, // !Send + !Sync
 }
 
@@ -4271,7 +4271,7 @@ impl Drop for Conflict {
 
 impl Conflict {
     /// Get a reference to the underlying pool
-    pub fn pool(&self) -> &apr::Pool {
+    pub fn pool(&self) -> &apr::Pool<'_> {
         &self.pool
     }
 
@@ -4286,7 +4286,7 @@ impl Conflict {
     }
     pub(crate) unsafe fn from_ptr_and_pool(
         ptr: *mut subversion_sys::svn_client_conflict_t,
-        pool: apr::Pool,
+        pool: apr::Pool<'static>,
     ) -> Self {
         Self {
             ptr,
@@ -4321,12 +4321,13 @@ impl Conflict {
         choice: crate::TextConflictChoice,
         ctx: &mut Context,
     ) -> Result<(), Error> {
+        let scratch_pool = apr::pool::Pool::new();
         unsafe {
             let err = subversion_sys::svn_client_conflict_text_resolve_by_id(
                 self.ptr,
                 choice.into(),
                 ctx.as_mut_ptr(),
-                apr::pool::Pool::new().as_mut_ptr(),
+                scratch_pool.as_mut_ptr(),
             );
             svn_result(err)
         }
@@ -4339,6 +4340,7 @@ impl Conflict {
         choice: crate::TextConflictChoice,
         ctx: &mut Context,
     ) -> Result<(), Error> {
+        let scratch_pool = apr::pool::Pool::new();
         let propname_c = std::ffi::CString::new(propname)?;
         unsafe {
             let err = subversion_sys::svn_client_conflict_prop_resolve_by_id(
@@ -4346,7 +4348,7 @@ impl Conflict {
                 propname_c.as_ptr(),
                 choice.into(),
                 ctx.as_mut_ptr(),
-                apr::pool::Pool::new().as_mut_ptr(),
+                scratch_pool.as_mut_ptr(),
             );
             svn_result(err)
         }
@@ -4358,12 +4360,13 @@ impl Conflict {
         choice: crate::TreeConflictChoice,
         ctx: &mut Context,
     ) -> Result<(), Error> {
+        let scratch_pool = apr::pool::Pool::new();
         unsafe {
             let err = subversion_sys::svn_client_conflict_tree_resolve_by_id(
                 self.ptr,
                 choice.into(),
                 ctx.as_mut_ptr(),
-                apr::pool::Pool::new().as_mut_ptr(),
+                scratch_pool.as_mut_ptr(),
             );
             svn_result(err)
         }

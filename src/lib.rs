@@ -645,7 +645,7 @@ impl pyo3::FromPyObject<'_> for Depth {
 /// Information about a committed revision.
 pub struct CommitInfo<'pool> {
     ptr: *const subversion_sys::svn_commit_info_t,
-    _pool: std::marker::PhantomData<&'pool apr::Pool>,
+    _pool: std::marker::PhantomData<&'pool apr::Pool<'static>>,
 }
 unsafe impl Send for CommitInfo<'_> {}
 
@@ -698,7 +698,7 @@ impl<'pool> CommitInfo<'pool> {
     }
 
     /// Duplicates the commit info in the given pool.
-    pub fn dup(&self, pool: &'pool apr::Pool) -> Result<CommitInfo<'pool>, Error> {
+    pub fn dup(&self, pool: &'pool apr::Pool<'pool>) -> Result<CommitInfo<'pool>, Error> {
         unsafe {
             let duplicated = subversion_sys::svn_commit_info_dup(self.ptr, pool.as_mut_ptr());
             Ok(CommitInfo::from_raw(duplicated))
@@ -743,7 +743,7 @@ impl RevisionRange {
 /// A log entry from the repository history.
 pub struct LogEntry<'pool> {
     ptr: *const subversion_sys::svn_log_entry_t,
-    _pool: std::marker::PhantomData<&'pool apr::Pool>,
+    _pool: std::marker::PhantomData<&'pool apr::Pool<'static>>,
 }
 unsafe impl Send for LogEntry<'_> {}
 
@@ -757,7 +757,7 @@ impl<'pool> LogEntry<'pool> {
     }
 
     /// Duplicates the log entry in the given pool.
-    pub fn dup(&self, pool: &'pool apr::Pool) -> Result<LogEntry<'pool>, Error> {
+    pub fn dup(&self, pool: &'pool apr::Pool<'pool>) -> Result<LogEntry<'pool>, Error> {
         unsafe {
             let duplicated = subversion_sys::svn_log_entry_dup(self.ptr, pool.as_mut_ptr());
             Ok(LogEntry::from_raw(duplicated))
@@ -869,7 +869,7 @@ impl From<NativeEOL> for Option<&str> {
 /// An inherited property item.
 pub struct InheritedItem<'pool> {
     ptr: *const subversion_sys::svn_prop_inherited_item_t,
-    _pool: std::marker::PhantomData<&'pool apr::Pool>,
+    _pool: std::marker::PhantomData<&'pool apr::Pool<'static>>,
 }
 
 impl<'pool> InheritedItem<'pool> {
@@ -1073,7 +1073,7 @@ impl From<StatusKind> for subversion_sys::svn_wc_status_kind {
 /// A lock on a path in the repository.
 pub struct Lock<'pool> {
     ptr: *const subversion_sys::svn_lock_t,
-    _pool: std::marker::PhantomData<&'pool apr::Pool>,
+    _pool: std::marker::PhantomData<&'pool apr::Pool<'static>>,
 }
 unsafe impl Send for Lock<'_> {}
 
@@ -1095,7 +1095,7 @@ impl<'pool> Lock<'pool> {
     }
 
     /// Duplicates the lock in the given pool.
-    pub fn dup(&self, pool: &'pool apr::Pool) -> Result<Lock<'pool>, Error> {
+    pub fn dup(&self, pool: &'pool apr::Pool<'pool>) -> Result<Lock<'pool>, Error> {
         unsafe {
             let duplicated = subversion_sys::svn_lock_dup(self.ptr, pool.as_mut_ptr());
             Ok(Lock::from_raw(duplicated))
@@ -1142,7 +1142,7 @@ impl<'pool> Lock<'pool> {
     }
 
     /// Creates a new lock.
-    pub fn create(pool: &'pool apr::Pool) -> Result<Lock<'pool>, Error> {
+    pub fn create(pool: &'pool apr::Pool<'pool>) -> Result<Lock<'pool>, Error> {
         unsafe {
             let lock_ptr = subversion_sys::svn_lock_create(pool.as_mut_ptr());
             Ok(Lock::from_raw(lock_ptr))
@@ -1189,7 +1189,7 @@ impl From<ChecksumKind> for subversion_sys::svn_checksum_kind_t {
 /// A segment of a location in the repository history.
 pub struct LocationSegment<'pool> {
     ptr: *const subversion_sys::svn_location_segment_t,
-    _pool: std::marker::PhantomData<&'pool apr::Pool>,
+    _pool: std::marker::PhantomData<&'pool apr::Pool<'static>>,
 }
 unsafe impl Send for LocationSegment<'_> {}
 
@@ -1203,7 +1203,7 @@ impl<'pool> LocationSegment<'pool> {
     }
 
     /// Duplicates the location segment in the given pool.
-    pub fn dup(&self, pool: &'pool apr::Pool) -> Result<LocationSegment<'pool>, Error> {
+    pub fn dup(&self, pool: &'pool apr::Pool<'pool>) -> Result<LocationSegment<'pool>, Error> {
         unsafe {
             let duplicated = subversion_sys::svn_location_segment_dup(self.ptr, pool.as_mut_ptr());
             Ok(LocationSegment::from_raw(duplicated))
@@ -1485,7 +1485,7 @@ impl From<ConflictChoice> for subversion_sys::svn_wc_conflict_choice_t {
 /// A checksum value.
 pub struct Checksum<'pool> {
     ptr: *const subversion_sys::svn_checksum_t,
-    _pool: std::marker::PhantomData<&'pool apr::Pool>,
+    _pool: std::marker::PhantomData<&'pool apr::Pool<'static>>,
 }
 
 impl<'pool> Checksum<'pool> {
@@ -1521,7 +1521,11 @@ impl<'pool> Checksum<'pool> {
     }
 
     /// Parses a checksum from a hexadecimal string.
-    pub fn parse_hex(kind: ChecksumKind, hex: &str, pool: &'pool apr::Pool) -> Result<Self, Error> {
+    pub fn parse_hex(
+        kind: ChecksumKind,
+        hex: &str,
+        pool: &'pool apr::Pool<'pool>,
+    ) -> Result<Self, Error> {
         let mut checksum = std::ptr::null_mut();
         let kind = kind.into();
         let hex = std::ffi::CString::new(hex).unwrap();
@@ -1537,7 +1541,7 @@ impl<'pool> Checksum<'pool> {
     }
 
     /// Creates an empty checksum of the specified kind.
-    pub fn empty(kind: ChecksumKind, pool: &'pool apr::Pool) -> Result<Self, Error> {
+    pub fn empty(kind: ChecksumKind, pool: &'pool apr::Pool<'pool>) -> Result<Self, Error> {
         let kind = kind.into();
         unsafe {
             let checksum = subversion_sys::svn_checksum_empty_checksum(kind, pool.as_mut_ptr());
@@ -1546,7 +1550,11 @@ impl<'pool> Checksum<'pool> {
     }
 
     /// Create a new checksum from data
-    pub fn create(kind: ChecksumKind, data: &[u8], pool: &'pool apr::Pool) -> Result<Self, Error> {
+    pub fn create(
+        kind: ChecksumKind,
+        data: &[u8],
+        pool: &'pool apr::Pool<'pool>,
+    ) -> Result<Self, Error> {
         checksum(kind, data, pool)
     }
 
@@ -1556,7 +1564,7 @@ impl<'pool> Checksum<'pool> {
     }
 
     /// Duplicate this checksum into a new pool
-    pub fn dup(&self, pool: &'pool apr::Pool) -> Result<Checksum<'pool>, Error> {
+    pub fn dup(&self, pool: &'pool apr::Pool<'pool>) -> Result<Checksum<'pool>, Error> {
         unsafe {
             let new_checksum = subversion_sys::svn_checksum_dup(self.ptr, pool.as_mut_ptr());
             if new_checksum.is_null() {
@@ -1585,7 +1593,7 @@ impl<'pool> Checksum<'pool> {
     }
 
     /// Deserialize checksum from a string representation
-    pub fn deserialize(data: &str, pool: &'pool apr::Pool) -> Result<Self, Error> {
+    pub fn deserialize(data: &str, pool: &'pool apr::Pool<'pool>) -> Result<Self, Error> {
         let data_cstr = std::ffi::CString::new(data)?;
         let mut checksum = std::ptr::null();
         unsafe {
@@ -1646,12 +1654,12 @@ impl<'pool> Checksum<'pool> {
 /// A context for computing checksums incrementally.
 pub struct ChecksumContext<'pool> {
     ptr: *mut subversion_sys::svn_checksum_ctx_t,
-    _pool: std::marker::PhantomData<&'pool apr::Pool>,
+    _pool: std::marker::PhantomData<&'pool apr::Pool<'static>>,
 }
 
 impl<'pool> ChecksumContext<'pool> {
     /// Creates a new checksum context.
-    pub fn new(kind: ChecksumKind, pool: &'pool apr::Pool) -> Result<Self, Error> {
+    pub fn new(kind: ChecksumKind, pool: &'pool apr::Pool<'pool>) -> Result<Self, Error> {
         let kind = kind.into();
         unsafe {
             let cc = subversion_sys::svn_checksum_ctx_create(kind, pool.as_mut_ptr());
@@ -1683,7 +1691,7 @@ impl<'pool> ChecksumContext<'pool> {
     }
 
     /// Finishes the checksum computation and returns the result.
-    pub fn finish(&self, result_pool: &'pool apr::Pool) -> Result<Checksum<'pool>, Error> {
+    pub fn finish(&self, result_pool: &'pool apr::Pool<'pool>) -> Result<Checksum<'pool>, Error> {
         let mut checksum = std::ptr::null_mut();
         unsafe {
             Error::from_raw(subversion_sys::svn_checksum_final(
@@ -1700,7 +1708,7 @@ impl<'pool> ChecksumContext<'pool> {
 pub fn checksum<'pool>(
     kind: ChecksumKind,
     data: &[u8],
-    pool: &'pool apr::Pool,
+    pool: &'pool apr::Pool<'pool>,
 ) -> Result<Checksum<'pool>, Error> {
     let mut checksum = std::ptr::null_mut();
     let kind = kind.into();

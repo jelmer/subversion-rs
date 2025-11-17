@@ -24,7 +24,7 @@ pub enum AuthSetting<'a> {
 /// Authentication baton for managing authentication providers and credentials.
 pub struct AuthBaton {
     ptr: *mut subversion_sys::svn_auth_baton_t,
-    pool: apr::Pool,
+    pool: apr::Pool<'static>,
     // Store parameter names to keep them alive for the lifetime of the baton
     parameter_names: std::collections::HashMap<String, std::ffi::CString>,
     // Store providers to keep them alive for the lifetime of the baton
@@ -66,7 +66,7 @@ pub trait Credentials {
 /// Simple username/password credentials.
 pub struct SimpleCredentials<'pool> {
     ptr: *mut subversion_sys::svn_auth_cred_simple_t,
-    _pool: std::marker::PhantomData<&'pool apr::Pool>,
+    _pool: std::marker::PhantomData<&'pool apr::Pool<'static>>,
 }
 
 impl<'pool> SimpleCredentials<'pool> {
@@ -101,7 +101,12 @@ impl<'pool> SimpleCredentials<'pool> {
     }
 
     /// Creates new simple credentials.
-    pub fn new(username: String, password: String, may_save: bool, pool: &'pool apr::Pool) -> Self {
+    pub fn new(
+        username: String,
+        password: String,
+        may_save: bool,
+        pool: &'pool apr::Pool<'pool>,
+    ) -> Self {
         let cred: *mut subversion_sys::svn_auth_cred_simple_t = pool.calloc();
         unsafe {
             (*cred).username = apr::strings::pstrdup_raw(&username, pool).unwrap() as *mut _;
@@ -143,7 +148,7 @@ impl<'pool> Credentials for SimpleCredentials<'pool> {
 /// Username-only credentials.
 pub struct UsernameCredentials<'pool> {
     ptr: *mut subversion_sys::svn_auth_cred_username_t,
-    _pool: std::marker::PhantomData<&'pool apr::Pool>,
+    _pool: std::marker::PhantomData<&'pool apr::Pool<'static>>,
 }
 
 impl<'pool> UsernameCredentials<'pool> {
@@ -162,7 +167,7 @@ impl<'pool> UsernameCredentials<'pool> {
     }
 
     /// Creates new username credentials.
-    pub fn new(username: String, may_save: bool, pool: &'pool apr::Pool) -> Self {
+    pub fn new(username: String, may_save: bool, pool: &'pool apr::Pool<'pool>) -> Self {
         let cred: *mut subversion_sys::svn_auth_cred_username_t = pool.calloc();
         unsafe {
             (*cred).username = apr::strings::pstrdup_raw(&username, pool).unwrap() as *mut _;
@@ -206,7 +211,7 @@ impl<'pool> Credentials for UsernameCredentials<'pool> {
 /// SSL server trust credentials.
 pub struct SslServerTrustCredentials<'pool> {
     ptr: *mut subversion_sys::svn_auth_cred_ssl_server_trust_t,
-    _pool: std::marker::PhantomData<&'pool apr::Pool>,
+    _pool: std::marker::PhantomData<&'pool apr::Pool<'static>>,
 }
 
 impl<'pool> SslServerTrustCredentials<'pool> {
@@ -221,7 +226,7 @@ impl<'pool> SslServerTrustCredentials<'pool> {
     }
 
     /// Creates new SSL server trust credentials.
-    pub fn new(may_save: bool, accepted_failures: u32, pool: &'pool apr::Pool) -> Self {
+    pub fn new(may_save: bool, accepted_failures: u32, pool: &'pool apr::Pool<'pool>) -> Self {
         let cred: *mut subversion_sys::svn_auth_cred_ssl_server_trust_t = pool.calloc();
         unsafe {
             (*cred).may_save = if may_save { 1 } else { 0 };
@@ -468,15 +473,15 @@ impl AuthBaton {
 /// Iterator state for credentials.
 pub struct IterState<C: Credentials> {
     ptr: *mut subversion_sys::svn_auth_iterstate_t,
-    pool: apr::Pool,
+    pool: apr::Pool<'static>,
     creds: Option<C>,
-    creds_pool: Option<apr::Pool>,
+    creds_pool: Option<apr::Pool<'static>>,
     _phantom: PhantomData<*mut ()>,
 }
 
 impl<C: Credentials> IterState<C> {
     /// Get a reference to the underlying pool
-    pub fn pool(&self) -> &apr::Pool {
+    pub fn pool(&self) -> &apr::Pool<'_> {
         &self.pool
     }
 
@@ -570,7 +575,7 @@ impl AsAuthProvider for &AuthProvider {
 /// Authentication provider.
 pub struct AuthProvider {
     ptr: *const subversion_sys::svn_auth_provider_object_t,
-    pool: apr::SharedPool,
+    pool: apr::SharedPool<'static>,
     _phantom: PhantomData<*mut ()>,
 }
 unsafe impl Send for AuthProvider {}
@@ -642,7 +647,7 @@ pub fn get_ssl_server_trust_file_provider() -> AuthProvider {
 /// SSL server certificate information.
 pub struct SslServerCertInfo {
     ptr: *const subversion_sys::svn_auth_ssl_server_cert_info_t,
-    pool: apr::PoolHandle,
+    pool: apr::PoolHandle<'static>,
     _phantom: PhantomData<*mut ()>,
 }
 unsafe impl Send for SslServerCertInfo {}
@@ -665,14 +670,14 @@ impl SslServerCertInfo {
 /// SSL server trust credentials.
 pub struct SslServerTrust {
     ptr: *mut subversion_sys::svn_auth_cred_ssl_server_trust_t,
-    pool: apr::Pool,
+    pool: apr::Pool<'static>,
     _phantom: PhantomData<*mut ()>,
 }
 unsafe impl Send for SslServerTrust {}
 
 impl SslServerTrust {
     /// Get a reference to the underlying pool
-    pub fn pool(&self) -> &apr::Pool {
+    pub fn pool(&self) -> &apr::Pool<'_> {
         &self.pool
     }
 
@@ -731,7 +736,8 @@ pub fn get_ssl_server_trust_prompt_provider(
             pool: unsafe { apr::PoolHandle::from_borrowed_raw(pool) },
             _phantom: PhantomData,
         };
-        let result = f(
+        
+        f(
             realm,
             failures.try_into().unwrap(),
             &cert_info,
@@ -741,8 +747,7 @@ pub fn get_ssl_server_trust_prompt_provider(
             unsafe { *cred = creds.ptr };
             std::ptr::null_mut()
         })
-        .unwrap_or_else(|e| unsafe { e.into_raw() });
-        result
+        .unwrap_or_else(|e| unsafe { e.into_raw() })
     }
 
     let pool = apr::SharedPool::new();
@@ -781,14 +786,14 @@ pub fn get_ssl_client_cert_file_provider() -> AuthProvider {
 /// SSL client certificate credentials.
 pub struct SslClientCertCredentials {
     ptr: *mut subversion_sys::svn_auth_cred_ssl_client_cert_t,
-    pool: apr::Pool,
+    pool: apr::Pool<'static>,
     _phantom: PhantomData<*mut ()>,
 }
 unsafe impl Send for SslClientCertCredentials {}
 
 impl SslClientCertCredentials {
     /// Get a reference to the underlying pool
-    pub fn pool(&self) -> &apr::Pool {
+    pub fn pool(&self) -> &apr::Pool<'_> {
         &self.pool
     }
 

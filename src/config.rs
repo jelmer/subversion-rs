@@ -131,13 +131,13 @@ pub enum ConfigOption<'a> {
 /// Configuration container wrapping svn_config_t
 pub struct Config {
     ptr: *mut subversion_sys::svn_config_t,
-    _pool: apr::Pool,
+    _pool: apr::Pool<'static>,
 }
 
 /// Configuration hash wrapping apr_hash_t (as expected by repository access APIs)
 pub struct ConfigHash {
     ptr: *mut apr_sys::apr_hash_t,
-    _pool: apr::Pool,
+    _pool: apr::Pool<'static>,
 }
 
 /// Internal helper for accessing hash with C string keys
@@ -170,7 +170,7 @@ impl Config {
     /// Create from raw pointer and pool
     pub(crate) unsafe fn from_ptr_and_pool(
         ptr: *mut subversion_sys::svn_config_t,
-        pool: apr::Pool,
+        pool: apr::Pool<'static>,
     ) -> Self {
         Self { ptr, _pool: pool }
     }
@@ -516,7 +516,7 @@ impl ConfigHash {
     /// Create from raw pointer and pool
     pub(crate) unsafe fn from_ptr_and_pool(
         ptr: *mut apr_sys::apr_hash_t,
-        pool: apr::Pool,
+        pool: apr::Pool<'static>,
     ) -> Self {
         Self { ptr, _pool: pool }
     }
