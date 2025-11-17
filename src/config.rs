@@ -136,17 +136,19 @@ pub struct Config {
 
 /// Configuration hash wrapping apr_hash_t (as expected by repository access APIs)
 pub struct ConfigHash {
-    ptr: *mut subversion_sys::apr_hash_t,
+    ptr: *mut apr_sys::apr_hash_t,
     _pool: apr::Pool,
 }
 
 /// Internal helper for accessing hash with C string keys
+#[allow(dead_code)]
 struct StringKeyHash {
-    ptr: *mut subversion_sys::apr_hash_t,
+    ptr: *mut apr_sys::apr_hash_t,
 }
 
+#[allow(dead_code)]
 impl StringKeyHash {
-    unsafe fn from_ptr(ptr: *mut subversion_sys::apr_hash_t) -> Self {
+    unsafe fn from_ptr(ptr: *mut apr_sys::apr_hash_t) -> Self {
         Self { ptr }
     }
 
@@ -157,7 +159,7 @@ impl StringKeyHash {
             let value = apr_sys::apr_hash_get(
                 self.ptr,
                 c_key.as_ptr() as *const c_void,
-                apr_sys::APR_HASH_KEY_STRING as subversion_sys::apr_ssize_t,
+                apr_sys::APR_HASH_KEY_STRING as apr_sys::apr_ssize_t,
             );
             Ok(value)
         }
@@ -513,18 +515,18 @@ impl Config {
 impl ConfigHash {
     /// Create from raw pointer and pool
     pub(crate) unsafe fn from_ptr_and_pool(
-        ptr: *mut subversion_sys::apr_hash_t,
+        ptr: *mut apr_sys::apr_hash_t,
         pool: apr::Pool,
     ) -> Self {
         Self { ptr, _pool: pool }
     }
 
     #[allow(dead_code)]
-    pub(crate) fn as_ptr(&self) -> *const subversion_sys::apr_hash_t {
+    pub(crate) fn as_ptr(&self) -> *const apr_sys::apr_hash_t {
         self.ptr
     }
 
-    pub(crate) fn as_mut_ptr(&mut self) -> *mut subversion_sys::apr_hash_t {
+    pub(crate) fn as_mut_ptr(&mut self) -> *mut apr_sys::apr_hash_t {
         self.ptr
     }
 }
@@ -596,7 +598,9 @@ pub fn get_config_hash(config_dir: Option<&Path>) -> Result<ConfigHash, Error> {
 
 /// Read configuration from the default locations
 pub fn get_config(config_dir: Option<&Path>) -> Result<(Config, Config), Error> {
-    let pool = apr::Pool::new();
+    // Create separate pools for each config object that will be returned
+    let config_pool = apr::Pool::new();
+    let servers_pool = apr::Pool::new();
 
     let config_dir_cstr = if let Some(dir) = config_dir {
         Some(CString::new(dir.to_str().ok_or_else(|| {
@@ -612,22 +616,43 @@ pub fn get_config(config_dir: Option<&Path>) -> Result<(Config, Config), Error> 
         .unwrap_or(ptr::null());
 
     unsafe {
+        // Get config into the config_pool
         let mut cfg_hash = ptr::null_mut();
-        let err =
-            subversion_sys::svn_config_get_config(&mut cfg_hash, config_dir_ptr, pool.as_mut_ptr());
+        let err = subversion_sys::svn_config_get_config(
+            &mut cfg_hash,
+            config_dir_ptr,
+            config_pool.as_mut_ptr(),
+        );
         svn_result(err)?;
 
-        // Use our StringKeyHash wrapper to access the config hash
-        let hash = StringKeyHash::from_ptr(cfg_hash);
+        // Get the config and servers from the hash
+        let config_key = CString::new("config")?;
+        let servers_key = CString::new("servers")?;
 
-        let config_ptr =
-            hash.get("config").unwrap_or(ptr::null_mut()) as *mut subversion_sys::svn_config_t;
-        let servers_ptr =
-            hash.get("servers").unwrap_or(ptr::null_mut()) as *mut subversion_sys::svn_config_t;
+        let config_ptr = apr_sys::apr_hash_get(
+            cfg_hash,
+            config_key.as_ptr() as *const std::ffi::c_void,
+            apr_sys::APR_HASH_KEY_STRING as isize,
+        ) as *mut subversion_sys::svn_config_t;
+
+        // Get servers config into the servers_pool
+        let mut servers_hash = ptr::null_mut();
+        let err2 = subversion_sys::svn_config_get_config(
+            &mut servers_hash,
+            config_dir_ptr,
+            servers_pool.as_mut_ptr(),
+        );
+        svn_result(err2)?;
+
+        let servers_ptr = apr_sys::apr_hash_get(
+            servers_hash,
+            servers_key.as_ptr() as *const std::ffi::c_void,
+            apr_sys::APR_HASH_KEY_STRING as isize,
+        ) as *mut subversion_sys::svn_config_t;
 
         Ok((
-            Config::from_ptr_and_pool(config_ptr, apr::Pool::new()),
-            Config::from_ptr_and_pool(servers_ptr, apr::Pool::new()),
+            Config::from_ptr_and_pool(config_ptr, config_pool),
+            Config::from_ptr_and_pool(servers_ptr, servers_pool),
         ))
     }
 }

@@ -1,4 +1,124 @@
 use crate::{svn_result, with_tmp_pool, Error, Revnum};
+use std::ffi::{CStr, CString};
+
+/// A canonical absolute filesystem path for use with Subversion filesystem operations.
+///
+/// SVN filesystem paths must be canonical and absolute (start with '/').
+/// This type ensures paths are properly canonicalized using SVN's own canonicalization functions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FsPath {
+    path: CString,
+}
+
+impl FsPath {
+    /// Create an FsPath from an already-canonical path.
+    ///
+    /// This is a fast path that only validates the path is canonical.
+    /// Returns an error if the path is not canonical.
+    pub fn from_canonical(path: &str) -> Result<Self, Error> {
+        // Handle empty path as root
+        let path = if path.is_empty() { "/" } else { path };
+
+        // Ensure path is absolute for filesystem operations
+        if !path.starts_with('/') {
+            return Err(Error::from_str(&format!(
+                "Filesystem path must be absolute (start with '/'): {}",
+                path
+            )));
+        }
+
+        with_tmp_pool(|pool| unsafe {
+            let path_cstr = CString::new(path)?;
+
+            // Check if canonical
+            let is_canonical =
+                subversion_sys::svn_path_is_canonical(path_cstr.as_ptr(), pool.as_mut_ptr()) != 0;
+
+            if is_canonical {
+                Ok(Self { path: path_cstr })
+            } else {
+                Err(Error::from_str(&format!("Path is not canonical: {}", path)))
+            }
+        })
+    }
+
+    /// Create an FsPath by canonicalizing the input path.
+    ///
+    /// This will canonicalize the path using SVN's canonicalization rules.
+    /// Returns an error if the path cannot be made canonical.
+    pub fn canonicalize(path: &str) -> Result<Self, Error> {
+        // Handle empty path as root
+        let path = if path.is_empty() { "/" } else { path };
+
+        // Ensure path is absolute for filesystem operations
+        if !path.starts_with('/') {
+            return Err(Error::from_str(&format!(
+                "Filesystem path must be absolute (start with '/'): {}",
+                path
+            )));
+        }
+
+        with_tmp_pool(|pool| unsafe {
+            let path_cstr = CString::new(path)?;
+
+            // Check if already canonical (fast path)
+            let is_canonical =
+                subversion_sys::svn_path_is_canonical(path_cstr.as_ptr(), pool.as_mut_ptr()) != 0;
+
+            if is_canonical {
+                Ok(Self { path: path_cstr })
+            } else {
+                // Canonicalize the path
+                let canonical_ptr =
+                    subversion_sys::svn_path_canonicalize(path_cstr.as_ptr(), pool.as_mut_ptr());
+
+                if canonical_ptr.is_null() {
+                    return Err(Error::from_str(&format!(
+                        "Failed to canonicalize path: {}",
+                        path
+                    )));
+                }
+
+                let canonical_str = CStr::from_ptr(canonical_ptr).to_str()?;
+                Ok(Self {
+                    path: CString::new(canonical_str)?,
+                })
+            }
+        })
+    }
+
+    /// Get the path as a C string pointer for FFI.
+    pub fn as_ptr(&self) -> *const i8 {
+        self.path.as_ptr()
+    }
+
+    /// Get the path as a string slice.
+    pub fn as_str(&self) -> &str {
+        self.path.to_str().unwrap_or("/")
+    }
+}
+
+impl TryFrom<&str> for FsPath {
+    type Error = Error;
+
+    fn try_from(path: &str) -> Result<Self, Self::Error> {
+        FsPath::canonicalize(path)
+    }
+}
+
+impl TryFrom<String> for FsPath {
+    type Error = Error;
+
+    fn try_from(path: String) -> Result<Self, Self::Error> {
+        FsPath::canonicalize(&path)
+    }
+}
+
+impl std::fmt::Display for FsPath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
 
 /// Represents a change to a path in the filesystem
 pub struct FsPathChange {
@@ -73,6 +193,7 @@ impl FsDirEntry {
     }
 
     /// Gets the entry name.
+
     pub fn name(&self) -> &str {
         unsafe { std::ffi::CStr::from_ptr((*self.ptr).name).to_str().unwrap() }
     }
@@ -144,6 +265,9 @@ impl Fs {
 
     /// Creates a new filesystem at the specified path.
     pub fn create(path: &std::path::Path) -> Result<Fs, Error> {
+        // Ensure SVN libraries are initialized
+        crate::init::initialize()?;
+
         let pool = apr::Pool::new();
         let path_str = path
             .to_str()
@@ -170,6 +294,8 @@ impl Fs {
 
     /// Opens an existing filesystem at the specified path.
     pub fn open(path: &std::path::Path) -> Result<Fs, Error> {
+        // Ensure SVN libraries are initialized
+        crate::init::initialize()?;
         let pool = apr::Pool::new();
         let path_str = path
             .to_str()
@@ -460,7 +586,7 @@ impl Fs {
 
         extern "C" fn freeze_callback<F>(
             baton: *mut std::ffi::c_void,
-            _pool: *mut subversion_sys::apr_pool_t,
+            _pool: *mut apr_sys::apr_pool_t,
         ) -> *mut subversion_sys::svn_error_t
         where
             F: FnOnce() -> Result<(), Error>,
@@ -817,8 +943,8 @@ pub struct FsInfo {
     pub fs_type: Option<String>,
 }
 
-#[allow(dead_code)]
 /// Represents a filesystem root at a specific revision.
+#[allow(dead_code)]
 pub struct Root {
     ptr: *mut subversion_sys::svn_fs_root_t,
     pool: apr::Pool, // Keep pool alive for root lifetime
@@ -844,14 +970,14 @@ impl Root {
     }
 
     /// Check if a path is a directory
-    pub fn is_dir(&self, path: &str) -> Result<bool, Error> {
+    pub fn is_dir(&self, path: impl TryInto<FsPath, Error = Error>) -> Result<bool, Error> {
+        let fs_path = path.try_into()?;
         with_tmp_pool(|pool| unsafe {
-            let path_c = std::ffi::CString::new(path).unwrap();
             let mut is_dir = 0;
             let err = subversion_sys::svn_fs_is_dir(
                 &mut is_dir,
                 self.ptr,
-                path_c.as_ptr(),
+                fs_path.as_ptr(),
                 pool.as_mut_ptr(),
             );
             svn_result(err)?;
@@ -860,14 +986,14 @@ impl Root {
     }
 
     /// Check if a path is a file
-    pub fn is_file(&self, path: &str) -> Result<bool, Error> {
+    pub fn is_file(&self, path: impl TryInto<FsPath, Error = Error>) -> Result<bool, Error> {
+        let fs_path = path.try_into()?;
         with_tmp_pool(|pool| unsafe {
-            let path_c = std::ffi::CString::new(path).unwrap();
             let mut is_file = 0;
             let err = subversion_sys::svn_fs_is_file(
                 &mut is_file,
                 self.ptr,
-                path_c.as_ptr(),
+                fs_path.as_ptr(),
                 pool.as_mut_ptr(),
             );
             svn_result(err)?;
@@ -876,14 +1002,14 @@ impl Root {
     }
 
     /// Get the length of a file
-    pub fn file_length(&self, path: &str) -> Result<i64, Error> {
+    pub fn file_length(&self, path: impl TryInto<FsPath, Error = Error>) -> Result<i64, Error> {
+        let fs_path = path.try_into()?;
         with_tmp_pool(|pool| unsafe {
-            let path_c = std::ffi::CString::new(path).unwrap();
             let mut length = 0;
             let err = subversion_sys::svn_fs_file_length(
                 &mut length,
                 self.ptr,
-                path_c.as_ptr(),
+                fs_path.as_ptr(),
                 pool.as_mut_ptr(),
             );
             svn_result(err)?;
@@ -892,15 +1018,18 @@ impl Root {
     }
 
     /// Get the contents of a file as a stream
-    pub fn file_contents(&self, path: &str) -> Result<crate::io::Stream, Error> {
+    pub fn file_contents(
+        &self,
+        path: impl TryInto<FsPath, Error = Error>,
+    ) -> Result<crate::io::Stream, Error> {
+        let fs_path = path.try_into()?;
         let pool = apr::Pool::new();
         unsafe {
-            let path_c = std::ffi::CString::new(path).unwrap();
             let mut stream = std::ptr::null_mut();
             let err = subversion_sys::svn_fs_file_contents(
                 &mut stream,
                 self.ptr,
-                path_c.as_ptr(),
+                fs_path.as_ptr(),
                 pool.as_mut_ptr(),
             );
             svn_result(err)?;
@@ -913,7 +1042,7 @@ impl Root {
         &self,
         path: &str,
         kind: crate::ChecksumKind,
-    ) -> Result<Option<crate::Checksum>, Error> {
+    ) -> Result<Option<crate::Checksum<'_>>, Error> {
         with_tmp_pool(|pool| unsafe {
             let path_c = std::ffi::CString::new(path).unwrap();
             let mut checksum = std::ptr::null_mut();
@@ -981,14 +1110,17 @@ impl Root {
     }
 
     /// Check the type of a path (file, directory, or none)
-    pub fn check_path(&self, path: &str) -> Result<crate::NodeKind, Error> {
+    pub fn check_path(
+        &self,
+        path: impl TryInto<FsPath, Error = Error>,
+    ) -> Result<crate::NodeKind, Error> {
+        let fs_path = path.try_into()?;
         with_tmp_pool(|pool| unsafe {
-            let path_c = std::ffi::CString::new(path).unwrap();
             let mut kind = subversion_sys::svn_node_kind_t_svn_node_none;
             let err = subversion_sys::svn_fs_check_path(
                 &mut kind,
                 self.ptr,
-                path_c.as_ptr(),
+                fs_path.as_ptr(),
                 pool.as_mut_ptr(),
             );
             svn_result(err)?;
@@ -999,16 +1131,16 @@ impl Root {
     /// List directory entries
     pub fn dir_entries(
         &self,
-        path: &str,
+        path: impl TryInto<FsPath, Error = Error>,
     ) -> Result<std::collections::HashMap<String, FsDirEntry>, Error> {
+        let fs_path = path.try_into()?;
         let pool = apr::SharedPool::from(apr::Pool::new());
         unsafe {
-            let path_c = std::ffi::CString::new(path).unwrap();
             let mut entries = std::ptr::null_mut();
             let err = subversion_sys::svn_fs_dir_entries(
                 &mut entries,
                 self.ptr,
-                path_c.as_ptr(),
+                fs_path.as_ptr(),
                 pool.as_mut_ptr(),
             );
             svn_result(err)?;
@@ -1022,18 +1154,23 @@ impl Root {
         }
     }
     /// Check if file contents have changed between two paths
-    pub fn contents_changed(&self, path1: &str, root2: &Root, path2: &str) -> Result<bool, Error> {
+    pub fn contents_changed(
+        &self,
+        path1: impl TryInto<FsPath, Error = Error>,
+        root2: &Root,
+        path2: impl TryInto<FsPath, Error = Error>,
+    ) -> Result<bool, Error> {
+        let fs_path1 = path1.try_into()?;
+        let fs_path2 = path2.try_into()?;
         with_tmp_pool(|pool| unsafe {
-            let path1_c = std::ffi::CString::new(path1)?;
-            let path2_c = std::ffi::CString::new(path2)?;
             let mut changed: subversion_sys::svn_boolean_t = 0;
 
             let err = subversion_sys::svn_fs_contents_changed(
                 &mut changed,
                 self.ptr,
-                path1_c.as_ptr(),
+                fs_path1.as_ptr(),
                 root2.ptr,
-                path2_c.as_ptr(),
+                fs_path2.as_ptr(),
                 pool.as_mut_ptr(),
             );
             svn_result(err)?;
@@ -1043,18 +1180,23 @@ impl Root {
     }
 
     /// Check if properties have changed between two paths
-    pub fn props_changed(&self, path1: &str, root2: &Root, path2: &str) -> Result<bool, Error> {
+    pub fn props_changed(
+        &self,
+        path1: impl TryInto<FsPath, Error = Error>,
+        root2: &Root,
+        path2: impl TryInto<FsPath, Error = Error>,
+    ) -> Result<bool, Error> {
+        let fs_path1 = path1.try_into()?;
+        let fs_path2 = path2.try_into()?;
         with_tmp_pool(|pool| unsafe {
-            let path1_c = std::ffi::CString::new(path1)?;
-            let path2_c = std::ffi::CString::new(path2)?;
             let mut changed: subversion_sys::svn_boolean_t = 0;
 
             let err = subversion_sys::svn_fs_props_changed(
                 &mut changed,
                 self.ptr,
-                path1_c.as_ptr(),
+                fs_path1.as_ptr(),
                 root2.ptr,
-                path2_c.as_ptr(),
+                fs_path2.as_ptr(),
                 pool.as_mut_ptr(),
             );
             svn_result(err)?;
@@ -1064,16 +1206,20 @@ impl Root {
     }
 
     /// Get the history of a node
-    pub fn node_history(&self, path: &str) -> Result<NodeHistory, Error> {
-        let pool = apr::Pool::new();
+    pub fn node_history(
+        &self,
+        path: impl TryInto<FsPath, Error = Error>,
+    ) -> Result<NodeHistory, Error> {
+        let fs_path = path.try_into()?;
         unsafe {
-            let path_c = std::ffi::CString::new(path)?;
+            // Create a pool that will live as long as the NodeHistory
+            let pool = apr::Pool::new();
             let mut history: *mut subversion_sys::svn_fs_history_t = std::ptr::null_mut();
 
             let err = subversion_sys::svn_fs_node_history(
                 &mut history,
                 self.ptr,
-                path_c.as_ptr(),
+                fs_path.as_ptr(),
                 pool.as_mut_ptr(),
             );
             svn_result(err)?;
@@ -1084,21 +1230,24 @@ impl Root {
 
             Ok(NodeHistory {
                 ptr: history,
-                _pool: pool,
+                pool, // Use the same pool that allocated the history
             })
         }
     }
 
     /// Get the created revision of a path
-    pub fn node_created_rev(&self, path: &str) -> Result<Revnum, Error> {
+    pub fn node_created_rev(
+        &self,
+        path: impl TryInto<FsPath, Error = Error>,
+    ) -> Result<Revnum, Error> {
+        let fs_path = path.try_into()?;
         with_tmp_pool(|pool| unsafe {
-            let path_c = std::ffi::CString::new(path)?;
             let mut rev: subversion_sys::svn_revnum_t = -1;
 
             let err = subversion_sys::svn_fs_node_created_rev(
                 &mut rev,
                 self.ptr,
-                path_c.as_ptr(),
+                fs_path.as_ptr(),
                 pool.as_mut_ptr(),
             );
             svn_result(err)?;
@@ -1108,16 +1257,16 @@ impl Root {
     }
 
     /// Get the node ID for a path
-    pub fn node_id(&self, path: &str) -> Result<NodeId, Error> {
-        let pool = apr::Pool::new();
+    pub fn node_id(&self, path: impl TryInto<FsPath, Error = Error>) -> Result<NodeId, Error> {
+        let fs_path = path.try_into()?;
         unsafe {
-            let path_c = std::ffi::CString::new(path)?;
+            let pool = apr::Pool::new();
             let mut id: *const subversion_sys::svn_fs_id_t = std::ptr::null();
 
             let err = subversion_sys::svn_fs_node_id(
                 &mut id,
                 self.ptr,
-                path_c.as_ptr(),
+                fs_path.as_ptr(),
                 pool.as_mut_ptr(),
             );
             svn_result(err)?;
@@ -1126,10 +1275,7 @@ impl Root {
                 return Err(Error::from_str("Failed to get node ID"));
             }
 
-            Ok(NodeId {
-                ptr: id,
-                _pool: pool,
-            })
+            Ok(NodeId { ptr: id, pool })
         }
     }
 }
@@ -1137,7 +1283,7 @@ impl Root {
 /// Represents the history of a node in the filesystem
 pub struct NodeHistory {
     ptr: *mut subversion_sys::svn_fs_history_t,
-    _pool: apr::Pool,
+    pool: apr::Pool, // Pool used for all history allocations
 }
 
 impl NodeHistory {
@@ -1145,11 +1291,12 @@ impl NodeHistory {
     pub fn prev(&mut self, cross_copies: bool) -> Result<Option<(String, Revnum)>, Error> {
         unsafe {
             let mut prev_history: *mut subversion_sys::svn_fs_history_t = std::ptr::null_mut();
+            // Use the NodeHistory's own pool for allocations
             let err = subversion_sys::svn_fs_history_prev(
                 &mut prev_history,
                 self.ptr,
                 if cross_copies { 1 } else { 0 },
-                self._pool.as_mut_ptr(),
+                self.pool.as_mut_ptr(),
             );
             svn_result(err)?;
 
@@ -1168,7 +1315,7 @@ impl NodeHistory {
                 &mut path,
                 &mut rev,
                 prev_history,
-                self._pool.as_mut_ptr(),
+                self.pool.as_mut_ptr(),
             );
             svn_result(err)?;
 
@@ -1193,7 +1340,7 @@ impl Drop for NodeHistory {
 /// Represents a node ID in the filesystem
 pub struct NodeId {
     ptr: *const subversion_sys::svn_fs_id_t,
-    _pool: apr::Pool,
+    pool: apr::Pool, // Keep the pool alive for the lifetime of the NodeId
 }
 
 impl NodeId {
@@ -1207,9 +1354,9 @@ impl NodeId {
     }
 
     /// Convert the node ID to a string representation
-    pub fn to_string(&self, pool: &apr::Pool) -> Result<String, Error> {
+    pub fn to_string(&self) -> Result<String, Error> {
         unsafe {
-            let str_svn = subversion_sys::svn_fs_unparse_id(self.ptr, pool.as_mut_ptr());
+            let str_svn = subversion_sys::svn_fs_unparse_id(self.ptr, self.pool.as_mut_ptr());
             if str_svn.is_null() {
                 return Err(Error::from_str("Failed to unparse node ID"));
             }
@@ -1228,7 +1375,8 @@ impl NodeId {
 /// Transaction handle with RAII cleanup
 pub struct Transaction {
     ptr: *mut subversion_sys::svn_fs_txn_t,
-    _pool: apr::Pool,
+    #[allow(dead_code)]
+    pool: apr::Pool,
     _phantom: std::marker::PhantomData<*mut ()>, // !Send + !Sync
 }
 
@@ -1246,12 +1394,13 @@ impl Transaction {
     ) -> Self {
         Self {
             ptr,
-            _pool: pool,
+            pool,
             _phantom: std::marker::PhantomData,
         }
     }
 
     /// Get the underlying SVN transaction pointer
+    #[allow(dead_code)]
     pub(crate) fn as_ptr(&self) -> *mut subversion_sys::svn_fs_txn_t {
         self.ptr
     }
@@ -1409,52 +1558,56 @@ pub struct TxnRoot {
 
 impl TxnRoot {
     /// Create a directory
-    pub fn make_dir(&mut self, path: &str) -> Result<(), Error> {
-        let path_cstr = std::ffi::CString::new(path)?;
+    pub fn make_dir(&mut self, path: impl TryInto<FsPath, Error = Error>) -> Result<(), Error> {
+        let fs_path = path.try_into()?;
         let pool = apr::Pool::new();
         unsafe {
             let err =
-                subversion_sys::svn_fs_make_dir(self.ptr, path_cstr.as_ptr(), pool.as_mut_ptr());
+                subversion_sys::svn_fs_make_dir(self.ptr, fs_path.as_ptr(), pool.as_mut_ptr());
             Error::from_raw(err)?;
             Ok(())
         }
     }
 
     /// Create a file
-    pub fn make_file(&mut self, path: &str) -> Result<(), Error> {
-        let path_cstr = std::ffi::CString::new(path)?;
+    pub fn make_file(&mut self, path: impl TryInto<FsPath, Error = Error>) -> Result<(), Error> {
+        let fs_path = path.try_into()?;
         let pool = apr::Pool::new();
         unsafe {
             let err =
-                subversion_sys::svn_fs_make_file(self.ptr, path_cstr.as_ptr(), pool.as_mut_ptr());
+                subversion_sys::svn_fs_make_file(self.ptr, fs_path.as_ptr(), pool.as_mut_ptr());
             Error::from_raw(err)?;
             Ok(())
         }
     }
 
     /// Delete a node
-    pub fn delete(&mut self, path: &str) -> Result<(), Error> {
-        let path_cstr = std::ffi::CString::new(path)?;
+    pub fn delete(&mut self, path: impl TryInto<FsPath, Error = Error>) -> Result<(), Error> {
+        let fs_path = path.try_into()?;
         let pool = apr::Pool::new();
         unsafe {
-            let err =
-                subversion_sys::svn_fs_delete(self.ptr, path_cstr.as_ptr(), pool.as_mut_ptr());
+            let err = subversion_sys::svn_fs_delete(self.ptr, fs_path.as_ptr(), pool.as_mut_ptr());
             Error::from_raw(err)?;
             Ok(())
         }
     }
 
     /// Copy a node from another location
-    pub fn copy(&mut self, from_root: &Root, from_path: &str, to_path: &str) -> Result<(), Error> {
-        let from_path_cstr = std::ffi::CString::new(from_path)?;
-        let to_path_cstr = std::ffi::CString::new(to_path)?;
+    pub fn copy(
+        &mut self,
+        from_root: &Root,
+        from_path: impl TryInto<FsPath, Error = Error>,
+        to_path: impl TryInto<FsPath, Error = Error>,
+    ) -> Result<(), Error> {
+        let from_fs_path = from_path.try_into()?;
+        let to_fs_path = to_path.try_into()?;
         let pool = apr::Pool::new();
         unsafe {
             let err = subversion_sys::svn_fs_copy(
                 from_root.ptr,
-                from_path_cstr.as_ptr(),
+                from_fs_path.as_ptr(),
                 self.ptr,
-                to_path_cstr.as_ptr(),
+                to_fs_path.as_ptr(),
                 pool.as_mut_ptr(),
             );
             Error::from_raw(err)?;
@@ -1465,10 +1618,10 @@ impl TxnRoot {
     /// Apply text changes to a file
     pub fn apply_text(
         &mut self,
-        path: &str,
+        path: impl TryInto<FsPath, Error = Error>,
         result_checksum: Option<&str>,
     ) -> Result<crate::io::Stream, Error> {
-        let path_cstr = std::ffi::CString::new(path)?;
+        let fs_path = path.try_into()?;
         let checksum_cstr = result_checksum.map(std::ffi::CString::new).transpose()?;
         let pool = apr::Pool::new();
         unsafe {
@@ -1476,7 +1629,7 @@ impl TxnRoot {
             let err = subversion_sys::svn_fs_apply_text(
                 &mut stream_ptr,
                 self.ptr,
-                path_cstr.as_ptr(),
+                fs_path.as_ptr(),
                 checksum_cstr
                     .as_ref()
                     .map_or(std::ptr::null(), |c| c.as_ptr() as *const _),
@@ -1489,8 +1642,13 @@ impl TxnRoot {
     }
 
     /// Set a property on a node
-    pub fn change_node_prop(&mut self, path: &str, name: &str, value: &[u8]) -> Result<(), Error> {
-        let path_cstr = std::ffi::CString::new(path)?;
+    pub fn change_node_prop(
+        &mut self,
+        path: impl TryInto<FsPath, Error = Error>,
+        name: &str,
+        value: &[u8],
+    ) -> Result<(), Error> {
+        let fs_path = path.try_into()?;
         let name_cstr = std::ffi::CString::new(name)?;
         let value_str = if value.is_empty() {
             std::ptr::null()
@@ -1504,7 +1662,7 @@ impl TxnRoot {
         unsafe {
             let err = subversion_sys::svn_fs_change_node_prop(
                 self.ptr,
-                path_cstr.as_ptr(),
+                fs_path.as_ptr(),
                 name_cstr.as_ptr(),
                 value_str,
                 pool.as_mut_ptr(),
@@ -1515,15 +1673,18 @@ impl TxnRoot {
     }
 
     /// Check if a path exists and what kind of node it is
-    pub fn check_path(&self, path: &str) -> Result<crate::NodeKind, Error> {
-        let path_cstr = std::ffi::CString::new(path)?;
+    pub fn check_path(
+        &self,
+        path: impl TryInto<FsPath, Error = Error>,
+    ) -> Result<crate::NodeKind, Error> {
+        let fs_path = path.try_into()?;
         let pool = apr::Pool::new();
         unsafe {
             let mut kind = 0;
             let err = subversion_sys::svn_fs_check_path(
                 &mut kind,
                 self.ptr,
-                path_cstr.as_ptr(),
+                fs_path.as_ptr(),
                 pool.as_mut_ptr(),
             );
             Error::from_raw(err)?;
@@ -1532,8 +1693,12 @@ impl TxnRoot {
     }
 
     /// Set file contents directly
-    pub fn set_file_contents(&mut self, path: &str, contents: &[u8]) -> Result<(), Error> {
-        let path_cstr = std::ffi::CString::new(path)?;
+    pub fn set_file_contents(
+        &mut self,
+        path: impl TryInto<FsPath, Error = Error>,
+        contents: &[u8],
+    ) -> Result<(), Error> {
+        let fs_path = path.try_into()?;
         let pool = apr::Pool::new();
 
         unsafe {
@@ -1541,7 +1706,7 @@ impl TxnRoot {
             let err = subversion_sys::svn_fs_apply_text(
                 &mut stream,
                 self.ptr,
-                path_cstr.as_ptr(),
+                fs_path.as_ptr(),
                 std::ptr::null(), // result_checksum
                 pool.as_mut_ptr(),
             );
@@ -1564,8 +1729,11 @@ impl TxnRoot {
     }
 
     /// Get the contents of a file as bytes
-    pub fn file_contents(&self, path: &str) -> Result<Vec<u8>, Error> {
-        let path_cstr = std::ffi::CString::new(path)?;
+    pub fn file_contents(
+        &self,
+        path: impl TryInto<FsPath, Error = Error>,
+    ) -> Result<Vec<u8>, Error> {
+        let fs_path = path.try_into()?;
         let pool = apr::Pool::new();
 
         unsafe {
@@ -1573,7 +1741,7 @@ impl TxnRoot {
             let err = subversion_sys::svn_fs_file_contents(
                 &mut stream,
                 self.ptr,
-                path_cstr.as_ptr(),
+                fs_path.as_ptr(),
                 pool.as_mut_ptr(),
             );
             Error::from_raw(err)?;
@@ -1621,7 +1789,7 @@ impl Fs {
             Error::from_raw(err)?;
             Ok(Transaction {
                 ptr: txn_ptr,
-                _pool: pool,
+                pool,
                 _phantom: std::marker::PhantomData,
             })
         }
@@ -1642,7 +1810,7 @@ impl Fs {
             Error::from_raw(err)?;
             Ok(Transaction {
                 ptr: txn_ptr,
-                _pool: pool,
+                pool,
                 _phantom: std::marker::PhantomData,
             })
         }
@@ -2206,27 +2374,26 @@ mod tests {
 
         // Test node created revision
         // Note: node_created_rev returns the revision where the current node instance was created
-        let created_rev1 = root1.node_created_rev("test.txt").unwrap();
+        let created_rev1 = root1.node_created_rev("/test.txt").unwrap();
         assert_eq!(
             created_rev1, rev1,
             "Node in rev1 should have been created in rev1"
         );
 
-        let created_rev2 = root2.node_created_rev("test.txt").unwrap();
+        let created_rev2 = root2.node_created_rev("/test.txt").unwrap();
         assert_eq!(
             created_rev2, rev2,
             "Node in rev2 should have been created in rev2 (after modification)"
         );
 
         // Test node ID
-        let node_id1 = root1.node_id("test.txt").unwrap();
-        let node_id2 = root2.node_id("test.txt").unwrap();
+        let node_id1 = root1.node_id("/test.txt").unwrap();
+        let node_id2 = root2.node_id("/test.txt").unwrap();
 
         // Just verify we can get node IDs - comparison semantics may vary
         // based on SVN backend implementation
-        let pool = apr::Pool::new();
-        let _id1_str = node_id1.to_string(&pool).unwrap();
-        let _id2_str = node_id2.to_string(&pool).unwrap();
+        let _id1_str = node_id1.to_string().unwrap();
+        let _id2_str = node_id2.to_string().unwrap();
 
         // Cleanup handled by tempdir Drop
     }
@@ -2266,14 +2433,18 @@ mod tests {
         let root2 = fs.revision_root(rev2).unwrap();
 
         // Properties should be different between revisions
-        let props_changed = root1.props_changed("test.txt", &root2, "test.txt").unwrap();
+        let props_changed = root1
+            .props_changed("/test.txt", &root2, "/test.txt")
+            .unwrap();
         assert!(
             props_changed,
             "Properties should have changed between revisions"
         );
 
         // Properties should be the same when comparing the same revision
-        let props_same = root1.props_changed("test.txt", &root1, "test.txt").unwrap();
+        let props_same = root1
+            .props_changed("/test.txt", &root1, "/test.txt")
+            .unwrap();
         assert!(
             !props_same,
             "Properties should be the same in the same revision"
@@ -2346,7 +2517,7 @@ mod tests {
 
         // Verify in committed revision
         let root = fs.revision_root(rev2).unwrap();
-        let mut stream = root.file_contents("renamed.txt").unwrap();
+        let mut stream = root.file_contents("/renamed.txt").unwrap();
         let mut contents = Vec::new();
         let mut buffer = [0u8; 1024];
         loop {
@@ -2491,7 +2662,9 @@ mod tests {
         let mut txn3 = fs.begin_txn(rev2, 0).unwrap();
         let mut root3 = txn3.root().unwrap();
         let source_root = fs.revision_root(rev2).unwrap();
-        root3.copy(&source_root, "/file.txt", "/copied.txt").unwrap();
+        root3
+            .copy(&source_root, "/file.txt", "/copied.txt")
+            .unwrap();
         let rev3 = txn3.commit().unwrap();
 
         // Get history of the copied file
@@ -2527,7 +2700,8 @@ mod tests {
         let mut txn = fs.begin_txn(crate::Revnum(0), 0).unwrap();
         let mut root = txn.root().unwrap();
         root.make_file("/test.txt").unwrap();
-        root.set_file_contents("/test.txt", b"test content").unwrap();
+        root.set_file_contents("/test.txt", b"test content")
+            .unwrap();
         let rev = txn.commit().unwrap();
 
         // Test locking a file

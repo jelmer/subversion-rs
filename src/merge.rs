@@ -272,7 +272,7 @@ pub enum ConflictResolution {
 /// from Subversion's C API, reducing unsafe code and providing convenient
 /// conversion methods.
 pub struct MergeinfoHash<'a> {
-    inner: apr::hash::TypedHash<'a, subversion_sys::apr_array_header_t>,
+    inner: apr::hash::TypedHash<'a, apr_sys::apr_array_header_t>,
 }
 
 impl<'a> MergeinfoHash<'a> {
@@ -282,9 +282,9 @@ impl<'a> MergeinfoHash<'a> {
     /// The caller must ensure that:
     /// - `ptr` is a valid APR hash containing rangelist arrays
     /// - The hash and its contents remain valid for the lifetime of this wrapper
-    pub unsafe fn from_ptr(ptr: *mut subversion_sys::apr_hash_t) -> Self {
+    pub unsafe fn from_ptr(ptr: *mut apr_sys::apr_hash_t) -> Self {
         Self {
-            inner: apr::hash::TypedHash::<subversion_sys::apr_array_header_t>::from_ptr(ptr),
+            inner: apr::hash::TypedHash::<apr_sys::apr_array_header_t>::from_ptr(ptr),
         }
     }
 
@@ -303,7 +303,7 @@ impl<'a> MergeinfoHash<'a> {
     /// Convert a rangelist array to a Vec<RevisionRange>
     unsafe fn rangelist_to_vec(
         &self,
-        rangelist: *mut subversion_sys::apr_array_header_t,
+        rangelist: *mut apr_sys::apr_array_header_t,
     ) -> Vec<crate::RevisionRange> {
         if rangelist.is_null() {
             return Vec::new();
@@ -523,7 +523,7 @@ pub fn mergeinfo_intersect(
 unsafe fn hashmap_to_mergeinfo_hash(
     mergeinfo: &std::collections::HashMap<String, Vec<crate::RevisionRange>>,
     pool: &apr::Pool,
-) -> Result<*mut subversion_sys::apr_hash_t, Error> {
+) -> Result<*mut apr_sys::apr_hash_t, Error> {
     let hash = apr_sys::apr_hash_make(pool.as_mut_ptr());
 
     for (path, ranges) in mergeinfo {

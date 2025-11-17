@@ -239,7 +239,7 @@ pub fn dir_delta2(
                 editor_ptr,
                 edit_baton,
                 None,                 // authz_read_func
-                std::ptr::null_mut(), // authz_read_baton
+                std::ptr::null_mut(), // authz_read_baton,
                 if text_deltas { 1 } else { 0 },
                 depth.into(),
                 if entry_props { 1 } else { 0 },
@@ -270,6 +270,9 @@ impl Repos {
         config: Option<&std::collections::HashMap<String, String>>,
         fs_config: Option<&std::collections::HashMap<String, String>>,
     ) -> Result<Repos, Error> {
+        // Ensure SVN libraries are initialized
+        crate::init::initialize()?;
+
         let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
         let pool = apr::Pool::new();
 
@@ -329,6 +332,9 @@ impl Repos {
 
     /// Opens an existing repository.
     pub fn open(path: &std::path::Path) -> Result<Repos, Error> {
+        // Ensure SVN libraries are initialized
+        crate::init::initialize()?;
+
         let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
         let pool = apr::Pool::new();
 
@@ -348,7 +354,7 @@ impl Repos {
     pub fn capabilities(&mut self) -> Result<std::collections::HashSet<String>, Error> {
         let pool = apr::Pool::new();
         let scratch_pool = apr::Pool::new();
-        let mut capabilities: *mut subversion_sys::apr_hash_t = std::ptr::null_mut();
+        let mut capabilities: *mut apr_sys::apr_hash_t = std::ptr::null_mut();
         let ret = unsafe {
             subversion_sys::svn_repos_capabilities(
                 &mut capabilities,
@@ -411,8 +417,10 @@ impl Repos {
         if fs_ptr.is_null() {
             None
         } else {
-            // Create a child pool from the repos pool to keep the fs alive
-            let child_pool = apr::Pool::new();
+            // Create a subpool from the repos pool
+            // The fs_ptr is owned by repos and valid as long as repos exists
+            // The subpool ensures proper cleanup order
+            let child_pool = self._pool.subpool();
             Some(unsafe { crate::fs::Fs::from_ptr_and_pool(fs_ptr, child_pool) })
         }
     }
@@ -576,7 +584,7 @@ impl Repos {
             baton: *mut std::ffi::c_void,
             revision: subversion_sys::svn_revnum_t,
             verify_err: *mut subversion_sys::svn_error_t,
-            _pool: *mut subversion_sys::apr_pool_t,
+            _pool: *mut apr_sys::apr_pool_t,
         ) -> *mut subversion_sys::svn_error_t {
             let baton = unsafe {
                 &mut *(baton as *mut Box<dyn FnMut(Revnum, &Error) -> Result<(), Error>>)
@@ -767,7 +775,7 @@ impl Repos {
             _root: *mut subversion_sys::svn_fs_root_t,
             _path: *const std::ffi::c_char,
             _baton: *mut std::ffi::c_void,
-            _pool: *mut subversion_sys::apr_pool_t,
+            _pool: *mut apr_sys::apr_pool_t,
         ) -> *mut subversion_sys::svn_error_t {
             unsafe {
                 *_allowed = 1; // Always allow
@@ -817,7 +825,7 @@ impl Repos {
             _root: *mut subversion_sys::svn_fs_root_t,
             _path: *const std::ffi::c_char,
             _baton: *mut std::ffi::c_void,
-            _pool: *mut subversion_sys::apr_pool_t,
+            _pool: *mut apr_sys::apr_pool_t,
         ) -> *mut subversion_sys::svn_error_t {
             unsafe {
                 *_allowed = 1; // Always allow
@@ -999,7 +1007,7 @@ impl Repos {
             baton: *mut std::ffi::c_void,
             revision: subversion_sys::svn_revnum_t,
             verify_err: *mut subversion_sys::svn_error_t,
-            _pool: *mut subversion_sys::apr_pool_t,
+            _pool: *mut apr_sys::apr_pool_t,
         ) -> *mut subversion_sys::svn_error_t {
             let baton = unsafe {
                 &mut *(baton as *mut Box<dyn FnMut(Revnum, &Error) -> Result<(), Error>>)
@@ -1166,7 +1174,7 @@ pub fn recover(
 
 extern "C" fn wrap_freeze_func(
     baton: *mut std::ffi::c_void,
-    _pool: *mut subversion_sys::apr_pool_t,
+    _pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     let freeze_func = unsafe { &*(baton as *const Box<dyn Fn() -> Result<(), Error>>) };
     match freeze_func() {
@@ -1226,7 +1234,7 @@ impl<'a> Notify<'a> {
 extern "C" fn wrap_notify_func(
     baton: *mut std::ffi::c_void,
     notify: *const subversion_sys::svn_repos_notify_t,
-    _pool: *mut subversion_sys::apr_pool_t,
+    _pool: *mut apr_sys::apr_pool_t,
 ) {
     let baton = unsafe { &mut *(baton as *mut Box<dyn FnMut(&Notify)>) };
     unsafe {
@@ -1543,7 +1551,6 @@ pub fn fs_pack(
     notify_func: Option<&dyn Fn(&Notify)>,
     cancel_func: Option<&dyn Fn() -> Result<(), Error>>,
 ) -> Result<(), Error> {
-    let _path_cstr = std::ffi::CString::new(path.to_string_lossy().as_ref())?;
     let pool = apr::Pool::new();
 
     let notify_baton = notify_func
@@ -1602,6 +1609,7 @@ impl Repos {
     /// * `author` - Optional author name
     /// * `revprops` - Optional additional revision properties (svn:log and svn:author are set automatically)
     /// * `commit_callback` - Optional callback to be called on successful commit
+    #[cfg(feature = "delta")]
     pub fn get_commit_editor(
         &self,
         repos_url: &str,
@@ -1686,7 +1694,7 @@ impl Repos {
         extern "C" fn wrap_commit_callback(
             commit_info: *const subversion_sys::svn_commit_info_t,
             baton: *mut std::ffi::c_void,
-            _pool: *mut subversion_sys::apr_pool_t,
+            _pool: *mut apr_sys::apr_pool_t,
         ) -> *mut subversion_sys::svn_error_t {
             if baton.is_null() || commit_info.is_null() {
                 return std::ptr::null_mut();
@@ -1739,9 +1747,9 @@ impl Repos {
 
         Error::from_raw(ret)?;
 
-        // Leak the pool to keep it alive for the lifetime of the editor
-        // This is necessary because the C API expects the pool to remain valid
-        let _ = Box::leak(pool);
+        // TODO: This is a memory leak! The pool is leaked and never freed.
+        // WrapEditor should be changed to own the pool instead of using PhantomData.
+        let _pool = Box::leak(pool);
 
         let editor = crate::delta::WrapEditor {
             editor: editor_ptr,
@@ -1764,7 +1772,7 @@ impl Repos {
     /// * `send_copyfrom_args` - Whether to send copyfrom arguments
     /// * `editor` - The delta editor
     /// * `editor_baton` - The editor baton
-    pub fn begin_report(
+    pub unsafe fn begin_report(
         &self,
         revnum: Revnum,
         fs_base: &str,
@@ -2087,6 +2095,7 @@ mod additional_tests {
     }
 
     #[test]
+    #[cfg(feature = "delta")]
     fn test_get_commit_editor_basic() {
         // Create a temporary repository for testing
         let temp_dir = tempfile::tempdir().unwrap();
@@ -2101,7 +2110,7 @@ mod additional_tests {
         // Test get_commit_editor with basic parameters
         let result = repo.get_commit_editor(
             &repo_url,
-            "/", // base path (repository root)
+            "", // base path (repository root - empty string in fspath format)
             "Test commit message",
             Some("test_author"),
             None, // no revprops
@@ -2330,18 +2339,20 @@ admin = rw
             let (editor_ptr, baton_ptr) = editor_box.as_raw_parts();
 
             // Test begin_report with the commit editor
-            let report_result = repo.begin_report(
-                crate::Revnum::from_raw(0).unwrap(),
-                "/",
-                "",   // Empty string means all of fs_base
-                None, // No path switching
-                false,
-                crate::Depth::Infinity,
-                false,
-                false,
-                editor_ptr,
-                baton_ptr,
-            );
+            let report_result = unsafe {
+                repo.begin_report(
+                    crate::Revnum::from_raw(0).unwrap(),
+                    "/",
+                    "",   // Empty string means all of fs_base
+                    None, // No path switching
+                    false,
+                    crate::Depth::Infinity,
+                    false,
+                    false,
+                    editor_ptr,
+                    baton_ptr,
+                )
+            };
 
             // begin_report should succeed
             assert!(
@@ -2388,8 +2399,8 @@ admin = rw
 
         // Create a report using the editor's raw pointers
         let (editor_ptr, baton_ptr) = editor_box.as_raw_parts();
-        let report = repo
-            .begin_report(
+        let report = unsafe {
+            repo.begin_report(
                 crate::Revnum::from_raw(0).unwrap(),
                 "/",
                 "",   // Empty string means all of fs_base
@@ -2401,7 +2412,8 @@ admin = rw
                 editor_ptr,
                 baton_ptr,
             )
-            .unwrap();
+        }
+        .unwrap();
 
         // Test individual report operations
         // set_path with root path

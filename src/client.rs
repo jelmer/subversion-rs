@@ -27,7 +27,7 @@ extern "C" fn wrap_filter_callback(
     filtered: *mut subversion_sys::svn_boolean_t,
     local_abspath: *const i8,
     dirent: *const subversion_sys::svn_io_dirent2_t,
-    _pool: *mut subversion_sys::apr_pool_t,
+    _pool: *mut apr_sys::apr_pool_t,
 ) -> *mut svn_error_t {
     unsafe {
         let callback =
@@ -50,7 +50,7 @@ extern "C" fn wrap_status_func(
     baton: *mut std::ffi::c_void,
     path: *const i8,
     status: *const subversion_sys::svn_client_status_t,
-    _pool: *mut subversion_sys::apr_pool_t,
+    _pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     unsafe {
         let callback = &mut *(baton as *mut &mut dyn FnMut(&str, &Status) -> Result<(), Error>);
@@ -90,8 +90,8 @@ extern "C" fn wrap_proplist_receiver2(
     path: *const i8,
     props: *mut apr::hash::apr_hash_t,
     inherited_props: *mut apr::tables::apr_array_header_t,
-    scratch_pool: *mut subversion_sys::apr_pool_t,
-)-> *mut subversion_sys::svn_error_t {
+    scratch_pool: *mut apr_sys::apr_pool_t,
+) -> *mut subversion_sys::svn_error_t {
     unsafe {
         // SVN owns the scratch_pool, we just need to reference it
         let _scratch_pool = apr::PoolHandle::from_borrowed_raw(scratch_pool);
@@ -208,7 +208,7 @@ extern "C" fn wrap_info_receiver2(
     baton: *mut std::ffi::c_void,
     abspath_or_url: *const i8,
     info: *const subversion_sys::svn_client_info2_t,
-    _scatch_pool: *mut subversion_sys::apr_pool_t,
+    _scatch_pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     unsafe {
         let callback =
@@ -229,15 +229,15 @@ extern "C" fn wrap_info_receiver2(
 /// Callback wrapper for blame receiver
 unsafe extern "C" fn blame_receiver_wrapper(
     baton: *mut std::ffi::c_void,
-    line_no: subversion_sys::apr_int64_t,
+    line_no: apr_sys::apr_int64_t,
     revision: subversion_sys::svn_revnum_t,
-    rev_props: *mut subversion_sys::apr_hash_t,
+    rev_props: *mut apr_sys::apr_hash_t,
     merged_revision: subversion_sys::svn_revnum_t,
-    merged_rev_props: *mut subversion_sys::apr_hash_t,
+    merged_rev_props: *mut apr_sys::apr_hash_t,
     merged_path: *const i8,
     line: *const subversion_sys::svn_string_t,
     local_change: subversion_sys::svn_boolean_t,
-    _pool: *mut subversion_sys::apr_pool_t,
+    _pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     let callback = &mut *(baton as *mut &mut dyn FnMut(BlameInfo) -> Result<(), Error>);
 
@@ -808,6 +808,9 @@ impl Drop for Context {
 impl Context {
     /// Creates a new Subversion client context.
     pub fn new() -> Result<Self, Error> {
+        // Ensure SVN libraries are initialized
+        crate::init::initialize()?;
+
         let pool = apr::Pool::new();
         let mut ctx = std::ptr::null_mut();
         let ret = unsafe {
@@ -1839,7 +1842,7 @@ impl Context {
         &mut self,
         url: &str,
         wri_path: &std::path::Path,
-    ) -> Result<crate::ra::Session, Error> {
+    ) -> Result<crate::ra::Session<'_>, Error> {
         let url = std::ffi::CString::new(url).unwrap();
         let wri_path = std::ffi::CString::new(wri_path.to_str().unwrap()).unwrap();
         let pool = apr::Pool::new();
@@ -2221,9 +2224,9 @@ impl Context {
             extern "C" fn proplist_receiver(
                 baton: *mut std::ffi::c_void,
                 path: *const i8,
-                props: *mut subversion_sys::apr_hash_t,
-                _inherited_props: *mut subversion_sys::apr_array_header_t,
-                _scratch_pool: *mut subversion_sys::apr_pool_t,
+                props: *mut apr_sys::apr_hash_t,
+                _inherited_props: *mut apr_sys::apr_array_header_t,
+                _scratch_pool: *mut apr_sys::apr_pool_t,
             ) -> *mut subversion_sys::svn_error_t {
                 let receiver = unsafe {
                     &mut *(baton
@@ -2390,7 +2393,7 @@ impl Context {
                 _abs_path: *const i8,
                 _external_parent_url: *const i8,
                 _external_target: *const i8,
-                _scratch_pool: *mut subversion_sys::apr_pool_t,
+                _scratch_pool: *mut apr_sys::apr_pool_t,
             ) -> *mut subversion_sys::svn_error_t {
                 let list_func = unsafe {
                     &mut *(baton
@@ -4142,7 +4145,7 @@ impl Status {
     }
 
     /// Returns the lock information if the item is locked.
-    pub fn lock(&self) -> Option<crate::Lock> {
+    pub fn lock(&self) -> Option<crate::Lock<'_>> {
         let lock_ptr = unsafe { (*self.0).lock };
         if lock_ptr.is_null() {
             None
@@ -4192,7 +4195,7 @@ impl Status {
     }
 
     /// Returns the repository lock information.
-    pub fn repos_lock(&self) -> Option<crate::Lock> {
+    pub fn repos_lock(&self) -> Option<crate::Lock<'_>> {
         let lock_ptr = unsafe { (*self.0).repos_lock };
         if lock_ptr.is_null() {
             None
@@ -4370,7 +4373,7 @@ impl Conflict {
     pub fn get_conflicted(&self) -> Result<(bool, Vec<String>, bool), Error> {
         let pool = apr::pool::Pool::new();
         let mut text_conflicted: subversion_sys::svn_boolean_t = 0;
-        let mut props_conflicted: *mut subversion_sys::apr_array_header_t = std::ptr::null_mut();
+        let mut props_conflicted: *mut apr_sys::apr_array_header_t = std::ptr::null_mut();
         let mut tree_conflicted: subversion_sys::svn_boolean_t = 0;
 
         unsafe {

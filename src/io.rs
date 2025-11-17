@@ -272,7 +272,7 @@ impl Stream {
             extern "C" fn read_trampoline<B: StreamBackend>(
                 baton: *mut std::ffi::c_void,
                 buffer: *mut std::os::raw::c_char,
-                len: *mut subversion_sys::apr_size_t,
+                len: *mut apr_sys::apr_size_t,
             ) -> *mut subversion_sys::svn_error_t {
                 unsafe {
                     let backend = &mut *(baton as *mut B);
@@ -292,7 +292,7 @@ impl Stream {
             extern "C" fn write_trampoline<B: StreamBackend>(
                 baton: *mut std::ffi::c_void,
                 data: *const std::os::raw::c_char,
-                len: *mut subversion_sys::apr_size_t,
+                len: *mut apr_sys::apr_size_t,
             ) -> *mut subversion_sys::svn_error_t {
                 unsafe {
                     let backend = &mut *(baton as *mut B);
@@ -332,7 +332,7 @@ impl Stream {
             // Skip callback
             extern "C" fn skip_trampoline<B: StreamBackend>(
                 baton: *mut std::ffi::c_void,
-                len: subversion_sys::apr_size_t,
+                len: apr_sys::apr_size_t,
             ) -> *mut subversion_sys::svn_error_t {
                 unsafe {
                     let backend = &mut *(baton as *mut B);
@@ -364,7 +364,7 @@ impl Stream {
             extern "C" fn mark_trampoline<B: StreamBackend>(
                 baton: *mut std::ffi::c_void,
                 mark: *mut *mut subversion_sys::svn_stream_mark_t,
-                pool: *mut subversion_sys::apr_pool_t,
+                pool: *mut apr_sys::apr_pool_t,
             ) -> *mut subversion_sys::svn_error_t {
                 unsafe {
                     let backend = &mut *(baton as *mut B);
@@ -449,7 +449,7 @@ impl Stream {
     }
 
     /// Create a stream from an APR file
-    pub fn from_apr_file(file: *mut subversion_sys::apr_file_t, disown: bool) -> Self {
+    pub unsafe fn from_apr_file(file: *mut apr_sys::apr_file_t, disown: bool) -> Self {
         let pool = apr::Pool::new();
         let stream = unsafe {
             subversion_sys::svn_stream_from_aprfile2(file, disown as i32, pool.as_mut_ptr())
@@ -612,9 +612,11 @@ impl Stream {
         &mut self,
         checksum_kind: crate::ChecksumKind,
         read_all: bool,
-    ) -> (crate::io::Stream, crate::Checksum, crate::Checksum) {
+    ) -> (crate::io::Stream, crate::Checksum<'_>, crate::Checksum<'_>) {
         let mut read_checksum = std::ptr::null_mut();
         let mut write_checksum = std::ptr::null_mut();
+        // Create a pool that will live as long as the returned objects
+        let pool = apr::pool::Pool::new();
         let stream = unsafe {
             subversion_sys::svn_stream_checksummed2(
                 self.ptr,
@@ -622,12 +624,11 @@ impl Stream {
                 &mut write_checksum,
                 checksum_kind.into(),
                 read_all as i32,
-                apr::pool::Pool::new().as_mut_ptr(),
+                pool.as_mut_ptr(),
             )
         };
-        let _pool = std::rc::Rc::new(apr::pool::Pool::new());
         (
-            unsafe { crate::io::Stream::from_ptr_and_pool(stream, apr::Pool::new()) },
+            unsafe { crate::io::Stream::from_ptr_and_pool(stream, pool) },
             crate::Checksum {
                 ptr: read_checksum,
                 _pool: std::marker::PhantomData,
@@ -655,7 +656,7 @@ impl Stream {
     pub fn contents_checksum(
         &mut self,
         checksum_kind: crate::ChecksumKind,
-    ) -> Result<crate::Checksum, Error> {
+    ) -> Result<crate::Checksum<'_>, Error> {
         let mut checksum = std::ptr::null_mut();
         let pool = apr::pool::Pool::new();
         let err = unsafe {
@@ -859,7 +860,7 @@ impl Stream {
         extern "C" fn read_trampoline(
             baton: *mut std::ffi::c_void,
             buffer: *mut std::os::raw::c_char,
-            len: *mut subversion_sys::apr_size_t,
+            len: *mut apr_sys::apr_size_t,
         ) -> *mut subversion_sys::svn_error_t {
             let read_func =
                 unsafe { &*(baton as *const Box<dyn Fn(&mut [u8]) -> Result<usize, Error>>) };
@@ -891,7 +892,7 @@ impl Stream {
         extern "C" fn write_trampoline(
             baton: *mut std::ffi::c_void,
             data: *const std::os::raw::c_char,
-            len: *mut subversion_sys::apr_size_t,
+            len: *mut apr_sys::apr_size_t,
         ) -> *mut subversion_sys::svn_error_t {
             let write_func =
                 unsafe { &*(baton as *const Box<dyn Fn(&[u8]) -> Result<usize, Error>>) };
@@ -947,7 +948,7 @@ impl Stream {
 
         extern "C" fn skip_trampoline(
             baton: *mut std::ffi::c_void,
-            len: subversion_sys::apr_size_t,
+            len: apr_sys::apr_size_t,
         ) -> *mut subversion_sys::svn_error_t {
             let skip_func = unsafe { &*(baton as *const Box<dyn Fn(usize) -> Result<(), Error>>) };
             match skip_func(len) {
@@ -974,7 +975,7 @@ impl Stream {
         extern "C" fn mark_trampoline(
             baton: *mut std::ffi::c_void,
             mark: *mut *mut subversion_sys::svn_stream_mark_t,
-            _pool: *mut subversion_sys::apr_pool_t,
+            _pool: *mut apr_sys::apr_pool_t,
         ) -> *mut subversion_sys::svn_error_t {
             let mark_func = unsafe {
                 &*(baton
@@ -1038,8 +1039,8 @@ impl Stream {
         extern "C" fn open_trampoline(
             lazyopen_stream: *mut *mut subversion_sys::svn_stream_t,
             open_baton: *mut std::ffi::c_void,
-            _result_pool: *mut subversion_sys::apr_pool_t,
-            _scratch_pool: *mut subversion_sys::apr_pool_t,
+            _result_pool: *mut apr_sys::apr_pool_t,
+            _scratch_pool: *mut apr_sys::apr_pool_t,
         ) -> *mut subversion_sys::svn_error_t {
             let open_func =
                 unsafe { &*(open_baton as *const Box<dyn Fn() -> Result<Stream, Error>>) };
@@ -1215,7 +1216,10 @@ pub fn wrap_write(write: &mut dyn std::io::Write) -> Result<Stream, Error> {
         let write = Box::leak(write);
         let buffer = unsafe { std::slice::from_raw_parts(buffer as *const u8, *len) };
         match write.write(buffer) {
-            Ok(_) => std::ptr::null_mut(),
+            Ok(bytes_written) => {
+                unsafe { *len = bytes_written };
+                std::ptr::null_mut()
+            }
             Err(e) => {
                 let mut e: crate::Error = e.into();
                 unsafe { e.detach() }
@@ -1574,7 +1578,7 @@ pub fn filesizes_three_different_p(
 pub fn file_checksum(
     file: &std::path::Path,
     checksum_kind: crate::ChecksumKind,
-) -> Result<crate::Checksum, Error> {
+) -> Result<crate::Checksum<'_>, Error> {
     let file = std::ffi::CString::new(file.to_str().unwrap()).unwrap();
     let mut checksum = std::ptr::null_mut();
     let pool = apr::pool::Pool::new();

@@ -12,6 +12,8 @@ fn create_svn_bindings(
 
     let mut builder = bindgen::Builder::default()
         .header(svn_path.join("svn_dirent_uri.h").to_str().unwrap())
+        .header(svn_path.join("svn_dso.h").to_str().unwrap())
+        .header(svn_path.join("svn_path.h").to_str().unwrap())
         .header(svn_path.join("svn_version.h").to_str().unwrap())
         .header(svn_path.join("svn_error.h").to_str().unwrap())
         .header(svn_path.join("svn_error_codes.h").to_str().unwrap())
@@ -34,28 +36,30 @@ fn create_svn_bindings(
         .allowlist_file(".*/svn_.*.h")
         .blocklist_type("apr_.*")
         .derive_default(true)
-        .raw_line("pub type apr_file_t = apr_sys::apr_file_t;")
-        .raw_line("pub type apr_finfo_t = apr_sys::apr_finfo_t;")
-        .raw_line("pub type apr_getopt_t = apr_sys::apr_getopt_t;")
-        .raw_line("pub type apr_int64_t = apr_sys::apr_int64_t;")
-        .raw_line("pub type apr_off_t = apr_sys::apr_off_t;")
-        .raw_line("pub type apr_pool_t = apr_sys::apr_pool_t;")
-        .raw_line("pub type apr_size_t = apr_sys::apr_size_t;")
-        .raw_line("pub type apr_ssize_t = apr_sys::apr_ssize_t;")
-        .raw_line("pub type apr_status_t = apr_sys::apr_status_t;")
-        .raw_line("pub type apr_time_t = apr_sys::apr_time_t;")
-        .raw_line("pub type apr_int32_t = apr_sys::apr_int32_t;")
-        .raw_line("pub type apr_uint32_t = apr_sys::apr_uint32_t;")
-        .raw_line("pub type apr_fileperms_t = apr_sys::apr_fileperms_t;")
-        .raw_line("pub type apr_proc_t = apr_sys::apr_proc_t;")
-        .raw_line("pub type apr_uint64_t = apr_sys::apr_uint64_t;")
-        .raw_line("pub type apr_dir_t = apr_sys::apr_dir_t;")
-        .raw_line("pub type apr_hash_t = apr::hash::apr_hash_t;")
-        .raw_line("pub type apr_array_header_t = apr::tables::apr_array_header_t;")
-        .raw_line("pub type apr_getopt_option_t = apr_sys::apr_getopt_option_t;")
-        .raw_line("pub type apr_exit_why_e = apr_sys::apr_exit_why_e;")
-        .raw_line("pub type apr_seek_where_t = apr_sys::apr_seek_where_t;")
-        .raw_line("pub type apr_byte_t = apr_sys::apr_byte_t;")
+        .raw_line("use apr_sys::apr_file_t;")
+        .raw_line("use apr_sys::apr_finfo_t;")
+        .raw_line("use apr_sys::apr_getopt_t;")
+        .raw_line("use apr_sys::apr_int64_t;")
+        .raw_line("use apr_sys::apr_off_t;")
+        .raw_line("use apr_sys::apr_pool_t;")
+        .raw_line("use apr_sys::apr_size_t;")
+        .raw_line("use apr_sys::apr_ssize_t;")
+        .raw_line("use apr_sys::apr_status_t;")
+        .raw_line("use apr_sys::apr_time_t;")
+        .raw_line("use apr_sys::apr_int32_t;")
+        .raw_line("use apr_sys::apr_uint32_t;")
+        .raw_line("use apr_sys::apr_fileperms_t;")
+        .raw_line("use apr_sys::apr_proc_t;")
+        .raw_line("use apr_sys::apr_uint64_t;")
+        .raw_line("use apr_sys::apr_dir_t;")
+        .raw_line("use apr::hash::apr_hash_t;")
+        .raw_line("use apr::tables::apr_array_header_t;")
+        .raw_line("use apr_sys::apr_getopt_option_t;")
+        .raw_line("use apr_sys::apr_exit_why_e;")
+        .raw_line("use apr_sys::apr_seek_where_t;")
+        .raw_line("#[allow(unused_imports)]")
+        .raw_line("use apr_sys::apr_byte_t;")
+        .raw_line("use apr_sys::apr_dso_handle_t;")
         .clang_args(
             include_paths
                 .iter()
@@ -70,7 +74,9 @@ fn create_svn_bindings(
         builder = builder.header(svn_path.join("svn_wc.h").to_str().unwrap());
     }
 
-    if ra_feature_enabled {
+    // Include svn_ra.h if ra feature OR client feature is enabled
+    // (client library depends on ra)
+    if ra_feature_enabled || client_feature_enabled {
         builder = builder.header(svn_path.join("svn_ra.h").to_str().unwrap());
     }
 

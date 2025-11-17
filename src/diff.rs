@@ -457,7 +457,7 @@ pub fn file_output_merge(
 }
 
 /// Generic diff output using callback functions
-pub fn output(
+pub unsafe fn output(
     diff: &Diff,
     output_baton: *mut std::ffi::c_void,
     output_fns: &subversion_sys::svn_diff_output_fns_t,

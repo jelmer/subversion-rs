@@ -48,17 +48,17 @@ pub trait Credentials {
         Self: Sized;
 
     /// Try to downcast to SimpleCredentials
-    fn as_simple(&self) -> Option<&SimpleCredentials> {
+    fn as_simple(&self) -> Option<&SimpleCredentials<'_>> {
         None
     }
 
     /// Try to downcast to UsernameCredentials
-    fn as_username(&self) -> Option<&UsernameCredentials> {
+    fn as_username(&self) -> Option<&UsernameCredentials<'_>> {
         None
     }
 
-    /// Try to downcast to SslServerTrustCredentials  
-    fn as_ssl_server_trust(&self) -> Option<&SslServerTrustCredentials> {
+    /// Try to downcast to SslServerTrustCredentials
+    fn as_ssl_server_trust(&self) -> Option<&SslServerTrustCredentials<'_>> {
         None
     }
 }
@@ -135,7 +135,7 @@ impl<'pool> Credentials for SimpleCredentials<'pool> {
         }
     }
 
-    fn as_simple(&self) -> Option<&SimpleCredentials> {
+    fn as_simple(&self) -> Option<&SimpleCredentials<'_>> {
         Some(self)
     }
 }
@@ -198,7 +198,7 @@ impl<'pool> Credentials for UsernameCredentials<'pool> {
         }
     }
 
-    fn as_username(&self) -> Option<&UsernameCredentials> {
+    fn as_username(&self) -> Option<&UsernameCredentials<'_>> {
         Some(self)
     }
 }
@@ -257,7 +257,7 @@ impl<'pool> Credentials for SslServerTrustCredentials<'pool> {
         }
     }
 
-    fn as_ssl_server_trust(&self) -> Option<&SslServerTrustCredentials> {
+    fn as_ssl_server_trust(&self) -> Option<&SslServerTrustCredentials<'_>> {
         Some(self)
     }
 }
@@ -709,10 +709,10 @@ pub fn get_ssl_server_trust_prompt_provider(
         cred: *mut *mut subversion_sys::svn_auth_cred_ssl_server_trust_t,
         baton: *mut std::ffi::c_void,
         realmstring: *const std::ffi::c_char,
-        failures: subversion_sys::apr_uint32_t,
+        failures: apr_sys::apr_uint32_t,
         cert_info: *const subversion_sys::svn_auth_ssl_server_cert_info_t,
         may_save: subversion_sys::svn_boolean_t,
-        pool: *mut subversion_sys::apr_pool_t,
+        pool: *mut apr_sys::apr_pool_t,
     ) -> *mut subversion_sys::svn_error_t {
         let f = unsafe {
             &*(baton
@@ -829,7 +829,7 @@ extern "C" fn wrap_client_cert_prompt_fn(
     baton: *mut std::ffi::c_void,
     realmstring: *const std::ffi::c_char,
     may_save: subversion_sys::svn_boolean_t,
-    _pool: *mut subversion_sys::apr_pool_t,
+    _pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     let f = unsafe {
         &*(baton as *const &dyn Fn(&str, bool) -> Result<SslClientCertCredentials, crate::Error>)
@@ -948,7 +948,7 @@ pub fn get_simple_prompt_provider<'pool>(
         realmstring: *const std::ffi::c_char,
         username: *const std::ffi::c_char,
         may_save: subversion_sys::svn_boolean_t,
-        _pool: *mut subversion_sys::apr_pool_t,
+        _pool: *mut apr_sys::apr_pool_t,
     ) -> *mut subversion_sys::svn_error_t {
         let f = unsafe {
             &*(baton
@@ -1010,7 +1010,7 @@ pub fn get_simple_prompt_provider_boxed(
         realmstring: *const std::ffi::c_char,
         username: *const std::ffi::c_char,
         may_save: subversion_sys::svn_boolean_t,
-        pool: *mut subversion_sys::apr_pool_t,
+        pool: *mut apr_sys::apr_pool_t,
     ) -> *mut subversion_sys::svn_error_t {
         let f = unsafe {
             &*(baton
@@ -1068,7 +1068,7 @@ pub fn get_username_prompt_provider(
         baton: *mut std::ffi::c_void,
         realmstring: *const std::ffi::c_char,
         may_save: subversion_sys::svn_boolean_t,
-        _pool: *mut subversion_sys::apr_pool_t,
+        _pool: *mut apr_sys::apr_pool_t,
     ) -> *mut subversion_sys::svn_error_t {
         let f = unsafe { &*(baton as *const &dyn Fn(&str, bool) -> Result<String, crate::Error>) };
         let realm = unsafe { std::ffi::CStr::from_ptr(realmstring).to_str().unwrap() };
@@ -1119,7 +1119,7 @@ pub fn get_username_prompt_provider_boxed(
         baton: *mut std::ffi::c_void,
         realmstring: *const std::ffi::c_char,
         may_save: subversion_sys::svn_boolean_t,
-        _pool: *mut subversion_sys::apr_pool_t,
+        _pool: *mut apr_sys::apr_pool_t,
     ) -> *mut subversion_sys::svn_error_t {
         let f = unsafe {
             &*(baton as *const Box<dyn Fn(&str, bool) -> Result<String, crate::Error> + Send>)
@@ -1162,7 +1162,7 @@ extern "C" fn wrap_plaintext_passphrase_prompt_boxed(
     may_save_plaintext: *mut subversion_sys::svn_boolean_t,
     realmstring: *const std::ffi::c_char,
     baton: *mut std::ffi::c_void,
-    _pool: *mut subversion_sys::apr_pool_t,
+    _pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     let f = unsafe { &*(baton as *const Box<dyn Fn(&str) -> Result<bool, crate::Error> + Send>) };
     let realm = unsafe { std::ffi::CStr::from_ptr(realmstring).to_str().unwrap() };
@@ -1178,7 +1178,7 @@ extern "C" fn wrap_plaintext_passphrase_prompt(
     may_save_plaintext: *mut subversion_sys::svn_boolean_t,
     realmstring: *const std::ffi::c_char,
     baton: *mut std::ffi::c_void,
-    _pool: *mut subversion_sys::apr_pool_t,
+    _pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     let f = unsafe { &*(baton as *const &dyn Fn(&str) -> Result<bool, crate::Error>) };
     let realm = unsafe { std::ffi::CStr::from_ptr(realmstring).to_str().unwrap() };

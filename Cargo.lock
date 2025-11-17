@@ -13,17 +13,19 @@ dependencies = [
 
 [[package]]
 name = "apr"
-version = "0.3.4"
-source = "git+https://github.com/jelmer/apr-rs#e40765f18d7f419bac8d21fc00530b6ac07d0449"
+version = "0.3.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1cd5b44fe056a4cac1a41118fc72d92428858c137098767e87596a260b22e0e"
 dependencies = [
  "apr-sys",
- "ctor 0.6.1",
+ "ctor",
 ]
 
 [[package]]
 name = "apr-sys"
 version = "0.2.1"
-source = "git+https://github.com/jelmer/apr-rs#e40765f18d7f419bac8d21fc00530b6ac07d0449"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edccb3d92ae38dd713e46ea192cf3a2fb3ffa387817691816cef9a3b5ebb8b7c"
 dependencies = [
  "bindgen",
  "system-deps",
@@ -110,29 +112,13 @@ dependencies = [
 
 [[package]]
 name = "ctor"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "67773048316103656a637612c4a62477603b777d91d9c62ff2290f9cde178fdb"
-dependencies = [
- "ctor-proc-macro 0.0.6",
- "dtor",
-]
-
-[[package]]
-name = "ctor"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ffc71fcdcdb40d6f087edddf7f8f1f8f79e6cf922f555a9ee8779752d4819bd"
 dependencies = [
- "ctor-proc-macro 0.0.7",
+ "ctor-proc-macro",
  "dtor",
 ]
-
-[[package]]
-name = "ctor-proc-macro"
-version = "0.0.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2931af7e13dc045d8e9d26afccc6fa115d64e115c9c84b1166288b46f6782c2"
 
 [[package]]
 name = "ctor-proc-macro"
@@ -690,7 +676,7 @@ dependencies = [
  "apr-sys",
  "atty",
  "bitflags",
- "ctor 0.5.0",
+ "ctor",
  "indexmap",
  "lazy_static",
  "libc",

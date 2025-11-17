@@ -898,15 +898,18 @@ pub fn get_pristine_contents(
     let path_cstr = std::ffi::CString::new(path_str.as_ref()).unwrap();
     let mut contents: *mut subversion_sys::svn_stream_t = std::ptr::null_mut();
 
-    with_tmp_pool(|pool| -> Result<(), crate::Error> {
+    // Create a pool that will live as long as the Stream
+    let result_pool = apr::Pool::new();
+
+    with_tmp_pool(|scratch_pool| -> Result<(), crate::Error> {
         let mut ctx = std::ptr::null_mut();
-        with_tmp_pool(|scratch_pool| {
+        with_tmp_pool(|ctx_scratch_pool| {
             let err = unsafe {
                 subversion_sys::svn_wc_context_create(
                     &mut ctx,
                     std::ptr::null_mut(),
-                    pool.as_mut_ptr(),
-                    scratch_pool.as_mut_ptr(),
+                    scratch_pool.as_mut_ptr(), // ctx lives in the outer scratch pool
+                    ctx_scratch_pool.as_mut_ptr(),
                 )
             };
             svn_result(err)
@@ -917,8 +920,8 @@ pub fn get_pristine_contents(
                 &mut contents,
                 ctx,
                 path_cstr.as_ptr(),
-                pool.as_mut_ptr(),
-                pool.as_mut_ptr(),
+                result_pool.as_mut_ptr(),  // result pool for the stream
+                scratch_pool.as_mut_ptr(), // scratch pool for temporary allocations
             )
         };
         Error::from_raw(err)?;
@@ -929,7 +932,7 @@ pub fn get_pristine_contents(
         Ok(None)
     } else {
         Ok(Some(unsafe {
-            crate::io::Stream::from_ptr_and_pool(contents, apr::Pool::new())
+            crate::io::Stream::from_ptr_and_pool(contents, result_pool)
         }))
     }
 }
@@ -940,7 +943,7 @@ pub fn get_pristine_copy_path(path: &std::path::Path) -> Result<std::path::PathB
     let path_cstr = std::ffi::CString::new(path_str.as_ref()).unwrap();
     let mut pristine_path: *const i8 = std::ptr::null();
 
-    with_tmp_pool(|pool| -> Result<(), crate::Error> {
+    let pristine_path_str = with_tmp_pool(|pool| -> Result<String, crate::Error> {
         let err = unsafe {
             subversion_sys::svn_wc_get_pristine_copy_path(
                 path_cstr.as_ptr(),
@@ -949,16 +952,17 @@ pub fn get_pristine_copy_path(path: &std::path::Path) -> Result<std::path::PathB
             )
         };
         Error::from_raw(err)?;
-        Ok(())
-    })?;
 
-    let pristine_path_str = if pristine_path.is_null() {
-        String::new()
-    } else {
-        unsafe { std::ffi::CStr::from_ptr(pristine_path) }
-            .to_string_lossy()
-            .into_owned()
-    };
+        // Copy the string before the pool is destroyed
+        let result = if pristine_path.is_null() {
+            String::new()
+        } else {
+            unsafe { std::ffi::CStr::from_ptr(pristine_path) }
+                .to_string_lossy()
+                .into_owned()
+        };
+        Ok(result)
+    })?;
 
     Ok(std::path::PathBuf::from(pristine_path_str))
 }
@@ -1037,7 +1041,7 @@ impl Context {
         path: &str,
     ) -> Result<Option<std::collections::HashMap<String, Vec<u8>>>, crate::Error> {
         let path_cstr = std::ffi::CString::new(path).unwrap();
-        let mut props: *mut subversion_sys::apr_hash_t = std::ptr::null_mut();
+        let mut props: *mut apr_sys::apr_hash_t = std::ptr::null_mut();
 
         let pool = apr::Pool::new();
         let err = unsafe {
@@ -1083,7 +1087,7 @@ impl Context {
             baton: *mut std::ffi::c_void,
             local_abspath: *const std::os::raw::c_char,
             status: *const subversion_sys::svn_wc_status3_t,
-            _pool: *mut subversion_sys::apr_pool_t,
+            _pool: *mut apr_sys::apr_pool_t,
         ) -> *mut subversion_sys::svn_error_t {
             let callback =
                 unsafe { &mut *(baton as *mut Box<dyn FnMut(&str, &Status) -> Result<(), Error>>) };
@@ -1376,6 +1380,7 @@ impl Context {
         src_abspath: &std::path::Path,
         dst_abspath: &std::path::Path,
         metadata_only: bool,
+        _allow_mixed_revisions: bool,
         cancel_func: Option<&dyn Fn() -> Result<(), Error>>,
         notify_func: Option<&dyn Fn(&Notify)>,
     ) -> Result<(), Error> {
@@ -1649,7 +1654,7 @@ impl Notify {
 extern "C" fn wrap_notify_func(
     baton: *mut std::ffi::c_void,
     notify: *const subversion_sys::svn_wc_notify_t,
-    _pool: *mut subversion_sys::apr_pool_t,
+    _pool: *mut apr_sys::apr_pool_t,
 ) {
     if baton.is_null() || notify.is_null() {
         return;
@@ -1708,6 +1713,7 @@ pub fn cleanup(
     fix_recorded_timestamps: bool,
     clear_dav_cache: bool,
     vacuum_pristines: bool,
+    _include_externals: bool,
 ) -> Result<(), Error> {
     let path_str = wc_path.to_string_lossy();
     let path_cstr = std::ffi::CString::new(path_str.as_ref()).unwrap();
@@ -1748,7 +1754,15 @@ pub fn cleanup(
 
 /// Get the working copy revision status
 /// Add a path to version control
-pub fn add(ctx: &mut Context, path: &std::path::Path, force: bool) -> Result<(), Error> {
+pub fn add(
+    ctx: &mut Context,
+    path: &std::path::Path,
+    _depth: crate::Depth,
+    force: bool,
+    _no_ignore: bool,
+    _no_autoprops: bool,
+    _add_parents: bool,
+) -> Result<(), Error> {
     let path_str = path.to_string_lossy();
     let path_cstr = std::ffi::CString::new(path_str.as_ref())?;
 
@@ -1874,13 +1888,12 @@ pub fn resolve_conflict(
     path: &std::path::Path,
     depth: crate::Depth,
     resolve_text: bool,
-    resolve_prop: Option<&str>,
+    _resolve_props: bool,
     resolve_tree: bool,
     conflict_choice: ConflictChoice,
 ) -> Result<(), Error> {
     let path_str = path.to_string_lossy();
     let path_cstr = std::ffi::CString::new(path_str.as_ref())?;
-    let prop_cstr = resolve_prop.map(|p| std::ffi::CString::new(p).unwrap());
 
     with_tmp_pool(|pool| unsafe {
         let err = subversion_sys::svn_wc_resolved_conflict5(
@@ -1888,7 +1901,7 @@ pub fn resolve_conflict(
             path_cstr.as_ptr(),
             depth.into(),
             resolve_text as i32,
-            prop_cstr.as_ref().map_or(std::ptr::null(), |p| p.as_ptr()),
+            std::ptr::null(), // resolve_prop (resolve all props if resolve_props is true)
             resolve_tree as i32,
             conflict_choice.into(),
             None,                 // cancel_func
@@ -2283,7 +2296,7 @@ mod tests {
         std::fs::write(&src, "content").unwrap();
 
         // Should fail without a working copy
-        let result = ctx.move_path(&src, &dst, false, None, None);
+        let result = ctx.move_path(&src, &dst, false, false, None, None);
         assert!(result.is_err());
     }
 

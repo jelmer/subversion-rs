@@ -10,6 +10,7 @@ pub struct Mergeinfo {
 }
 
 impl Mergeinfo {
+    #[allow(dead_code)]
     pub(crate) unsafe fn from_ptr_and_pool(ptr: *mut svn_mergeinfo_t, pool: apr::Pool) -> Self {
         Self {
             ptr,

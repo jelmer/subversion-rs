@@ -66,7 +66,7 @@ pub fn read(
         let mut hi = apr_sys::apr_hash_first(pool.as_mut_ptr(), raw_hash);
         while !hi.is_null() {
             let mut key_ptr: *const std::ffi::c_void = std::ptr::null();
-            let mut key_len: subversion_sys::apr_ssize_t = 0;
+            let mut key_len: apr_sys::apr_ssize_t = 0;
             let mut val_ptr: *mut std::ffi::c_void = std::ptr::null_mut();
 
             apr_sys::apr_hash_this(hi, &mut key_ptr, &mut key_len, &mut val_ptr);
@@ -135,7 +135,7 @@ pub fn write(
             apr_sys::apr_hash_set(
                 apr_hash.as_mut_ptr(),
                 key_cstr.as_ptr() as *const std::ffi::c_void,
-                apr_sys::APR_HASH_KEY_STRING as subversion_sys::apr_ssize_t,
+                apr_sys::APR_HASH_KEY_STRING as apr_sys::apr_ssize_t,
                 svn_string as *const std::ffi::c_void,
             );
         }
@@ -200,7 +200,7 @@ pub fn read_incremental(
         let mut hi = apr_sys::apr_hash_first(pool.as_mut_ptr(), raw_hash);
         while !hi.is_null() {
             let mut key_ptr: *const std::ffi::c_void = std::ptr::null();
-            let mut key_len: subversion_sys::apr_ssize_t = 0;
+            let mut key_len: apr_sys::apr_ssize_t = 0;
             let mut val_ptr: *mut std::ffi::c_void = std::ptr::null_mut();
 
             apr_sys::apr_hash_this(hi, &mut key_ptr, &mut key_len, &mut val_ptr);
@@ -270,7 +270,7 @@ pub fn write_incremental(
             apr_sys::apr_hash_set(
                 apr_hash.as_mut_ptr(),
                 key_cstr.as_ptr() as *const std::ffi::c_void,
-                apr_sys::APR_HASH_KEY_STRING as subversion_sys::apr_ssize_t,
+                apr_sys::APR_HASH_KEY_STRING as apr_sys::apr_ssize_t,
                 svn_string as *const std::ffi::c_void,
             );
         }
@@ -294,7 +294,7 @@ pub fn write_incremental(
             apr_sys::apr_hash_set(
                 apr_oldhash.as_mut_ptr(),
                 key_cstr.as_ptr() as *const std::ffi::c_void,
-                apr_sys::APR_HASH_KEY_STRING as subversion_sys::apr_ssize_t,
+                apr_sys::APR_HASH_KEY_STRING as apr_sys::apr_ssize_t,
                 svn_string as *const std::ffi::c_void,
             );
         }
@@ -353,7 +353,7 @@ where
             apr_sys::apr_hash_set(
                 apr_hash_a.as_mut_ptr(),
                 key_cstr.as_ptr() as *const std::ffi::c_void,
-                apr_sys::APR_HASH_KEY_STRING as subversion_sys::apr_ssize_t,
+                apr_sys::APR_HASH_KEY_STRING as apr_sys::apr_ssize_t,
                 svn_string as *const std::ffi::c_void,
             );
         }
@@ -377,7 +377,7 @@ where
             apr_sys::apr_hash_set(
                 apr_hash_b.as_mut_ptr(),
                 key_cstr.as_ptr() as *const std::ffi::c_void,
-                apr_sys::APR_HASH_KEY_STRING as subversion_sys::apr_ssize_t,
+                apr_sys::APR_HASH_KEY_STRING as apr_sys::apr_ssize_t,
                 svn_string as *const std::ffi::c_void,
             );
         }
@@ -387,7 +387,7 @@ where
     // Create wrapper for the callback
     extern "C" fn diff_callback(
         key: *const std::ffi::c_void,
-        klen: subversion_sys::apr_ssize_t,
+        klen: apr_sys::apr_ssize_t,
         status: subversion_sys::svn_hash_diff_key_status,
         baton: *mut std::ffi::c_void,
     ) -> *mut subversion_sys::svn_error_t {
@@ -451,7 +451,7 @@ pub fn from_cstring_keys(keys: &[&str]) -> Result<HashMap<String, String>, Error
         keys_array.push(cstring.as_ptr());
     }
 
-    let mut hash_ptr: *mut subversion_sys::apr_hash_t = std::ptr::null_mut();
+    let mut hash_ptr: *mut apr_sys::apr_hash_t = std::ptr::null_mut();
     unsafe {
         let err = subversion_sys::svn_hash_from_cstring_keys(
             &mut hash_ptr,
@@ -594,13 +594,14 @@ impl<'a> DirentHash<'a> {
     /// The caller must ensure that:
     /// - `ptr` is a valid APR hash containing svn_dirent_t values
     /// - The hash and its contents remain valid for the lifetime of this wrapper
-    pub unsafe fn from_ptr(ptr: *mut subversion_sys::apr_hash_t) -> Self {
+    pub unsafe fn from_ptr(ptr: *mut apr_sys::apr_hash_t) -> Self {
         Self {
             inner: apr::hash::TypedHash::<subversion_sys::svn_dirent_t>::from_ptr(ptr),
         }
     }
 
     /// Convert the dirents to a HashMap<String, crate::Dirent>
+    #[cfg(feature = "ra")]
     pub fn to_hashmap(&self) -> HashMap<String, crate::ra::Dirent> {
         self.inner
             .iter()
@@ -613,6 +614,7 @@ impl<'a> DirentHash<'a> {
     }
 
     /// Iterate over the dirents as (path: &str, dirent: crate::ra::Dirent) pairs
+    #[cfg(feature = "ra")]
     pub fn iter(&self) -> impl Iterator<Item = (&str, crate::ra::Dirent)> + '_ {
         self.inner.iter().map(|(k, v)| {
             let path = std::str::from_utf8(k).unwrap_or("");
@@ -647,7 +649,7 @@ impl<'a> PathChangeHash<'a> {
     /// The caller must ensure that:
     /// - `ptr` is a valid APR hash containing svn_fs_path_change2_t values
     /// - The hash and its contents remain valid for the lifetime of this wrapper
-    pub unsafe fn from_ptr(ptr: *mut subversion_sys::apr_hash_t) -> Self {
+    pub unsafe fn from_ptr(ptr: *mut apr_sys::apr_hash_t) -> Self {
         Self {
             inner: apr::hash::Hash::from_ptr(ptr),
         }
@@ -691,7 +693,7 @@ impl<'a> FsDirentHash<'a> {
     /// The caller must ensure that:
     /// - `ptr` is a valid APR hash containing svn_fs_dirent_t values
     /// - The hash and its contents remain valid for the lifetime of this wrapper
-    pub unsafe fn from_ptr(ptr: *mut subversion_sys::apr_hash_t) -> Self {
+    pub unsafe fn from_ptr(ptr: *mut apr_sys::apr_hash_t) -> Self {
         Self {
             inner: apr::hash::Hash::from_ptr(ptr),
         }
@@ -702,7 +704,10 @@ impl<'a> FsDirentHash<'a> {
         let mut result = HashMap::new();
         for (k, v) in self.inner.iter() {
             let name = String::from_utf8_lossy(k).into_owned();
-            let entry = crate::fs::FsDirEntry::from_raw(v as *mut subversion_sys::svn_fs_dirent_t, pool.clone());
+            let entry = crate::fs::FsDirEntry::from_raw(
+                v as *mut subversion_sys::svn_fs_dirent_t,
+                pool.clone(),
+            );
             result.insert(name, entry);
         }
         result

@@ -532,12 +532,12 @@ impl TxDeltaWindow {
     }
 
     /// Gets the source view length.
-    pub fn sview_len(&self) -> subversion_sys::apr_size_t {
+    pub fn sview_len(&self) -> apr_sys::apr_size_t {
         unsafe { (*self.ptr).sview_len }
     }
 
     /// Gets the target view length.
-    pub fn tview_len(&self) -> subversion_sys::apr_size_t {
+    pub fn tview_len(&self) -> apr_sys::apr_size_t {
         unsafe { (*self.ptr).tview_len }
     }
 
@@ -566,7 +566,7 @@ impl TxDeltaWindow {
     ) -> Result<(), crate::Error> {
         unsafe {
             target.resize(self.tview_len(), 0);
-            let mut tlen = target.len() as subversion_sys::apr_size_t;
+            let mut tlen = target.len() as apr_sys::apr_size_t;
             subversion_sys::svn_txdelta_apply_instructions(
                 self.ptr,
                 source.as_ptr() as *mut i8,
@@ -592,7 +592,7 @@ impl TxDeltaWindow {
 unsafe extern "C" fn wrap_editor_open_root(
     edit_baton: *mut std::ffi::c_void,
     base_revision: subversion_sys::svn_revnum_t,
-    _pool: *mut subversion_sys::apr_pool_t,
+    _pool: *mut apr_sys::apr_pool_t,
     root_baton: *mut *mut std::ffi::c_void,
 ) -> *mut subversion_sys::svn_error_t {
     eprintln!(
@@ -625,7 +625,7 @@ unsafe extern "C" fn wrap_editor_delete_entry(
     path: *const std::ffi::c_char,
     revision: subversion_sys::svn_revnum_t,
     parent_baton: *mut std::ffi::c_void,
-    _pool: *mut subversion_sys::apr_pool_t,
+    _pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     let path = unsafe { std::ffi::CStr::from_ptr(path) };
     // The parent_baton is a pointer to a Box<dyn DirectoryEditor>
@@ -641,7 +641,7 @@ unsafe extern "C" fn wrap_editor_add_directory(
     parent_baton: *mut std::ffi::c_void,
     copyfrom_path: *const std::ffi::c_char,
     copyfrom_revision: subversion_sys::svn_revnum_t,
-    _pool: *mut subversion_sys::apr_pool_t,
+    _pool: *mut apr_sys::apr_pool_t,
     child_baton: *mut *mut std::ffi::c_void,
 ) -> *mut subversion_sys::svn_error_t {
     eprintln!(
@@ -698,7 +698,7 @@ unsafe extern "C" fn wrap_editor_open_directory(
     path: *const std::ffi::c_char,
     parent_baton: *mut std::ffi::c_void,
     base_revision: subversion_sys::svn_revnum_t,
-    _pool: *mut subversion_sys::apr_pool_t,
+    _pool: *mut apr_sys::apr_pool_t,
     child_baton: *mut *mut std::ffi::c_void,
 ) -> *mut subversion_sys::svn_error_t {
     let path = unsafe { std::ffi::CStr::from_ptr(path) };
@@ -719,7 +719,7 @@ unsafe extern "C" fn wrap_editor_change_dir_prop(
     baton: *mut std::ffi::c_void,
     name: *const std::ffi::c_char,
     value: *const subversion_sys::svn_string_t,
-    _pool: *mut subversion_sys::apr_pool_t,
+    _pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     let name = unsafe { std::ffi::CStr::from_ptr(name) };
     let value = unsafe { std::slice::from_raw_parts((*value).data as *const u8, (*value).len) };
@@ -732,7 +732,7 @@ unsafe extern "C" fn wrap_editor_change_dir_prop(
 
 unsafe extern "C" fn wrap_editor_close_directory(
     baton: *mut std::ffi::c_void,
-    _pool: *mut subversion_sys::apr_pool_t,
+    _pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     eprintln!("wrap_editor_close_directory called with baton={:p}", baton);
     // First recover the boxed fat pointer, then the actual DirectoryEditor
@@ -750,7 +750,7 @@ unsafe extern "C" fn wrap_editor_close_directory(
 unsafe extern "C" fn wrap_editor_absent_directory(
     path: *const std::ffi::c_char,
     parent_baton: *mut std::ffi::c_void,
-    _pool: *mut subversion_sys::apr_pool_t,
+    _pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     let path = unsafe { std::ffi::CStr::from_ptr(path) };
     // The parent_baton is a pointer to a Box<dyn DirectoryEditor>
@@ -766,7 +766,8 @@ unsafe extern "C" fn wrap_editor_add_file(
     parent_baton: *mut std::ffi::c_void,
     copyfrom_path: *const std::ffi::c_char,
     copyfrom_revision: subversion_sys::svn_revnum_t,
-    _pool: *mut subversion_sys::apr_pool_t,
+    _pool: *mut apr_sys::apr_pool_t,
+
     file_baton: *mut *mut std::ffi::c_void,
 ) -> *mut subversion_sys::svn_error_t {
     eprintln!(
@@ -824,7 +825,7 @@ unsafe extern "C" fn wrap_editor_open_file(
     path: *const std::ffi::c_char,
     parent_baton: *mut std::ffi::c_void,
     base_revision: subversion_sys::svn_revnum_t,
-    _pool: *mut subversion_sys::apr_pool_t,
+    _pool: *mut apr_sys::apr_pool_t,
     file_baton: *mut *mut std::ffi::c_void,
 ) -> *mut subversion_sys::svn_error_t {
     let path = unsafe { std::ffi::CStr::from_ptr(path) };
@@ -893,7 +894,7 @@ extern "C" fn wrap_window_handler(
 unsafe extern "C" fn wrap_editor_apply_textdelta(
     file_baton: *mut std::ffi::c_void,
     base_checksum: *const std::ffi::c_char,
-    _result_pool: *mut subversion_sys::apr_pool_t,
+    _result_pool: *mut apr_sys::apr_pool_t,
     handler: *mut subversion_sys::svn_txdelta_window_handler_t,
     handler_baton: *mut *mut std::ffi::c_void,
 ) -> *mut subversion_sys::svn_error_t {
@@ -934,7 +935,7 @@ unsafe extern "C" fn wrap_editor_change_file_prop(
     baton: *mut std::ffi::c_void,
     name: *const std::ffi::c_char,
     value: *const subversion_sys::svn_string_t,
-    _pool: *mut subversion_sys::apr_pool_t,
+    _pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     let name = unsafe { std::ffi::CStr::from_ptr(name) };
     let value = unsafe { std::slice::from_raw_parts((*value).data as *const u8, (*value).len) };
@@ -949,7 +950,7 @@ unsafe extern "C" fn wrap_editor_change_file_prop(
 unsafe extern "C" fn wrap_editor_close_file(
     baton: *mut std::ffi::c_void,
     text_checksum: *const std::ffi::c_char,
-    _pool: *mut subversion_sys::apr_pool_t,
+    _pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     let text_checksum = if text_checksum.is_null() {
         None
@@ -971,7 +972,7 @@ unsafe extern "C" fn wrap_editor_close_file(
 unsafe extern "C" fn wrap_editor_absent_file(
     text_checksum: *const std::ffi::c_char,
     file_baton: *mut std::ffi::c_void,
-    _pooll: *mut subversion_sys::apr_pool_t,
+    _pooll: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     let text_checksum = if text_checksum.is_null() {
         None
@@ -988,7 +989,7 @@ unsafe extern "C" fn wrap_editor_absent_file(
 
 unsafe extern "C" fn wrap_editor_close_edit(
     edit_baton: *mut std::ffi::c_void,
-    _pool: *mut subversion_sys::apr_pool_t,
+    _pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     // Reconstruct the fat pointer from the baton
     let editor_ptr = unsafe { *(edit_baton as *mut *mut dyn Editor) };
@@ -1001,7 +1002,7 @@ unsafe extern "C" fn wrap_editor_close_edit(
 
 unsafe extern "C" fn wrap_editor_abort_edit(
     edit_baton: *mut std::ffi::c_void,
-    _pool: *mut subversion_sys::apr_pool_t,
+    _pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     // Reconstruct the fat pointer from the baton
     let editor_ptr = unsafe { *(edit_baton as *mut *mut dyn Editor) };
@@ -1015,7 +1016,7 @@ unsafe extern "C" fn wrap_editor_abort_edit(
 unsafe extern "C" fn wrap_editor_set_target_revision(
     edit_baton: *mut std::ffi::c_void,
     revision: subversion_sys::svn_revnum_t,
-    _pool: *mut subversion_sys::apr_pool_t,
+    _pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     // Reconstruct the fat pointer from the baton
     let editor_ptr = unsafe { *(edit_baton as *mut *mut dyn Editor) };
@@ -1166,7 +1167,7 @@ pub fn txdelta2(
 }
 
 /// Send a string through a delta handler
-pub fn send_string(
+pub unsafe fn send_string(
     string: &str,
     handler: subversion_sys::svn_txdelta_window_handler_t,
     handler_baton: *mut std::ffi::c_void,
@@ -1194,7 +1195,7 @@ pub fn send_string(
 }
 
 /// Send a stream through a delta handler
-pub fn send_stream(
+pub unsafe fn send_stream(
     stream: &mut crate::io::Stream,
     handler: subversion_sys::svn_txdelta_window_handler_t,
     handler_baton: *mut std::ffi::c_void,
@@ -1218,7 +1219,7 @@ pub fn send_stream(
 }
 
 /// Send a txdelta stream through a delta handler
-pub fn send_txstream(
+pub unsafe fn send_txstream(
     txstream: &mut TxDeltaStream,
     handler: subversion_sys::svn_txdelta_window_handler_t,
     handler_baton: *mut std::ffi::c_void,

@@ -29,7 +29,7 @@ impl std::error::Error for IterBreak {}
 /// Return `IterResult::Ok(())` to continue iteration or `Err(IterBreak)` to stop.
 ///
 /// Returns `Ok(true)` if iteration completed normally, `Ok(false)` if broken early.
-pub fn iter_hash<F>(hash: *mut subversion_sys::apr_hash_t, mut callback: F) -> Result<bool, Error>
+pub unsafe fn iter_hash<F>(hash: *mut apr_sys::apr_hash_t, mut callback: F) -> Result<bool, Error>
 where
     F: FnMut(&[u8], *mut std::ffi::c_void) -> IterResult<()>,
 {
@@ -42,9 +42,9 @@ where
         extern "C" fn c_callback(
             baton: *mut std::ffi::c_void,
             key: *const std::ffi::c_void,
-            klen: subversion_sys::apr_ssize_t,
+            klen: apr_sys::apr_ssize_t,
             val: *mut std::ffi::c_void,
-            _pool: *mut subversion_sys::apr_pool_t,
+            _pool: *mut apr_sys::apr_pool_t,
         ) -> *mut subversion_sys::svn_error_t {
             let callback = unsafe {
                 &mut *(baton as *mut &mut dyn FnMut(&[u8], *mut std::ffi::c_void) -> IterResult<()>)
@@ -91,8 +91,8 @@ where
 /// Return `IterResult::Ok(())` to continue iteration or `Err(IterBreak)` to stop.
 ///
 /// Returns `Ok(true)` if iteration completed normally, `Ok(false)` if broken early.
-pub fn iter_array<F>(
-    array: *const subversion_sys::apr_array_header_t,
+pub unsafe fn iter_array<F>(
+    array: *const apr_sys::apr_array_header_t,
     mut callback: F,
 ) -> Result<bool, Error>
 where
@@ -107,7 +107,7 @@ where
         extern "C" fn c_callback(
             baton: *mut std::ffi::c_void,
             item: *mut std::ffi::c_void,
-            _pool: *mut subversion_sys::apr_pool_t,
+            _pool: *mut apr_sys::apr_pool_t,
         ) -> *mut subversion_sys::svn_error_t {
             let callback = unsafe {
                 &mut *(baton as *mut &mut dyn FnMut(*mut std::ffi::c_void) -> IterResult<()>)
@@ -164,7 +164,7 @@ impl HashIterExt for apr::hash::Hash<'_> {
     where
         F: FnMut(&[u8], *mut std::ffi::c_void) -> IterResult<()>,
     {
-        iter_hash(unsafe { self.as_ptr() as *mut _ }, callback)
+        unsafe { iter_hash(self.as_ptr() as *mut _, callback) }
     }
 }
 
@@ -181,7 +181,7 @@ impl<T: Copy> ArrayIterExt for apr::tables::TypedArray<'_, T> {
     where
         F: FnMut(*mut std::ffi::c_void) -> IterResult<()>,
     {
-        iter_array(unsafe { self.as_ptr() }, callback)
+        unsafe { iter_array(self.as_ptr(), callback) }
     }
 }
 
@@ -206,12 +206,14 @@ mod tests {
         }
 
         let mut collected = HashMap::new();
-        let completed = iter_hash(unsafe { hash.as_ptr() as *mut _ }, |key, value| {
-            let key_str = String::from_utf8_lossy(key).into_owned();
-            let value_int = unsafe { *(value as *const i32) };
-            collected.insert(key_str, value_int);
-            Ok(())
-        })
+        let completed = unsafe {
+            iter_hash(hash.as_ptr() as *mut _, |key, value| {
+                let key_str = String::from_utf8_lossy(key).into_owned();
+                let value_int = unsafe { *(value as *const i32) };
+                collected.insert(key_str, value_int);
+                Ok(())
+            })
+        }
         .unwrap();
 
         assert!(completed);
@@ -236,14 +238,16 @@ mod tests {
         }
 
         let mut count = 0;
-        let completed = iter_hash(unsafe { hash.as_ptr() as *mut _ }, |_key, _value| {
-            count += 1;
-            if count >= 1 {
-                Err(break_iteration())
-            } else {
-                Ok(())
-            }
-        })
+        let completed = unsafe {
+            iter_hash(hash.as_ptr() as *mut _, |_key, _value| {
+                count += 1;
+                if count >= 1 {
+                    Err(break_iteration())
+                } else {
+                    Ok(())
+                }
+            })
+        }
         .unwrap();
 
         assert!(!completed); // Should be false because we broke early

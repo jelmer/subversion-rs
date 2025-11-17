@@ -5,6 +5,90 @@ use std::collections::HashMap;
 use std::marker::PhantomData;
 use subversion_sys::svn_ra_session_t;
 
+/// A canonical relative path for use with RA (Repository Access) functions.
+///
+/// This type ensures that paths are properly formatted for SVN's RA layer,
+/// which expects relative paths without leading slashes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RelPath(String);
+
+impl RelPath {
+    /// Create a new RelPath from a string, canonicalizing it
+    pub fn canonicalize(path: &str) -> Result<Self, Error> {
+        // Remove leading slash if present
+        let path = path.strip_prefix('/').unwrap_or(path);
+
+        with_tmp_pool(|pool| unsafe {
+            let path_cstr = std::ffi::CString::new(path)?;
+            let canonical =
+                subversion_sys::svn_relpath_canonicalize(path_cstr.as_ptr(), pool.as_mut_ptr());
+            let canonical_cstr = std::ffi::CStr::from_ptr(canonical);
+            Ok(RelPath(canonical_cstr.to_str()?.to_owned()))
+        })
+    }
+
+    /// Create a RelPath from an already-canonical string (unchecked)
+    pub fn from_canonical(path: String) -> Result<Self, Error> {
+        // Verify it's actually canonical
+        let is_canonical = with_tmp_pool(|_pool| unsafe {
+            let path_cstr = std::ffi::CString::new(path.as_str())?;
+            Ok::<bool, Error>(subversion_sys::svn_relpath_is_canonical(path_cstr.as_ptr()) != 0)
+        })?;
+
+        if !is_canonical {
+            return Err(Error::from_str(&format!(
+                "Relative path is not canonical: {}",
+                path
+            )));
+        }
+
+        Ok(RelPath(path))
+    }
+
+    /// Get the path as a string slice
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<&str> for RelPath {
+    type Error = Error;
+
+    fn try_from(path: &str) -> Result<Self, Self::Error> {
+        Self::from_canonical(path.to_string())
+    }
+}
+
+impl TryFrom<String> for RelPath {
+    type Error = Error;
+
+    fn try_from(path: String) -> Result<Self, Self::Error> {
+        Self::from_canonical(path)
+    }
+}
+
+impl TryFrom<&String> for RelPath {
+    type Error = Error;
+
+    fn try_from(path: &String) -> Result<Self, Self::Error> {
+        Self::from_canonical(path.clone())
+    }
+}
+
+impl<'a> TryFrom<&'a &str> for RelPath {
+    type Error = Error;
+
+    fn try_from(path: &'a &str) -> Result<Self, Self::Error> {
+        Self::from_canonical((*path).to_string())
+    }
+}
+
+impl std::fmt::Display for RelPath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 /// Repository information struct
 #[derive(Debug, Clone)]
 pub struct RepositoryInfo {
@@ -98,7 +182,7 @@ pub(crate) extern "C" fn wrap_dirent_receiver(
     rel_path: *const std::os::raw::c_char,
     dirent: *mut subversion_sys::svn_dirent_t,
     baton: *mut std::os::raw::c_void,
-    _pool: *mut subversion_sys::apr_pool_t,
+    _pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     let rel_path = unsafe { std::ffi::CStr::from_ptr(rel_path) };
     let baton = unsafe {
@@ -113,7 +197,7 @@ pub(crate) extern "C" fn wrap_dirent_receiver(
 extern "C" fn wrap_location_segment_receiver(
     svn_location_segment: *mut subversion_sys::svn_location_segment_t,
     baton: *mut std::os::raw::c_void,
-    _pool: *mut subversion_sys::apr_pool_t,
+    _pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     let baton = unsafe {
         &*(baton as *const _ as *const &dyn Fn(&crate::LocationSegment) -> Result<(), crate::Error>)
@@ -133,7 +217,7 @@ extern "C" fn wrap_lock_func(
     do_lock: i32,
     lock: *const subversion_sys::svn_lock_t,
     error: *mut subversion_sys::svn_error_t,
-    _pool: *mut subversion_sys::apr_pool_t,
+    _pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     let lock_baton = unsafe {
         // Unbox the reference like get_log does
@@ -223,6 +307,7 @@ impl<'a> Session<'a> {
     pub fn as_mut_ptr(&mut self) -> *mut svn_ra_session_t {
         self.ptr
     }
+
     /// Opens a repository access session to a URL.
     pub fn open(
         url: &str,
@@ -230,6 +315,9 @@ impl<'a> Session<'a> {
         mut callbacks: Option<&'a mut Callbacks>,
         mut config: Option<&mut crate::config::ConfigHash>,
     ) -> Result<(Self, Option<String>, Option<String>), Error> {
+        // Ensure SVN libraries are initialized
+        crate::init::initialize()?;
+
         let url = std::ffi::CString::new(url).unwrap();
         let mut corrected_url = std::ptr::null();
         let mut redirect_url = std::ptr::null();
@@ -521,11 +609,12 @@ impl<'a> Session<'a> {
     /// Gets a file from the repository.
     pub fn get_file(
         &mut self,
-        path: &str,
+        path: impl TryInto<RelPath, Error = Error>,
         rev: Revnum,
         stream: &mut crate::io::Stream,
     ) -> Result<(Revnum, HashMap<String, Vec<u8>>), Error> {
-        let path = std::ffi::CString::new(path).unwrap();
+        let relpath = path.try_into()?;
+        let path = std::ffi::CString::new(relpath.as_str()).unwrap();
         let pool = Pool::new();
         let mut props = std::ptr::null_mut();
         let mut fetched_rev = 0;
@@ -551,11 +640,12 @@ impl<'a> Session<'a> {
     /// Gets a directory listing from the repository.
     pub fn get_dir(
         &mut self,
-        path: &str,
+        path: impl TryInto<RelPath, Error = Error>,
         rev: Revnum,
         dirent_fields: crate::DirentField,
     ) -> Result<(Revnum, HashMap<String, Dirent>, HashMap<String, Vec<u8>>), Error> {
-        let path = std::ffi::CString::new(path).unwrap();
+        let relpath = path.try_into()?;
+        let path = std::ffi::CString::new(relpath.as_str()).unwrap();
         let pool = Pool::new();
         let mut props = std::ptr::null_mut();
         let mut fetched_rev = 0;
@@ -573,7 +663,6 @@ impl<'a> Session<'a> {
                 pool.as_mut_ptr(),
             )
         };
-        let _rc_pool = std::rc::Rc::new(pool);
         crate::Error::from_raw(err)?;
         let prop_hash = unsafe { crate::props::PropHash::from_ptr(props) };
         let dirents_hash = unsafe { crate::hash::DirentHash::from_ptr(dirents) };
@@ -655,16 +744,14 @@ impl<'a> Session<'a> {
             )
         };
         Error::from_raw(err)?;
-        let _pool = std::rc::Rc::new(pool);
         let mergeinfo = unsafe { apr::hash::Hash::from_ptr(mergeinfo) };
-        let _iter_pool = apr::pool::Pool::new();
         Ok(mergeinfo
             .iter()
             .map(|(k, v)| {
                 // The value is already apr_hash_t* (svn_mergeinfo_t)
                 (String::from_utf8_lossy(k).into_owned(), unsafe {
                     crate::mergeinfo::Mergeinfo::from_ptr_and_pool(
-                        v as *mut *mut subversion_sys::apr_hash_t,
+                        v as *mut *mut apr_sys::apr_hash_t,
                         apr::Pool::new(),
                     )
                 })
@@ -754,8 +841,13 @@ impl<'a> Session<'a> {
     }
 
     /// Checks the node kind of a path at a specific revision.
-    pub fn check_path(&mut self, path: &str, rev: Revnum) -> Result<crate::NodeKind, Error> {
-        let path = std::ffi::CString::new(path).unwrap();
+    pub fn check_path(
+        &mut self,
+        path: impl TryInto<RelPath, Error = Error>,
+        rev: Revnum,
+    ) -> Result<crate::NodeKind, Error> {
+        let relpath = path.try_into()?;
+        let path = std::ffi::CString::new(relpath.as_str()).unwrap();
         let mut kind = 0;
         let pool = Pool::new();
         let err = unsafe {
@@ -775,7 +867,11 @@ impl<'a> Session<'a> {
     ///
     /// This is a convenience method that uses check_path internally.
     /// Returns true if the path exists (is a file or directory), false otherwise.
-    pub fn path_exists(&mut self, path: &str, rev: Revnum) -> Result<bool, Error> {
+    pub fn path_exists(
+        &mut self,
+        path: impl TryInto<RelPath, Error = Error>,
+        rev: Revnum,
+    ) -> Result<bool, Error> {
         let kind = self.check_path(path, rev)?;
         Ok(!matches!(kind, crate::NodeKind::None))
     }
@@ -783,12 +879,13 @@ impl<'a> Session<'a> {
     /// Performs a status operation.
     pub fn do_status(
         &mut self,
-        status_target: &str,
+        status_target: impl TryInto<RelPath, Error = Error>,
         revision: Revnum,
         depth: Depth,
         status_editor: &mut dyn Editor,
     ) -> Result<(), Error> {
-        let status_target = std::ffi::CString::new(status_target).unwrap();
+        let relpath = status_target.try_into()?;
+        let status_target = std::ffi::CString::new(relpath.as_str()).unwrap();
         let pool = Pool::new();
         let mut reporter = std::ptr::null();
         let mut report_baton = std::ptr::null_mut();
@@ -810,8 +907,13 @@ impl<'a> Session<'a> {
     }
 
     /// Gets information about a path at a specific revision.
-    pub fn stat(&mut self, path: &str, rev: Revnum) -> Result<Dirent, Error> {
-        let path = std::ffi::CString::new(path).unwrap();
+    pub fn stat(
+        &mut self,
+        path: impl TryInto<RelPath, Error = Error>,
+        rev: Revnum,
+    ) -> Result<Dirent, Error> {
+        let relpath = path.try_into()?;
+        let path = std::ffi::CString::new(relpath.as_str()).unwrap();
         let mut dirent = std::ptr::null_mut();
         let pool = Pool::new();
         let err = unsafe {
@@ -939,14 +1041,15 @@ impl<'a> Session<'a> {
     pub fn diff(
         &mut self,
         revision: Revnum,
-        diff_target: &str,
+        diff_target: impl TryInto<RelPath, Error = Error>,
         depth: Depth,
         ignore_ancestry: bool,
         text_deltas: bool,
         versus_url: &str,
         diff_editor: &mut dyn Editor,
     ) -> Result<Box<dyn Reporter + Send>, Error> {
-        let diff_target = std::ffi::CString::new(diff_target).unwrap();
+        let relpath = diff_target.try_into()?;
+        let diff_target = std::ffi::CString::new(relpath.as_str()).unwrap();
         let versus_url = std::ffi::CString::new(versus_url).unwrap();
         let pool = Pool::new();
         let mut reporter = std::ptr::null();
@@ -1048,11 +1151,12 @@ impl<'a> Session<'a> {
     /// Gets the locations of a path at multiple revisions.
     pub fn get_locations(
         &mut self,
-        path: &str,
+        path: impl TryInto<RelPath, Error = Error>,
         peg_revision: Revnum,
         location_revisions: &[Revnum],
     ) -> Result<HashMap<Revnum, String>, Error> {
-        let path = std::ffi::CString::new(path).unwrap();
+        let relpath = path.try_into()?;
+        let path = std::ffi::CString::new(relpath.as_str()).unwrap();
         let pool = Pool::new();
         let mut location_revisions_array =
             apr::tables::TypedArray::<subversion_sys::svn_revnum_t>::new(
@@ -1079,7 +1183,6 @@ impl<'a> Session<'a> {
         let iter = unsafe { apr::hash::Hash::from_ptr(locations) };
 
         let mut locations = HashMap::new();
-        let _pool = apr::pool::Pool::new();
         for (k, v) in iter.iter() {
             // The key is a pointer to svn_revnum_t (i64)
             let revnum = unsafe { *(k.as_ptr() as *const subversion_sys::svn_revnum_t) };
@@ -1097,13 +1200,14 @@ impl<'a> Session<'a> {
     /// Gets location segments for a path.
     pub fn get_location_segments(
         &mut self,
-        path: &str,
+        path: impl TryInto<RelPath, Error = Error>,
         peg_revision: Revnum,
         start: Revnum,
         end: Revnum,
         location_receiver: &dyn Fn(&crate::LocationSegment) -> Result<(), Error>,
     ) -> Result<(), Error> {
-        let path = std::ffi::CString::new(path).unwrap();
+        let relpath = path.try_into()?;
+        let path = std::ffi::CString::new(relpath.as_str()).unwrap();
         let pool = Pool::new();
         let err = unsafe {
             subversion_sys::svn_ra_get_location_segments(
@@ -1246,8 +1350,12 @@ impl<'a> Session<'a> {
     }
 
     /// Gets lock information for a path.
-    pub fn get_lock(&mut self, path: &str) -> Result<crate::Lock, Error> {
-        let path = std::ffi::CString::new(path).unwrap();
+    pub fn get_lock(
+        &mut self,
+        path: impl TryInto<RelPath, Error = Error>,
+    ) -> Result<crate::Lock<'_>, Error> {
+        let relpath = path.try_into()?;
+        let path = std::ffi::CString::new(relpath.as_str()).unwrap();
         let mut lock = std::ptr::null_mut();
         let pool = Pool::new();
         let err = unsafe {
@@ -1263,10 +1371,11 @@ impl<'a> Session<'a> {
     /// Gets all locks under a path.
     pub fn get_locks(
         &mut self,
-        path: &str,
+        path: impl TryInto<RelPath, Error = Error>,
         depth: Depth,
-    ) -> Result<HashMap<String, crate::Lock>, Error> {
-        let path = std::ffi::CString::new(path).unwrap();
+    ) -> Result<HashMap<String, crate::Lock<'_>>, Error> {
+        let relpath = path.try_into()?;
+        let path = std::ffi::CString::new(relpath.as_str()).unwrap();
         let mut locks = std::ptr::null_mut();
         let pool = Pool::new();
         let err = unsafe {
@@ -1281,7 +1390,6 @@ impl<'a> Session<'a> {
         Error::from_raw(err)?;
         let _pool = std::rc::Rc::new(pool);
         let hash = unsafe { apr::hash::Hash::from_ptr(locks) };
-        let _iter_pool = apr::pool::Pool::new();
         Ok(hash
             .iter()
             .map(|(k, v)| {
@@ -1320,7 +1428,7 @@ impl<'a> Session<'a> {
             editor: *mut *const subversion_sys::svn_delta_editor_t,
             edit_baton: *mut *mut std::ffi::c_void,
             rev_props: *mut apr::hash::apr_hash_t,
-            _pool: *mut subversion_sys::apr_pool_t,
+            _pool: *mut apr_sys::apr_pool_t,
         ) -> *mut subversion_sys::svn_error_t {
             let baton = unsafe {
                 (replay_baton
@@ -1358,7 +1466,7 @@ impl<'a> Session<'a> {
             editor: *const subversion_sys::svn_delta_editor_t,
             edit_baton: *mut std::ffi::c_void,
             rev_props: *mut apr::hash::apr_hash_t,
-            _pool: *mut subversion_sys::apr_pool_t,
+            _pool: *mut apr_sys::apr_pool_t,
         ) -> *mut subversion_sys::svn_error_t {
             let baton = unsafe {
                 (replay_baton
@@ -1438,7 +1546,7 @@ impl<'a> Session<'a> {
     /// Get the history of a file as revisions
     pub fn get_file_revs(
         &mut self,
-        path: &str,
+        path: impl TryInto<RelPath, Error = Error>,
         start: Revnum,
         end: Revnum,
         include_merged_revisions: bool,
@@ -1452,7 +1560,8 @@ impl<'a> Session<'a> {
             &HashMap<String, Vec<u8>>,
         ) -> Result<(), Error>,
     ) -> Result<(), Error> {
-        let path_cstr = std::ffi::CString::new(path)?;
+        let relpath = path.try_into()?;
+        let path_cstr = std::ffi::CString::new(relpath.as_str())?;
         let pool = Pool::new();
         let handler_ptr = Box::into_raw(Box::new(file_rev_handler));
 
@@ -1460,12 +1569,12 @@ impl<'a> Session<'a> {
             baton: *mut std::ffi::c_void,
             path: *const std::os::raw::c_char,
             rev: subversion_sys::svn_revnum_t,
-            rev_props: *mut subversion_sys::apr_hash_t,
+            rev_props: *mut apr_sys::apr_hash_t,
             result_of_merge: subversion_sys::svn_boolean_t,
             txdelta_handler: *mut *const subversion_sys::svn_txdelta_window_handler_t,
             txdelta_baton: *mut *mut std::ffi::c_void,
-            prop_diffs: *mut subversion_sys::apr_array_header_t,
-            _pool: *mut subversion_sys::apr_pool_t,
+            prop_diffs: *mut apr_sys::apr_array_header_t,
+            _pool: *mut apr_sys::apr_pool_t,
         ) -> *mut subversion_sys::svn_error_t {
             let handler = unsafe {
                 &mut *(baton
@@ -1574,7 +1683,7 @@ impl<'a> Session<'a> {
     ) -> Result<Vec<(String, HashMap<String, Vec<u8>>)>, Error> {
         let path_cstr = std::ffi::CString::new(path)?;
         let pool = Pool::new();
-        let mut inherited_props_array: *mut subversion_sys::apr_array_header_t =
+        let mut inherited_props_array: *mut apr_sys::apr_array_header_t =
             std::ptr::null_mut();
 
         let scratch_pool = Pool::new();
@@ -1930,7 +2039,6 @@ pub trait Reporter {
     ) -> Result<(), Error>;
 
     /// Reports that a path has been deleted from the working copy.
-    /// Reports that a path has been deleted from the working copy.
     fn delete_path(&mut self, path: &str) -> Result<(), Error>;
 
     /// Links a path to a URL in the repository.
@@ -1944,7 +2052,6 @@ pub trait Reporter {
         lock_token: &str,
     ) -> Result<(), Error>;
 
-    /// Finishes the report and triggers the update/diff.
     /// Finishes the report and triggers the update/diff.
     fn finish_report(&mut self) -> Result<(), Error>;
 
@@ -2420,8 +2527,8 @@ mod tests {
             let mut root = txn.root().unwrap();
 
             let filename = format!("/file{}.txt", i);
-            root.make_file(&filename).unwrap();
-            let mut stream = root.apply_text(&filename, None).unwrap();
+            root.make_file(filename.as_str()).unwrap();
+            let mut stream = root.apply_text(filename.as_str(), None).unwrap();
             use std::io::Write;
             writeln!(stream, "Content for file {}", i).unwrap();
             drop(stream);
@@ -2750,18 +2857,23 @@ mod tests {
         let mut lock_paths = HashMap::new();
         lock_paths.insert("lockable.txt".to_string(), rev);
 
-        // Use a simpler test without RefCell to avoid potential recursion
-        let _lock_called = false;
-        let _received_token = String::new();
+        // Use Rc<RefCell<>> to capture mutable state in the closure
+        let lock_called = std::rc::Rc::new(std::cell::RefCell::new(false));
+        let received_token = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
+
+        let lock_called_clone = lock_called.clone();
+        let received_token_clone = received_token.clone();
+
         session
             .lock(
                 &lock_paths,
                 "Test lock comment",
                 false, // steal_lock
-                |path, locked, lock, error| {
+                move |path, locked, lock, error| {
+                    *lock_called_clone.borrow_mut() = true;
                     if locked {
                         println!("Locked path: {} with token: {}", path, lock.token());
-                        // Can't capture mutable variables, just print for now
+                        *received_token_clone.borrow_mut() = lock.token().to_string();
                     } else if let Some(err) = error {
                         println!("Failed to lock {}: {:?}", path, err.message());
                     }
@@ -2770,7 +2882,15 @@ mod tests {
             )
             .unwrap();
 
-        // For now, just verify the call didn't crash
+        // Verify the callback was called and we got a token
+        assert!(
+            *lock_called.borrow(),
+            "Lock callback should have been called"
+        );
+        assert!(
+            !received_token.borrow().is_empty(),
+            "Should have received a lock token"
+        );
 
         // Test get_lock
         let lock = session.get_lock("lockable.txt").unwrap();
