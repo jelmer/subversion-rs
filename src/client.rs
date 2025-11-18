@@ -559,16 +559,27 @@ impl AddOptions {
 }
 
 /// Options for delete
-#[derive(Debug, Clone, Copy, Default)]
 /// Options for deleting versioned items.
-pub struct DeleteOptions {
+pub struct DeleteOptions<'a> {
     /// Whether to force deletion even if there are local modifications.
     pub force: bool,
     /// Whether to keep the local copy of the file.
     pub keep_local: bool,
+    /// Optional callback to invoke after commit.
+    pub commit_callback: Option<&'a mut dyn FnMut(&crate::CommitInfo) -> Result<(), Error>>,
 }
 
-impl DeleteOptions {
+impl<'a> Default for DeleteOptions<'a> {
+    fn default() -> Self {
+        Self {
+            force: false,
+            keep_local: false,
+            commit_callback: None,
+        }
+    }
+}
+
+impl<'a> DeleteOptions<'a> {
     /// Creates a new DeleteOptions with default values.
     pub fn new() -> Self {
         Self::default()
@@ -583,6 +594,15 @@ impl DeleteOptions {
     /// Sets whether to keep the local copy.
     pub fn with_keep_local(mut self, keep_local: bool) -> Self {
         self.keep_local = keep_local;
+        self
+    }
+
+    /// Sets the commit callback.
+    pub fn with_commit_callback(
+        mut self,
+        callback: &'a mut dyn FnMut(&crate::CommitInfo) -> Result<(), Error>,
+    ) -> Self {
+        self.commit_callback = Some(callback);
         self
     }
 }
@@ -1106,7 +1126,7 @@ impl Context {
         &mut self,
         paths: &[&str],
         revprop_table: std::collections::HashMap<&str, &str>,
-        options: &DeleteOptions,
+        options: &mut DeleteOptions,
     ) -> Result<(), Error> {
         with_tmp_pool(|pool| unsafe {
             // Convert revprops to BStr objects that live in the pool
@@ -1130,15 +1150,18 @@ impl Context {
             for path in &path_cstrings {
                 ps.push(path.as_ptr() as *mut std::ffi::c_void);
             }
-            // Note: commit_callback parameter removed from DeleteOptions for simplicity
-            let commit_callback = std::ptr::null_mut();
+            let (callback_func, callback_baton) = if let Some(ref mut cb) = options.commit_callback {
+                (Some(crate::wrap_commit_callback2 as _), *cb as *const _ as *mut std::ffi::c_void)
+            } else {
+                (None, std::ptr::null_mut())
+            };
             let err = svn_client_delete4(
                 ps.as_ptr(),
                 options.force.into(),
                 options.keep_local.into(),
                 rps.as_ptr(),
-                Some(crate::wrap_commit_callback2),
-                commit_callback as *mut std::ffi::c_void,
+                callback_func,
+                callback_baton,
                 self.ptr,
                 pool.as_mut_ptr(),
             );
@@ -5809,5 +5832,74 @@ mod tests {
 
         // Should succeed with ignore_ancestry=true
         assert!(result.is_ok(), "Switch with ignore_ancestry=true should succeed: {:?}", result);
+    }
+
+    #[test]
+    fn test_delete_with_commit_callback() {
+        // Test that DeleteOptions accepts a commit_callback and delete() can be called with it
+        let td = tempfile::tempdir().unwrap();
+        let repo_path = td.path().join("repo");
+        let wc_path = td.path().join("wc");
+
+        crate::repos::Repos::create(&repo_path).unwrap();
+        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        let url = crate::uri::Uri::new(&url_str).unwrap();
+
+        let mut ctx = Context::new().unwrap();
+        ctx.checkout(
+            url,
+            &wc_path,
+            &CheckoutOptions {
+                peg_revision: Revision::Head,
+                revision: Revision::Head,
+                depth: Depth::Infinity,
+                ignore_externals: false,
+                allow_unver_obstructions: false,
+            },
+        ).unwrap();
+
+        // Create and commit a file
+        let file_path = wc_path.join("test.txt");
+        std::fs::write(&file_path, "test content").unwrap();
+        ctx.add(&file_path, &AddOptions::new()).unwrap();
+
+        ctx.commit(
+            &[wc_path.to_str().unwrap()],
+            &CommitOptions::default(),
+            std::collections::HashMap::new(),
+            &mut |_info: &crate::CommitInfo| Ok(()),
+        ).unwrap();
+
+        // Test delete with callback (callback only invoked for URL deletes, not WC deletes)
+        let mut callback = |_info: &crate::CommitInfo| {
+            Ok(())
+        };
+
+        let result = ctx.delete(
+            &[file_path.to_str().unwrap()],
+            std::collections::HashMap::new(),
+            &mut DeleteOptions::new().with_commit_callback(&mut callback),
+        );
+
+        assert!(result.is_ok(), "Delete with callback should succeed: {:?}", result);
+
+        // Also test delete without callback
+        let file_path2 = wc_path.join("test2.txt");
+        std::fs::write(&file_path2, "test content 2").unwrap();
+        ctx.add(&file_path2, &AddOptions::new()).unwrap();
+        ctx.commit(
+            &[wc_path.to_str().unwrap()],
+            &CommitOptions::default(),
+            std::collections::HashMap::new(),
+            &mut |_info: &crate::CommitInfo| Ok(()),
+        ).unwrap();
+
+        let result = ctx.delete(
+            &[file_path2.to_str().unwrap()],
+            std::collections::HashMap::new(),
+            &mut DeleteOptions::new(),
+        );
+
+        assert!(result.is_ok(), "Delete without callback should succeed: {:?}", result);
     }
 }
