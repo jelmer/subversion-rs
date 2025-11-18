@@ -1238,6 +1238,60 @@ impl Default for PropSetOptions {
     }
 }
 
+/// Options for remote property set operations
+pub struct PropSetRemoteOptions<'a> {
+    /// Whether to skip checks.
+    pub skip_checks: bool,
+    /// Base revision for URL (used for atomic property changes).
+    pub base_revision_for_url: Revnum,
+    /// Revision properties for the commit.
+    pub revprop_table: Option<std::collections::HashMap<String, String>>,
+    /// Callback for commit completion.
+    pub commit_callback: Option<&'a mut dyn FnMut(&crate::CommitInfo) -> Result<(), Error>>,
+}
+
+impl<'a> Default for PropSetRemoteOptions<'a> {
+    fn default() -> Self {
+        Self {
+            skip_checks: false,
+            base_revision_for_url: Revnum(-1),
+            revprop_table: None,
+            commit_callback: None,
+        }
+    }
+}
+
+impl<'a> PropSetRemoteOptions<'a> {
+    /// Creates new PropSetRemoteOptions with default values.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets whether to skip checks.
+    pub fn with_skip_checks(mut self, skip_checks: bool) -> Self {
+        self.skip_checks = skip_checks;
+        self
+    }
+
+    /// Sets the base revision for URL.
+    pub fn with_base_revision_for_url(mut self, base_revision_for_url: Revnum) -> Self {
+        self.base_revision_for_url = base_revision_for_url;
+        self
+    }
+
+    /// Sets the revision properties for the commit.
+    pub fn with_revprop_table(mut self, revprop_table: std::collections::HashMap<String, String>) -> Self {
+        self.revprop_table = Some(revprop_table);
+        self
+    }
+
+    /// Sets the commit callback.
+    pub fn with_commit_callback(mut self, callback: &'a mut dyn FnMut(&crate::CommitInfo) -> Result<(), Error>) -> Self {
+        self.commit_callback = Some(callback);
+        self
+    }
+}
+
 impl PropSetOptions {
     /// Creates a new PropSetOptions with default values.
     pub fn new() -> Self {
@@ -3469,6 +3523,71 @@ impl Context {
             drop(list_cstrings);
 
             svn_result(err)
+        })
+    }
+
+    /// Sets a property on a remote URL in the repository.
+    ///
+    /// This sets a property directly on a repository URL, creating a commit.
+    /// For working copy property setting, use `propset()` instead.
+    pub fn propset_remote(
+        &mut self,
+        propname: &str,
+        propval: Option<&[u8]>,
+        url: &str,
+        options: &mut PropSetRemoteOptions,
+    ) -> Result<(), Error> {
+        with_tmp_pool(|pool| {
+            let propname_c = std::ffi::CString::new(propname).unwrap();
+            let url_c = std::ffi::CString::new(url).unwrap();
+
+            let propval_svn = propval.map(|val| subversion_sys::svn_string_t {
+                data: val.as_ptr() as *mut i8,
+                len: val.len(),
+            });
+
+            // Handle revprop_table
+            let revprop_hash = options.revprop_table.as_ref().map(|rp| {
+                let svn_strings: Vec<_> = rp
+                    .iter()
+                    .map(|(k, v)| (k.as_str(), crate::string::BStr::from_str(v, pool)))
+                    .collect();
+                apr::hash::Hash::from_iter(
+                    pool,
+                    svn_strings
+                        .iter()
+                        .map(|(k, v)| (k.as_bytes(), v.as_ptr() as *mut std::ffi::c_void)),
+                )
+            });
+
+            unsafe {
+                let (callback_func, callback_baton) = if let Some(ref mut cb) = options.commit_callback {
+                    (
+                        Some(crate::wrap_commit_callback2 as unsafe extern "C" fn(_, _, _) -> _),
+                        Box::into_raw(Box::new(cb)) as *mut std::ffi::c_void,
+                    )
+                } else {
+                    (None, std::ptr::null_mut())
+                };
+
+                let err = subversion_sys::svn_client_propset_remote(
+                    propname_c.as_ptr(),
+                    propval_svn
+                        .as_ref()
+                        .map_or(std::ptr::null(), |v| v as *const _),
+                    url_c.as_ptr(),
+                    options.skip_checks as i32,
+                    options.base_revision_for_url.0,
+                    revprop_hash
+                        .as_ref()
+                        .map_or(std::ptr::null(), |h| h.as_ptr()),
+                    callback_func,
+                    callback_baton,
+                    self.as_mut_ptr(),
+                    pool.as_mut_ptr(),
+                );
+                svn_result(err)
+            }
         })
     }
 
