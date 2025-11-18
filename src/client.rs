@@ -1269,6 +1269,133 @@ impl PropSetOptions {
     }
 }
 
+/// Options for diff operations
+#[derive(Debug, Clone)]
+pub struct DiffOptions {
+    /// Diff-specific options to pass to diff engine.
+    pub diff_options: Vec<String>,
+    /// Recursion depth.
+    pub depth: Depth,
+    /// Whether to ignore ancestry when calculating diffs.
+    pub ignore_ancestry: bool,
+    /// If true, don't show diffs for added files.
+    pub no_diff_added: bool,
+    /// If true, don't show diffs for deleted files.
+    pub no_diff_deleted: bool,
+    /// If true, show copies as additions.
+    pub show_copies_as_adds: bool,
+    /// If true, ignore content type.
+    pub ignore_content_type: bool,
+    /// If true, ignore properties.
+    pub ignore_properties: bool,
+    /// If true, show only properties.
+    pub properties_only: bool,
+    /// If true, use Git diff format.
+    pub use_git_diff_format: bool,
+    /// Encoding for headers.
+    pub header_encoding: String,
+    /// Changelists to limit operation to (None means all).
+    pub changelists: Option<Vec<String>>,
+}
+
+impl Default for DiffOptions {
+    fn default() -> Self {
+        Self {
+            diff_options: Vec::new(),
+            depth: Depth::Infinity,
+            ignore_ancestry: false,
+            no_diff_added: false,
+            no_diff_deleted: false,
+            show_copies_as_adds: false,
+            ignore_content_type: false,
+            ignore_properties: false,
+            properties_only: false,
+            use_git_diff_format: false,
+            header_encoding: String::from("UTF-8"),
+            changelists: None,
+        }
+    }
+}
+
+impl DiffOptions {
+    /// Creates a new DiffOptions with default values.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets the diff options.
+    pub fn with_diff_options(mut self, diff_options: Vec<String>) -> Self {
+        self.diff_options = diff_options;
+        self
+    }
+
+    /// Sets the depth.
+    pub fn with_depth(mut self, depth: Depth) -> Self {
+        self.depth = depth;
+        self
+    }
+
+    /// Sets whether to ignore ancestry.
+    pub fn with_ignore_ancestry(mut self, ignore_ancestry: bool) -> Self {
+        self.ignore_ancestry = ignore_ancestry;
+        self
+    }
+
+    /// Sets whether to skip diffs for added files.
+    pub fn with_no_diff_added(mut self, no_diff_added: bool) -> Self {
+        self.no_diff_added = no_diff_added;
+        self
+    }
+
+    /// Sets whether to skip diffs for deleted files.
+    pub fn with_no_diff_deleted(mut self, no_diff_deleted: bool) -> Self {
+        self.no_diff_deleted = no_diff_deleted;
+        self
+    }
+
+    /// Sets whether to show copies as additions.
+    pub fn with_show_copies_as_adds(mut self, show_copies_as_adds: bool) -> Self {
+        self.show_copies_as_adds = show_copies_as_adds;
+        self
+    }
+
+    /// Sets whether to ignore content type.
+    pub fn with_ignore_content_type(mut self, ignore_content_type: bool) -> Self {
+        self.ignore_content_type = ignore_content_type;
+        self
+    }
+
+    /// Sets whether to ignore properties.
+    pub fn with_ignore_properties(mut self, ignore_properties: bool) -> Self {
+        self.ignore_properties = ignore_properties;
+        self
+    }
+
+    /// Sets whether to show only properties.
+    pub fn with_properties_only(mut self, properties_only: bool) -> Self {
+        self.properties_only = properties_only;
+        self
+    }
+
+    /// Sets whether to use Git diff format.
+    pub fn with_use_git_diff_format(mut self, use_git_diff_format: bool) -> Self {
+        self.use_git_diff_format = use_git_diff_format;
+        self
+    }
+
+    /// Sets the header encoding.
+    pub fn with_header_encoding(mut self, header_encoding: String) -> Self {
+        self.header_encoding = header_encoding;
+        self
+    }
+
+    /// Sets the changelists.
+    pub fn with_changelists(mut self, changelists: Vec<String>) -> Self {
+        self.changelists = Some(changelists);
+        self
+    }
+}
+
 /// Options for commit
 #[derive(Debug, Clone)]
 /// Options for committing changes to the repository.
@@ -3088,34 +3215,24 @@ impl Context {
     /// Get differences between two paths/revisions
     pub fn diff(
         &mut self,
-        diff_options: &[&str],
         path_or_url1: &str,
         revision1: &Revision,
         path_or_url2: &str,
         revision2: &Revision,
         relative_to_dir: Option<&str>,
-        depth: Depth,
-        ignore_ancestry: bool,
-        no_diff_added: bool,
-        no_diff_deleted: bool,
-        show_copies_as_adds: bool,
-        ignore_content_type: bool,
-        ignore_properties: bool,
-        properties_only: bool,
-        use_git_diff_format: bool,
-        header_encoding: &str,
         outstream: &mut crate::io::Stream,
         errstream: &mut crate::io::Stream,
-        changelists: Option<&[&str]>,
+        options: &DiffOptions,
     ) -> Result<(), Error> {
         with_tmp_pool(|pool| {
             let path1_c = std::ffi::CString::new(path_or_url1).unwrap();
             let path2_c = std::ffi::CString::new(path_or_url2).unwrap();
-            let header_encoding_c = std::ffi::CString::new(header_encoding).unwrap();
+            let header_encoding_c = std::ffi::CString::new(options.header_encoding.as_str()).unwrap();
 
-            let diff_options_c: Vec<_> = diff_options
+            let diff_options_c: Vec<_> = options
+                .diff_options
                 .iter()
-                .map(|o| std::ffi::CString::new(*o).unwrap())
+                .map(|o| std::ffi::CString::new(o.as_str()).unwrap())
                 .collect();
             let mut diff_options_array = apr::tables::TypedArray::<*const i8>::new(pool, 0);
             for opt in diff_options_c.iter() {
@@ -3124,14 +3241,20 @@ impl Context {
 
             let relative_to_dir_c = relative_to_dir.map(|d| std::ffi::CString::new(d).unwrap());
 
-            let changelists = changelists.map(|cl| {
-                let mut array = apr::tables::TypedArray::<*const i8>::new(pool, 0);
-                for item in cl.iter() {
-                    let item_c = std::ffi::CString::new(*item).unwrap();
-                    array.push(item_c.as_ptr());
+            // Convert changelists if provided
+            let (changelists_array, list_cstrings) = if let Some(lists) = &options.changelists {
+                let mut array = apr::tables::TypedArray::<*const i8>::new(pool, lists.len() as i32);
+                let cstrings: Vec<_> = lists
+                    .iter()
+                    .map(|l| std::ffi::CString::new(l.as_str()).unwrap())
+                    .collect();
+                for cstring in &cstrings {
+                    array.push(cstring.as_ptr());
                 }
-                array
-            });
+                (unsafe { array.as_ptr() }, Some(cstrings))
+            } else {
+                (std::ptr::null(), None)
+            };
 
             let err = unsafe {
                 subversion_sys::svn_client_diff6(
@@ -3143,23 +3266,27 @@ impl Context {
                     relative_to_dir_c
                         .as_ref()
                         .map_or(std::ptr::null(), |c| c.as_ptr()),
-                    depth.into(),
-                    ignore_ancestry as i32,
-                    no_diff_added as i32,
-                    no_diff_deleted as i32,
-                    show_copies_as_adds as i32,
-                    ignore_content_type as i32,
-                    ignore_properties as i32,
-                    properties_only as i32,
-                    use_git_diff_format as i32,
+                    options.depth.into(),
+                    options.ignore_ancestry as i32,
+                    options.no_diff_added as i32,
+                    options.no_diff_deleted as i32,
+                    options.show_copies_as_adds as i32,
+                    options.ignore_content_type as i32,
+                    options.ignore_properties as i32,
+                    options.properties_only as i32,
+                    options.use_git_diff_format as i32,
                     header_encoding_c.as_ptr(),
                     outstream.as_mut_ptr(),
                     errstream.as_mut_ptr(),
-                    changelists.map_or(std::ptr::null(), |cl| cl.as_ptr()),
+                    changelists_array,
                     self.as_mut_ptr(),
                     pool.as_mut_ptr(),
                 )
             };
+
+            // Keep list_cstrings alive until after the call
+            drop(list_cstrings);
+
             svn_result(err)
         })
     }
@@ -3421,32 +3548,32 @@ impl<'a> DiffBuilder<'a> {
         outstream: &mut crate::io::Stream,
         errstream: &mut crate::io::Stream,
     ) -> Result<(), Error> {
-        let diff_options: Vec<&str> = self.diff_options.iter().map(|s| s.as_str()).collect();
-        let changelists = self
-            .changelists
-            .as_ref()
-            .map(|cl| cl.iter().map(|s| s.as_str()).collect::<Vec<_>>());
+        let mut options = DiffOptions::new()
+            .with_diff_options(self.diff_options)
+            .with_depth(self.depth)
+            .with_ignore_ancestry(self.ignore_ancestry)
+            .with_no_diff_added(self.no_diff_added)
+            .with_no_diff_deleted(self.no_diff_deleted)
+            .with_show_copies_as_adds(self.show_copies_as_adds)
+            .with_ignore_content_type(self.ignore_content_type)
+            .with_ignore_properties(self.ignore_properties)
+            .with_properties_only(self.properties_only)
+            .with_use_git_diff_format(self.use_git_diff_format)
+            .with_header_encoding(self.header_encoding);
+
+        if let Some(cl) = self.changelists {
+            options = options.with_changelists(cl);
+        }
 
         self.ctx.diff(
-            &diff_options,
             &self.path1,
             &self.revision1,
             &self.path2,
             &self.revision2,
             self.relative_to_dir.as_deref(),
-            self.depth,
-            self.ignore_ancestry,
-            self.no_diff_added,
-            self.no_diff_deleted,
-            self.show_copies_as_adds,
-            self.ignore_content_type,
-            self.ignore_properties,
-            self.properties_only,
-            self.use_git_diff_format,
-            &self.header_encoding,
             outstream,
             errstream,
-            changelists.as_deref(),
+            &options,
         )
     }
 }
@@ -5780,25 +5907,14 @@ mod tests {
 
         // Test diff between repository revisions using direct function
         let diff_result = ctx.diff(
-            &[], // diff_options
             url.as_ref(),
             &Revision::Head,
             url.as_ref(),
             &Revision::Head,
             None, // relative_to_dir
-            Depth::Infinity,
-            false, // ignore_ancestry
-            false, // no_diff_added
-            false, // no_diff_deleted
-            false, // show_copies_as_adds
-            false, // ignore_content_type
-            false, // ignore_properties
-            false, // properties_only
-            false, // use_git_diff_format
-            "UTF-8",
             &mut out_stream,
             &mut err_stream,
-            None, // changelists
+            &DiffOptions::new().with_depth(Depth::Infinity),
         );
 
         // Should succeed even with no differences
