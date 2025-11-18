@@ -1588,6 +1588,170 @@ impl RevpropSetOptions {
     }
 }
 
+/// Options for list operations
+#[derive(Debug, Clone)]
+pub struct ListOptions {
+    /// Peg revision for the target.
+    pub peg_revision: Revision,
+    /// Operative revision.
+    pub revision: Revision,
+    /// Patterns to filter the listing (None = no filter).
+    pub patterns: Option<Vec<String>>,
+    /// Recursion depth.
+    pub depth: Depth,
+    /// Dirent fields to retrieve (bitfield).
+    pub dirent_fields: u32,
+    /// Whether to fetch locks.
+    pub fetch_locks: bool,
+    /// Whether to include externals.
+    pub include_externals: bool,
+}
+
+impl Default for ListOptions {
+    fn default() -> Self {
+        Self {
+            peg_revision: Revision::Unspecified,
+            revision: Revision::Head,
+            patterns: None,
+            depth: Depth::Infinity,
+            dirent_fields: 0xFFFFFFFF, // All fields
+            fetch_locks: false,
+            include_externals: false,
+        }
+    }
+}
+
+impl ListOptions {
+    /// Creates a new ListOptions with default values.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets the peg revision.
+    pub fn with_peg_revision(mut self, peg_revision: Revision) -> Self {
+        self.peg_revision = peg_revision;
+        self
+    }
+
+    /// Sets the operative revision.
+    pub fn with_revision(mut self, revision: Revision) -> Self {
+        self.revision = revision;
+        self
+    }
+
+    /// Sets the patterns to filter the listing.
+    pub fn with_patterns(mut self, patterns: Vec<String>) -> Self {
+        self.patterns = Some(patterns);
+        self
+    }
+
+    /// Sets the depth.
+    pub fn with_depth(mut self, depth: Depth) -> Self {
+        self.depth = depth;
+        self
+    }
+
+    /// Sets the dirent fields to retrieve.
+    pub fn with_dirent_fields(mut self, dirent_fields: u32) -> Self {
+        self.dirent_fields = dirent_fields;
+        self
+    }
+
+    /// Sets whether to fetch locks.
+    pub fn with_fetch_locks(mut self, fetch_locks: bool) -> Self {
+        self.fetch_locks = fetch_locks;
+        self
+    }
+
+    /// Sets whether to include externals.
+    pub fn with_include_externals(mut self, include_externals: bool) -> Self {
+        self.include_externals = include_externals;
+        self
+    }
+}
+
+/// Options for info operations
+#[derive(Debug, Clone)]
+pub struct InfoOptions {
+    /// Peg revision for the target.
+    pub peg_revision: Revision,
+    /// Operative revision.
+    pub revision: Revision,
+    /// Recursion depth.
+    pub depth: Depth,
+    /// Whether to fetch excluded items.
+    pub fetch_excluded: bool,
+    /// Whether to fetch actual-only items.
+    pub fetch_actual_only: bool,
+    /// Whether to include externals.
+    pub include_externals: bool,
+    /// Changelists to limit operation to (None = all).
+    pub changelists: Option<Vec<String>>,
+}
+
+impl Default for InfoOptions {
+    fn default() -> Self {
+        Self {
+            peg_revision: Revision::Unspecified,
+            revision: Revision::Working,
+            depth: Depth::Empty,
+            fetch_excluded: false,
+            fetch_actual_only: false,
+            include_externals: false,
+            changelists: None,
+        }
+    }
+}
+
+impl InfoOptions {
+    /// Creates a new InfoOptions with default values.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets the peg revision.
+    pub fn with_peg_revision(mut self, peg_revision: Revision) -> Self {
+        self.peg_revision = peg_revision;
+        self
+    }
+
+    /// Sets the operative revision.
+    pub fn with_revision(mut self, revision: Revision) -> Self {
+        self.revision = revision;
+        self
+    }
+
+    /// Sets the depth.
+    pub fn with_depth(mut self, depth: Depth) -> Self {
+        self.depth = depth;
+        self
+    }
+
+    /// Sets whether to fetch excluded items.
+    pub fn with_fetch_excluded(mut self, fetch_excluded: bool) -> Self {
+        self.fetch_excluded = fetch_excluded;
+        self
+    }
+
+    /// Sets whether to fetch actual-only items.
+    pub fn with_fetch_actual_only(mut self, fetch_actual_only: bool) -> Self {
+        self.fetch_actual_only = fetch_actual_only;
+        self
+    }
+
+    /// Sets whether to include externals.
+    pub fn with_include_externals(mut self, include_externals: bool) -> Self {
+        self.include_externals = include_externals;
+        self
+    }
+
+    /// Sets the changelists.
+    pub fn with_changelists(mut self, changelists: Vec<String>) -> Self {
+        self.changelists = Some(changelists);
+        self
+    }
+}
+
 /// Options for commit
 #[derive(Debug, Clone)]
 /// Options for committing changes to the repository.
@@ -3469,13 +3633,7 @@ impl Context {
     pub fn list(
         &mut self,
         path_or_url: &str,
-        peg_revision: &Revision,
-        revision: &Revision,
-        patterns: Option<&[&str]>,
-        depth: Depth,
-        dirent_fields: u32,
-        fetch_locks: bool,
-        include_externals: bool,
+        options: &ListOptions,
         list_func: &mut dyn FnMut(
             &str,
             &crate::ra::Dirent,
@@ -3486,11 +3644,15 @@ impl Context {
             let path_or_url_c = std::ffi::CString::new(path_or_url).unwrap();
 
             // Keep CStrings alive for the duration of the function
-            let pattern_cstrings: Vec<std::ffi::CString> = patterns
-                .unwrap_or(&[])
-                .iter()
-                .map(|p| std::ffi::CString::new(*p).unwrap())
-                .collect();
+            let pattern_cstrings: Vec<std::ffi::CString> = options
+                .patterns
+                .as_ref()
+                .map(|pats| {
+                    pats.iter()
+                        .map(|p| std::ffi::CString::new(p.as_str()).unwrap())
+                        .collect()
+                })
+                .unwrap_or_default();
 
             let patterns = if !pattern_cstrings.is_empty() {
                 let mut array = apr::tables::TypedArray::<*const i8>::new(pool, 0);
@@ -3498,7 +3660,7 @@ impl Context {
                     array.push(pattern_c.as_ptr());
                 }
                 Some(array)
-            } else if patterns.is_some() {
+            } else if options.patterns.is_some() {
                 Some(apr::tables::TypedArray::<*const i8>::new(pool, 0))
             } else {
                 None
@@ -3541,13 +3703,13 @@ impl Context {
             let err = unsafe {
                 subversion_sys::svn_client_list4(
                     path_or_url_c.as_ptr(),
-                    &(*peg_revision).into(),
-                    &(*revision).into(),
+                    &options.peg_revision.into(),
+                    &options.revision.into(),
                     patterns.map_or(std::ptr::null(), |p| p.as_ptr()),
-                    depth.into(),
-                    dirent_fields,
-                    fetch_locks as i32,
-                    include_externals as i32,
+                    options.depth.into(),
+                    options.dirent_fields,
+                    options.fetch_locks as i32,
+                    options.include_externals as i32,
                     Some(list_receiver),
                     list_func_ptr,
                     self.as_mut_ptr(),
@@ -3838,22 +4000,17 @@ impl<'a> ListBuilder<'a> {
             Option<&crate::Lock>,
         ) -> Result<(), Error>,
     ) -> Result<(), Error> {
-        let patterns = self
-            .patterns
-            .as_ref()
-            .map(|p| p.iter().map(|s| s.as_str()).collect::<Vec<_>>());
+        let options = ListOptions {
+            peg_revision: self.peg_revision,
+            revision: self.revision,
+            patterns: self.patterns,
+            depth: self.depth,
+            dirent_fields: self.dirent_fields,
+            fetch_locks: self.fetch_locks,
+            include_externals: self.include_externals,
+        };
 
-        self.ctx.list(
-            &self.path_or_url,
-            &self.peg_revision,
-            &self.revision,
-            patterns.as_deref(),
-            self.depth,
-            self.dirent_fields,
-            self.fetch_locks,
-            self.include_externals,
-            list_func,
-        )
+        self.ctx.list(&self.path_or_url, &options, list_func)
     }
 }
 
@@ -6158,21 +6315,24 @@ mod tests {
 
         // Test listing repository contents
         let mut entries = Vec::new();
-        let result = ctx.list(
-            &url_str,
-            &Revision::Head,
-            &Revision::Head,
-            None, // patterns
-            Depth::Infinity,
-            subversion_sys::SVN_DIRENT_KIND
+        let options = ListOptions {
+            peg_revision: Revision::Head,
+            revision: Revision::Head,
+            patterns: None,
+            depth: Depth::Infinity,
+            dirent_fields: subversion_sys::SVN_DIRENT_KIND
                 | subversion_sys::SVN_DIRENT_SIZE
                 | subversion_sys::SVN_DIRENT_HAS_PROPS
                 | subversion_sys::SVN_DIRENT_CREATED_REV
                 | subversion_sys::SVN_DIRENT_TIME
                 | subversion_sys::SVN_DIRENT_LAST_AUTHOR,
-            false, // fetch_locks
-            false, // include_externals
-            &mut |path, _dirent, _lock| {
+            fetch_locks: false,
+            include_externals: false,
+        };
+        let result = ctx.list(
+            &url_str,
+            &options,
+            &mut |path: &str, _dirent, _lock| {
                 entries.push(path.to_string());
                 Ok(())
             },
