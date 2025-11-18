@@ -1159,6 +1159,116 @@ impl RevertOptions {
     }
 }
 
+/// Options for property get operations
+#[derive(Debug, Clone)]
+pub struct PropGetOptions {
+    /// Peg revision.
+    pub peg_revision: Revision,
+    /// Operative revision.
+    pub revision: Revision,
+    /// Recursion depth.
+    pub depth: Depth,
+    /// Changelists to limit operation to (None means all).
+    pub changelists: Option<Vec<String>>,
+}
+
+impl Default for PropGetOptions {
+    fn default() -> Self {
+        Self {
+            peg_revision: Revision::Unspecified,
+            revision: Revision::Working,
+            depth: Depth::Empty,
+            changelists: None,
+        }
+    }
+}
+
+impl PropGetOptions {
+    /// Creates a new PropGetOptions with default values.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets the peg revision.
+    pub fn with_peg_revision(mut self, peg_revision: Revision) -> Self {
+        self.peg_revision = peg_revision;
+        self
+    }
+
+    /// Sets the operative revision.
+    pub fn with_revision(mut self, revision: Revision) -> Self {
+        self.revision = revision;
+        self
+    }
+
+    /// Sets the depth.
+    pub fn with_depth(mut self, depth: Depth) -> Self {
+        self.depth = depth;
+        self
+    }
+
+    /// Sets the changelists.
+    pub fn with_changelists(mut self, changelists: Vec<String>) -> Self {
+        self.changelists = Some(changelists);
+        self
+    }
+}
+
+/// Options for property set operations
+#[derive(Debug, Clone)]
+pub struct PropSetOptions {
+    /// Recursion depth.
+    pub depth: Depth,
+    /// Whether to skip checks.
+    pub skip_checks: bool,
+    /// Base revision for URL (used for atomic revprop changes).
+    pub base_revision_for_url: Revnum,
+    /// Changelists to limit operation to (None means all).
+    pub changelists: Option<Vec<String>>,
+}
+
+impl Default for PropSetOptions {
+    fn default() -> Self {
+        Self {
+            depth: Depth::Empty,
+            skip_checks: false,
+            base_revision_for_url: Revnum(-1),
+            changelists: None,
+        }
+    }
+}
+
+impl PropSetOptions {
+    /// Creates a new PropSetOptions with default values.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets the depth.
+    pub fn with_depth(mut self, depth: Depth) -> Self {
+        self.depth = depth;
+        self
+    }
+
+    /// Sets whether to skip checks.
+    pub fn with_skip_checks(mut self, skip_checks: bool) -> Self {
+        self.skip_checks = skip_checks;
+        self
+    }
+
+    /// Sets the base revision for URL.
+    pub fn with_base_revision_for_url(mut self, base_revision: Revnum) -> Self {
+        self.base_revision_for_url = base_revision;
+        self
+    }
+
+    /// Sets the changelists.
+    pub fn with_changelists(mut self, changelists: Vec<String>) -> Self {
+        self.changelists = Some(changelists);
+        self
+    }
+}
+
 /// Options for commit
 #[derive(Debug, Clone)]
 /// Options for committing changes to the repository.
@@ -2780,24 +2890,27 @@ impl Context {
         &mut self,
         propname: &str,
         target: &str,
-        peg_revision: &Revision,
-        revision: &Revision,
+        options: &PropGetOptions,
         actual_revnum: Option<&mut Revnum>,
-        depth: Depth,
-        changelists: Option<&[&str]>,
     ) -> Result<std::collections::HashMap<String, Vec<u8>>, Error> {
         with_tmp_pool(|pool| {
             let propname_c = std::ffi::CString::new(propname).unwrap();
             let target_c = std::ffi::CString::new(target).unwrap();
 
-            let changelists = changelists.map(|cl| {
-                let mut array = apr::tables::TypedArray::<*const i8>::new(pool, 0);
-                for item in cl.iter() {
-                    let item_c = std::ffi::CString::new(*item).unwrap();
-                    array.push(item_c.as_ptr());
+            // Convert changelists if provided
+            let (changelists_array, list_cstrings) = if let Some(lists) = &options.changelists {
+                let mut array = apr::tables::TypedArray::<*const i8>::new(pool, lists.len() as i32);
+                let cstrings: Vec<_> = lists
+                    .iter()
+                    .map(|l| std::ffi::CString::new(l.as_str()).unwrap())
+                    .collect();
+                for cstring in &cstrings {
+                    array.push(cstring.as_ptr());
                 }
-                array
-            });
+                (unsafe { array.as_ptr() }, Some(cstrings))
+            } else {
+                (std::ptr::null(), None)
+            };
 
             let mut props = std::ptr::null_mut();
             let mut actual_rev = actual_revnum.as_ref().map_or(0, |r| r.0);
@@ -2808,20 +2921,24 @@ impl Context {
                     std::ptr::null_mut(), // inherited_props
                     propname_c.as_ptr(),
                     target_c.as_ptr(),
-                    &(*peg_revision).into(),
-                    &(*revision).into(),
+                    &options.peg_revision.into(),
+                    &options.revision.into(),
                     if actual_revnum.is_some() {
                         &mut actual_rev
                     } else {
                         std::ptr::null_mut()
                     },
-                    depth.into(),
-                    changelists.map_or(std::ptr::null(), |cl| cl.as_ptr()),
+                    options.depth.into(),
+                    changelists_array,
                     self.as_mut_ptr(),
                     pool.as_mut_ptr(),
                     pool.as_mut_ptr(),
                 )
             };
+
+            // Keep list_cstrings alive until after the call
+            drop(list_cstrings);
+
             svn_result(err)?;
 
             if let Some(revnum) = actual_revnum {
@@ -2844,10 +2961,7 @@ impl Context {
         propname: &str,
         propval: Option<&[u8]>,
         target: &str,
-        depth: Depth,
-        skip_checks: bool,
-        _base_revision_for_url: Revnum,
-        changelists: Option<&[&str]>,
+        options: &PropSetOptions,
     ) -> Result<(), Error> {
         with_tmp_pool(|pool| {
             let propname_c = std::ffi::CString::new(propname).unwrap();
@@ -2862,14 +2976,20 @@ impl Context {
                 len: val.len(),
             });
 
-            let changelists = changelists.map(|cl| {
-                let mut array = apr::tables::TypedArray::<*const i8>::new(pool, 0);
-                for item in cl.iter() {
-                    let item_c = std::ffi::CString::new(*item).unwrap();
-                    array.push(item_c.as_ptr());
+            // Convert changelists if provided
+            let (changelists_array, list_cstrings) = if let Some(lists) = &options.changelists {
+                let mut array = apr::tables::TypedArray::<*const i8>::new(pool, lists.len() as i32);
+                let cstrings: Vec<_> = lists
+                    .iter()
+                    .map(|l| std::ffi::CString::new(l.as_str()).unwrap())
+                    .collect();
+                for cstring in &cstrings {
+                    array.push(cstring.as_ptr());
                 }
-                array
-            });
+                (unsafe { array.as_ptr() }, Some(cstrings))
+            } else {
+                (std::ptr::null(), None)
+            };
 
             let err = unsafe {
                 subversion_sys::svn_client_propset_local(
@@ -2878,13 +2998,17 @@ impl Context {
                         .as_ref()
                         .map_or(std::ptr::null(), |v| v as *const _),
                     targets_array.as_ptr(),
-                    depth.into(),
-                    skip_checks as i32,
-                    changelists.map_or(std::ptr::null(), |cl| cl.as_ptr()),
+                    options.depth.into(),
+                    options.skip_checks as i32,
+                    changelists_array,
                     self.as_mut_ptr(),
                     pool.as_mut_ptr(),
                 )
             };
+
+            // Keep list_cstrings alive until after the call
+            drop(list_cstrings);
+
             svn_result(err)
         })
     }
@@ -5377,10 +5501,7 @@ mod tests {
             "test:property",
             Some(b"test value"),
             test_file.to_str().unwrap(),
-            Depth::Empty,
-            false,      // skip_checks
-            Revnum(-1), // INVALID
-            None,       // changelists
+            &PropSetOptions::new().with_depth(Depth::Empty),
         );
 
         // Setting properties should work on added files
@@ -5390,11 +5511,11 @@ mod tests {
         let propget_result = ctx.propget(
             "test:property",
             test_file.to_str().unwrap(),
-            &Revision::Working,
-            &Revision::Working,
+            &PropGetOptions::new()
+                .with_peg_revision(Revision::Working)
+                .with_revision(Revision::Working)
+                .with_depth(Depth::Empty),
             None, // actual_revnum
-            Depth::Empty,
-            None, // changelists
         );
 
         if let Ok(props) = propget_result {
