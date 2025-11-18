@@ -1811,6 +1811,65 @@ impl Context {
         let prop_hash = unsafe { crate::props::PropHash::from_ptr(props) };
         Ok(prop_hash.to_hashmap())
     }
+
+    /// Read the kind (type) of a node in the working copy
+    ///
+    /// Returns the kind of node at @a local_abspath, which can be a file,
+    /// directory, symlink, etc.
+    ///
+    /// If @a show_deleted is true, will show deleted nodes.
+    /// If @a show_hidden is true, will show hidden nodes.
+    pub fn read_kind(
+        &mut self,
+        local_abspath: &std::path::Path,
+        show_deleted: bool,
+        show_hidden: bool,
+    ) -> Result<crate::NodeKind, Error> {
+        let path = local_abspath.to_str().unwrap();
+        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let scratch_pool = apr::Pool::new();
+
+        let mut kind: subversion_sys::svn_node_kind_t = subversion_sys::svn_node_kind_t_svn_node_none;
+
+        let err = unsafe {
+            subversion_sys::svn_wc_read_kind2(
+                &mut kind,
+                self.ptr,
+                path_cstr.as_ptr(),
+                show_deleted.into(),
+                show_hidden.into(),
+                scratch_pool.as_mut_ptr(),
+            )
+        };
+
+        Error::from_raw(err)?;
+        Ok(kind.into())
+    }
+
+    /// Check if a path is a working copy root
+    ///
+    /// Returns true if @a local_abspath is the root of a working copy.
+    /// A working copy root is the top-level directory containing the .svn
+    /// administrative directory.
+    pub fn is_wc_root(&mut self, local_abspath: &std::path::Path) -> Result<bool, Error> {
+        let path = local_abspath.to_str().unwrap();
+        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let scratch_pool = apr::Pool::new();
+
+        let mut wc_root: i32 = 0;
+
+        let err = unsafe {
+            subversion_sys::svn_wc_is_wc_root2(
+                &mut wc_root,
+                self.ptr,
+                path_cstr.as_ptr(),
+                scratch_pool.as_mut_ptr(),
+            )
+        };
+
+        Error::from_raw(err)?;
+        Ok(wc_root != 0)
+    }
 }
 
 /// Notify structure for callbacks
@@ -2738,5 +2797,105 @@ mod tests {
         let props = wc_ctx.prop_list(&file_path).unwrap();
         assert!(props.contains_key("test:property"));
         assert_eq!(props.get("test:property").unwrap(), b"test value");
+    }
+
+    #[test]
+    fn test_read_kind() {
+        use tempfile::TempDir;
+
+        // Create a repository and working copy
+        let temp_dir = TempDir::new().unwrap();
+        let repos_path = temp_dir.path().join("repos");
+        let wc_path = temp_dir.path().join("wc");
+
+        // Create a repository
+        let _repos = crate::repos::Repos::create(&repos_path).unwrap();
+
+        // Create a working copy using client API
+        let url_str = format!("file://{}", repos_path.display());
+        let url = crate::uri::Uri::new(&url_str).unwrap();
+        let mut client_ctx = crate::client::Context::new().unwrap();
+
+        let checkout_opts = crate::client::CheckoutOptions {
+            revision: crate::Revision::Head,
+            peg_revision: crate::Revision::Head,
+            depth: crate::Depth::Infinity,
+            ignore_externals: false,
+            allow_unver_obstructions: false,
+        };
+        client_ctx.checkout(url, &wc_path, &checkout_opts).unwrap();
+
+        // Create a file and directory
+        let file_path = wc_path.join("test.txt");
+        std::fs::write(&file_path, "test content").unwrap();
+
+        let dir_path = wc_path.join("subdir");
+        std::fs::create_dir(&dir_path).unwrap();
+
+        client_ctx.add(&file_path, &crate::client::AddOptions::new()).unwrap();
+        client_ctx.add(&dir_path, &crate::client::AddOptions::new()).unwrap();
+
+        // Test read_kind
+        let mut wc_ctx = Context::new().unwrap();
+
+        // Check the working copy root is a directory
+        let kind = wc_ctx.read_kind(&wc_path, false, false).unwrap();
+        assert_eq!(kind, crate::NodeKind::Dir);
+
+        // Check the file is recognized as a file
+        let kind = wc_ctx.read_kind(&file_path, false, false).unwrap();
+        assert_eq!(kind, crate::NodeKind::File);
+
+        // Check the directory
+        let kind = wc_ctx.read_kind(&dir_path, false, false).unwrap();
+        assert_eq!(kind, crate::NodeKind::Dir);
+
+        // Check a non-existent path
+        let nonexistent = wc_path.join("nonexistent");
+        let kind = wc_ctx.read_kind(&nonexistent, false, false).unwrap();
+        assert_eq!(kind, crate::NodeKind::None);
+    }
+
+    #[test]
+    fn test_is_wc_root() {
+        use tempfile::TempDir;
+
+        // Create a repository and working copy
+        let temp_dir = TempDir::new().unwrap();
+        let repos_path = temp_dir.path().join("repos");
+        let wc_path = temp_dir.path().join("wc");
+
+        // Create a repository
+        let _repos = crate::repos::Repos::create(&repos_path).unwrap();
+
+        // Create a working copy using client API
+        let url_str = format!("file://{}", repos_path.display());
+        let url = crate::uri::Uri::new(&url_str).unwrap();
+        let mut client_ctx = crate::client::Context::new().unwrap();
+
+        let checkout_opts = crate::client::CheckoutOptions {
+            revision: crate::Revision::Head,
+            peg_revision: crate::Revision::Head,
+            depth: crate::Depth::Infinity,
+            ignore_externals: false,
+            allow_unver_obstructions: false,
+        };
+        client_ctx.checkout(url, &wc_path, &checkout_opts).unwrap();
+
+        // Create a subdirectory
+        let subdir = wc_path.join("subdir");
+        std::fs::create_dir(&subdir).unwrap();
+        client_ctx.add(&subdir, &crate::client::AddOptions::new()).unwrap();
+
+        // Test is_wc_root
+        let mut wc_ctx = Context::new().unwrap();
+
+        // The working copy root should return true
+        let is_root = wc_ctx.is_wc_root(&wc_path).unwrap();
+        assert!(is_root, "Working copy root should be detected as WC root");
+
+        // A subdirectory should return false
+        let is_root = wc_ctx.is_wc_root(&subdir).unwrap();
+        assert!(!is_root, "Subdirectory should not be a WC root");
     }
 }
