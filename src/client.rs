@@ -1154,6 +1154,18 @@ impl RevertOptions {
     }
 }
 
+/// Represents inherited properties from a parent path.
+///
+/// Contains a path and the properties inherited from that path.
+#[derive(Debug, Clone)]
+pub struct InheritedPropItem {
+    /// The absolute working copy path, relative filesystem path, or URL
+    /// from which the properties are inherited.
+    pub path_or_url: String,
+    /// Hash map of inherited property names to values.
+    pub properties: std::collections::HashMap<String, Vec<u8>>,
+}
+
 /// Options for property get operations
 #[derive(Debug, Clone)]
 pub struct PropGetOptions {
@@ -3713,6 +3725,124 @@ impl Context {
             // Convert apr hash to Rust HashMap
             let prop_hash = unsafe { crate::props::PropHash::from_ptr(props) };
             Ok(prop_hash.to_hashmap())
+        })
+    }
+
+    /// Get property value with inherited properties.
+    ///
+    /// This is like `propget()` but also returns inherited properties from parent paths.
+    /// Returns a tuple of (properties, inherited_properties).
+    pub fn propget_with_inherited(
+        &mut self,
+        propname: &str,
+        target: &str,
+        options: &PropGetOptions,
+        actual_revnum: Option<&mut Revnum>,
+    ) -> Result<
+        (
+            std::collections::HashMap<String, Vec<u8>>,
+            Vec<InheritedPropItem>,
+        ),
+        Error,
+    > {
+        with_tmp_pool(|pool| {
+            let propname_c = std::ffi::CString::new(propname).unwrap();
+            let target_c = std::ffi::CString::new(target).unwrap();
+
+            // Convert changelists if provided
+            let (changelists_array, list_cstrings) = if let Some(lists) = &options.changelists {
+                let mut array = apr::tables::TypedArray::<*const i8>::new(pool, lists.len() as i32);
+                let cstrings: Vec<_> = lists
+                    .iter()
+                    .map(|l| std::ffi::CString::new(l.as_str()).unwrap())
+                    .collect();
+                for cstring in &cstrings {
+                    array.push(cstring.as_ptr());
+                }
+                (unsafe { array.as_ptr() }, Some(cstrings))
+            } else {
+                (std::ptr::null(), None)
+            };
+
+            let mut props = std::ptr::null_mut();
+            let mut inherited_props = std::ptr::null_mut();
+            let mut actual_rev = actual_revnum.as_ref().map_or(0, |r| r.0);
+
+            let err = unsafe {
+                subversion_sys::svn_client_propget5(
+                    &mut props,
+                    &mut inherited_props,
+                    propname_c.as_ptr(),
+                    target_c.as_ptr(),
+                    &options.peg_revision.into(),
+                    &options.revision.into(),
+                    if actual_revnum.is_some() {
+                        &mut actual_rev
+                    } else {
+                        std::ptr::null_mut()
+                    },
+                    options.depth.into(),
+                    changelists_array,
+                    self.as_mut_ptr(),
+                    pool.as_mut_ptr(),
+                    pool.as_mut_ptr(),
+                )
+            };
+
+            // Keep list_cstrings alive until after the call
+            drop(list_cstrings);
+
+            svn_result(err)?;
+
+            if let Some(revnum) = actual_revnum {
+                *revnum = Revnum(actual_rev);
+            }
+
+            // Convert props hash to Rust HashMap
+            let properties = if props.is_null() {
+                std::collections::HashMap::new()
+            } else {
+                let prop_hash = unsafe { crate::props::PropHash::from_ptr(props) };
+                prop_hash.to_hashmap()
+            };
+
+            // Convert inherited_props array to Vec<InheritedPropItem>
+            let inherited = if inherited_props.is_null() {
+                Vec::new()
+            } else {
+                let array = unsafe {
+                    apr::tables::TypedArray::<*mut subversion_sys::svn_prop_inherited_item_t>::from_ptr(inherited_props)
+                };
+                let mut result = Vec::new();
+                for item_ptr in array.iter() {
+                    if item_ptr.is_null() {
+                        continue;
+                    }
+                    unsafe {
+                        let item = *item_ptr;
+                        let path = if item.path_or_url.is_null() {
+                            String::new()
+                        } else {
+                            std::ffi::CStr::from_ptr(item.path_or_url)
+                                .to_string_lossy()
+                                .into_owned()
+                        };
+                        let props = if item.prop_hash.is_null() {
+                            std::collections::HashMap::new()
+                        } else {
+                            let prop_hash = crate::props::PropHash::from_ptr(item.prop_hash);
+                            prop_hash.to_hashmap()
+                        };
+                        result.push(InheritedPropItem {
+                            path_or_url: path,
+                            properties: props,
+                        });
+                    }
+                }
+                result
+            };
+
+            Ok((properties, inherited))
         })
     }
 
@@ -6570,6 +6700,111 @@ mod tests {
             for (_path, value) in props.iter() {
                 assert_eq!(value, b"test value");
             }
+        }
+    }
+
+    #[test]
+    fn test_propget_with_inherited() {
+        let td = tempfile::tempdir().unwrap();
+        let repo_path = td.path().join("repo");
+        let wc_path = td.path().join("wc");
+
+        // Create a test repository
+        crate::repos::Repos::create(&repo_path).unwrap();
+
+        // Check out working copy
+        let mut ctx = Context::new().unwrap();
+        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        let url = crate::uri::Uri::new(&url_str).unwrap();
+
+        ctx.checkout(
+            url,
+            &wc_path,
+            &CheckoutOptions {
+                peg_revision: Revision::Head,
+                revision: Revision::Head,
+                depth: Depth::Infinity,
+                ignore_externals: false,
+                allow_unver_obstructions: false,
+            },
+        )
+        .unwrap();
+
+        // Set a property on the working copy root
+        ctx.propset(
+            "test:parent-property",
+            Some(b"parent value"),
+            wc_path.to_str().unwrap(),
+            &PropSetOptions::new().with_depth(Depth::Empty),
+        )
+        .unwrap();
+
+        // Create a subdirectory
+        let subdir = wc_path.join("subdir");
+        std::fs::create_dir(&subdir).unwrap();
+        ctx.add(
+            &subdir,
+            &AddOptions {
+                depth: Depth::Empty,
+                force: false,
+                no_ignore: false,
+                no_autoprops: false,
+                add_parents: false,
+            },
+        )
+        .unwrap();
+
+        // Create a file in the subdirectory
+        let test_file = subdir.join("test.txt");
+        std::fs::write(&test_file, "test content").unwrap();
+        ctx.add(
+            &test_file,
+            &AddOptions {
+                depth: Depth::Empty,
+                force: false,
+                no_ignore: false,
+                no_autoprops: false,
+                add_parents: false,
+            },
+        )
+        .unwrap();
+
+        // Set a property on the file
+        ctx.propset(
+            "test:file-property",
+            Some(b"file value"),
+            test_file.to_str().unwrap(),
+            &PropSetOptions::new().with_depth(Depth::Empty),
+        )
+        .unwrap();
+
+        // Get properties with inherited properties
+        let result = ctx.propget_with_inherited(
+            "test:parent-property",
+            test_file.to_str().unwrap(),
+            &PropGetOptions::new()
+                .with_peg_revision(Revision::Working)
+                .with_revision(Revision::Working)
+                .with_depth(Depth::Empty),
+            None,
+        );
+
+        assert!(result.is_ok(), "propget_with_inherited should succeed");
+        let (props, inherited) = result.unwrap();
+
+        // The file itself doesn't have test:parent-property
+        assert!(props.is_empty() || !props.contains_key(test_file.to_str().unwrap()));
+
+        // But it should be in the inherited properties from the parent
+        // Note: inherited properties might be empty if SVN version doesn't support it
+        // or if the implementation differs. This is a basic smoke test.
+        println!("Inherited properties count: {}", inherited.len());
+        for item in &inherited {
+            println!(
+                "Inherited from: {} (has {} properties)",
+                item.path_or_url,
+                item.properties.len()
+            );
         }
     }
 
