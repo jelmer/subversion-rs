@@ -1814,22 +1814,24 @@ impl<'a> Session<'a> {
     /// Get properties of a directory without fetching its entries
     ///
     /// This is more efficient than get_dir when you only need properties.
+    /// Returns a tuple of (properties, fetched_revision).
     pub fn get_dir_props(
         &mut self,
         path: &str,
         revision: Revnum,
-    ) -> Result<HashMap<String, Vec<u8>>, Error> {
+    ) -> Result<(HashMap<String, Vec<u8>>, Revnum), Error> {
         let pool = Pool::new();
         let path_cstr = std::ffi::CString::new(path).unwrap();
 
         let mut props: *mut apr::hash::apr_hash_t = std::ptr::null_mut();
+        let mut fetched_rev: i64 = 0;
 
         // Use svn_ra_get_dir2 with dirent_fields set to 0 to skip entries
         let err = unsafe {
             subversion_sys::svn_ra_get_dir2(
                 self.ptr,
                 std::ptr::null_mut(), // Don't fetch entries
-                std::ptr::null_mut(), // Don't fetch fetched_rev
+                &mut fetched_rev,
                 &mut props,
                 path_cstr.as_ptr(),
                 revision.0,
@@ -1840,12 +1842,14 @@ impl<'a> Session<'a> {
 
         Error::from_raw(err)?;
 
-        if props.is_null() {
-            return Ok(HashMap::new());
-        }
+        let properties = if props.is_null() {
+            HashMap::new()
+        } else {
+            let prop_hash = unsafe { crate::props::PropHash::from_ptr(props) };
+            prop_hash.to_hashmap()
+        };
 
-        let prop_hash = unsafe { crate::props::PropHash::from_ptr(props) };
-        Ok(prop_hash.to_hashmap())
+        Ok((properties, Revnum(fetched_rev)))
     }
 
     /// Set or delete a revision property (with optional old value check)
@@ -2965,7 +2969,7 @@ mod tests {
         let (_temp_dir, _repo, mut session, _callbacks) = create_test_repo_with_session();
 
         // Test get_dir_props on the root directory (empty repository)
-        let props = session.get_dir_props("", crate::Revnum(0)).unwrap();
+        let (props, fetched_rev) = session.get_dir_props("", crate::Revnum(0)).unwrap();
 
         // In an empty repository, root might have some built-in properties
         // The test validates that the API works correctly
@@ -2973,6 +2977,10 @@ mod tests {
             "Root directory properties: {:?}",
             props.keys().collect::<Vec<_>>()
         );
+        println!("Fetched revision: {}", fetched_rev.0);
+
+        // Verify that the fetched revision is valid (should be 0 for an empty repo)
+        assert_eq!(fetched_rev.0, 0);
 
         // The function should succeed even if no custom properties are set
         // This tests the API without requiring repository modification
