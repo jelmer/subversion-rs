@@ -3738,6 +3738,113 @@ impl Context {
         })
     }
 
+    /// Produces diff output comparing a path at two revisions using a peg revision.
+    ///
+    /// This is similar to `diff()` but uses a single path with a peg revision to
+    /// identify the object, then compares it at two different operative revisions.
+    pub fn diff_peg(
+        &mut self,
+        path_or_url: &str,
+        peg_revision: &Revision,
+        start_revision: &Revision,
+        end_revision: &Revision,
+        relative_to_dir: Option<&str>,
+        outstream: &mut crate::io::Stream,
+        errstream: &mut crate::io::Stream,
+        options: &DiffOptions,
+    ) -> Result<(), Error> {
+        with_tmp_pool(|pool| {
+            let path_c = std::ffi::CString::new(path_or_url).unwrap();
+            let header_encoding_c = std::ffi::CString::new(options.header_encoding.as_str()).unwrap();
+            let relative_to_dir_c = relative_to_dir.map(|s| std::ffi::CString::new(s).unwrap());
+
+            // Create diff file options struct
+            let diff_file_options =
+                unsafe { subversion_sys::svn_diff_file_options_create(pool.as_mut_ptr()) };
+
+            if !options.diff_options.is_empty() {
+                let diff_options_cstrings: Vec<std::ffi::CString> = options
+                    .diff_options
+                    .iter()
+                    .map(|opt| std::ffi::CString::new(opt.as_str()).unwrap())
+                    .collect();
+
+                // Create APR array of diff options for parsing
+                let mut diff_opts_array = apr::tables::TypedArray::<*const i8>::new(pool, 10);
+                for opt in diff_options_cstrings.iter() {
+                    diff_opts_array.push(opt.as_ptr());
+                }
+
+                // Parse the options into the diff_file_options struct
+                let parse_err = unsafe {
+                    subversion_sys::svn_diff_file_options_parse(
+                        diff_file_options,
+                        unsafe { diff_opts_array.as_ptr() },
+                        pool.as_mut_ptr(),
+                    )
+                };
+                Error::from_raw(parse_err)?;
+            }
+
+            let diff_options_array = unsafe {
+                subversion_sys::svn_cstring_split(
+                    std::ptr::null(),
+                    std::ptr::null(),
+                    0,
+                    pool.as_mut_ptr(),
+                )
+            };
+
+            // Convert changelists if provided
+            let (changelists_array, list_cstrings) = if let Some(lists) = &options.changelists {
+                let mut array = apr::tables::TypedArray::<*const i8>::new(pool, lists.len() as i32);
+                let cstrings: Vec<_> = lists
+                    .iter()
+                    .map(|l| std::ffi::CString::new(l.as_str()).unwrap())
+                    .collect();
+                for cstring in &cstrings {
+                    array.push(cstring.as_ptr());
+                }
+                (unsafe { array.as_ptr() }, Some(cstrings))
+            } else {
+                (std::ptr::null(), None)
+            };
+
+            let err = unsafe {
+                subversion_sys::svn_client_diff_peg6(
+                    diff_options_array,
+                    path_c.as_ptr(),
+                    &(*peg_revision).into(),
+                    &(*start_revision).into(),
+                    &(*end_revision).into(),
+                    relative_to_dir_c
+                        .as_ref()
+                        .map_or(std::ptr::null(), |c| c.as_ptr()),
+                    options.depth.into(),
+                    options.ignore_ancestry as i32,
+                    options.no_diff_added as i32,
+                    options.no_diff_deleted as i32,
+                    options.show_copies_as_adds as i32,
+                    options.ignore_content_type as i32,
+                    options.ignore_properties as i32,
+                    options.properties_only as i32,
+                    options.use_git_diff_format as i32,
+                    header_encoding_c.as_ptr(),
+                    outstream.as_mut_ptr(),
+                    errstream.as_mut_ptr(),
+                    changelists_array,
+                    self.as_mut_ptr(),
+                    pool.as_mut_ptr(),
+                )
+            };
+
+            // Keep list_cstrings alive until after the call
+            drop(list_cstrings);
+
+            svn_result(err)
+        })
+    }
+
     /// List directory contents
     pub fn list(
         &mut self,
