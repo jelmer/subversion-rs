@@ -1450,6 +1450,113 @@ impl DiffOptions {
     }
 }
 
+/// The kind of change in a diff summary
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiffSummarizeKind {
+    /// Normal diff
+    Normal,
+    /// Item was added
+    Added,
+    /// Item was modified
+    Modified,
+    /// Item was deleted
+    Deleted,
+}
+
+impl From<subversion_sys::svn_client_diff_summarize_kind_t> for DiffSummarizeKind {
+    fn from(kind: subversion_sys::svn_client_diff_summarize_kind_t) -> Self {
+        match kind {
+            subversion_sys::svn_client_diff_summarize_kind_t_svn_client_diff_summarize_kind_normal => {
+                DiffSummarizeKind::Normal
+            }
+            subversion_sys::svn_client_diff_summarize_kind_t_svn_client_diff_summarize_kind_added => {
+                DiffSummarizeKind::Added
+            }
+            subversion_sys::svn_client_diff_summarize_kind_t_svn_client_diff_summarize_kind_modified => {
+                DiffSummarizeKind::Modified
+            }
+            subversion_sys::svn_client_diff_summarize_kind_t_svn_client_diff_summarize_kind_deleted => {
+                DiffSummarizeKind::Deleted
+            }
+            _ => DiffSummarizeKind::Normal,
+        }
+    }
+}
+
+/// Summary of a diff between two paths
+#[derive(Debug, Clone)]
+pub struct DiffSummary {
+    /// Path relative to the target
+    pub path: String,
+    /// The kind of change
+    pub kind: DiffSummarizeKind,
+    /// Whether properties changed
+    pub prop_changed: bool,
+    /// Node kind (file or directory)
+    pub node_kind: subversion_sys::svn_node_kind_t,
+}
+
+impl DiffSummary {
+    /// Create from raw C structure
+    pub(crate) unsafe fn from_raw(raw: *const subversion_sys::svn_client_diff_summarize_t) -> Self {
+        let path = std::ffi::CStr::from_ptr((*raw).path)
+            .to_string_lossy()
+            .into_owned();
+        Self {
+            path,
+            kind: (*raw).summarize_kind.into(),
+            prop_changed: (*raw).prop_changed != 0,
+            node_kind: (*raw).node_kind,
+        }
+    }
+}
+
+/// Options for diff summarize operations
+#[derive(Debug, Clone)]
+pub struct DiffSummarizeOptions {
+    /// Recursion depth (or use recurse boolean for older API)
+    pub depth: Depth,
+    /// Whether to ignore ancestry
+    pub ignore_ancestry: bool,
+    /// Changelists to limit operation to (None means all).
+    pub changelists: Option<Vec<String>>,
+}
+
+impl Default for DiffSummarizeOptions {
+    fn default() -> Self {
+        Self {
+            depth: Depth::Infinity,
+            ignore_ancestry: false,
+            changelists: None,
+        }
+    }
+}
+
+impl DiffSummarizeOptions {
+    /// Creates new DiffSummarizeOptions with default values.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets the depth.
+    pub fn with_depth(mut self, depth: Depth) -> Self {
+        self.depth = depth;
+        self
+    }
+
+    /// Sets whether to ignore ancestry.
+    pub fn with_ignore_ancestry(mut self, ignore_ancestry: bool) -> Self {
+        self.ignore_ancestry = ignore_ancestry;
+        self
+    }
+
+    /// Sets the changelists.
+    pub fn with_changelists(mut self, changelists: Vec<String>) -> Self {
+        self.changelists = Some(changelists);
+        self
+    }
+}
+
 /// Options for log operations
 #[derive(Debug, Clone)]
 pub struct LogOptions {
@@ -3833,6 +3940,151 @@ impl Context {
                     outstream.as_mut_ptr(),
                     errstream.as_mut_ptr(),
                     changelists_array,
+                    self.as_mut_ptr(),
+                    pool.as_mut_ptr(),
+                )
+            };
+
+            // Keep list_cstrings alive until after the call
+            drop(list_cstrings);
+
+            svn_result(err)
+        })
+    }
+
+    /// Produces a summary of differences between two paths.
+    ///
+    /// This is like `diff()` but returns a summary of changes (added, modified, deleted)
+    /// instead of generating full diff output.
+    pub fn diff_summarize(
+        &mut self,
+        path_or_url1: &str,
+        revision1: &Revision,
+        path_or_url2: &str,
+        revision2: &Revision,
+        options: &DiffSummarizeOptions,
+        summarize_func: &mut dyn FnMut(DiffSummary) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        with_tmp_pool(|pool| {
+            let path1_c = std::ffi::CString::new(path_or_url1).unwrap();
+            let path2_c = std::ffi::CString::new(path_or_url2).unwrap();
+
+            // Convert changelists if provided
+            let (changelists_array, list_cstrings) = if let Some(lists) = &options.changelists {
+                let mut array = apr::tables::TypedArray::<*const i8>::new(pool, lists.len() as i32);
+                let cstrings: Vec<_> = lists
+                    .iter()
+                    .map(|l| std::ffi::CString::new(l.as_str()).unwrap())
+                    .collect();
+                for cstring in &cstrings {
+                    array.push(cstring.as_ptr());
+                }
+                (unsafe { array.as_ptr() }, Some(cstrings))
+            } else {
+                (std::ptr::null(), None)
+            };
+
+            extern "C" fn summarize_callback(
+                diff: *const subversion_sys::svn_client_diff_summarize_t,
+                baton: *mut std::ffi::c_void,
+                _pool: *mut apr_sys::apr_pool_t,
+            ) -> *mut subversion_sys::svn_error_t {
+                unsafe {
+                    let callback = &mut *(baton
+                        as *mut &mut dyn FnMut(DiffSummary) -> Result<(), Error>);
+                    let summary = DiffSummary::from_raw(diff);
+                    match callback(summary) {
+                        Ok(()) => std::ptr::null_mut(),
+                        Err(mut e) => e.detach(),
+                    }
+                }
+            }
+
+            let callback_baton = &summarize_func as *const _ as *mut std::ffi::c_void;
+
+            let err = unsafe {
+                // Note: Using depth > 0 for recursion (diff_summarize doesn't have depth parameter)
+                subversion_sys::svn_client_diff_summarize(
+                    path1_c.as_ptr(),
+                    &(*revision1).into(),
+                    path2_c.as_ptr(),
+                    &(*revision2).into(),
+                    (options.depth != Depth::Empty) as i32,  // recurse boolean
+                    options.ignore_ancestry as i32,
+                    Some(summarize_callback as unsafe extern "C" fn(_, _, _) -> _),
+                    callback_baton,
+                    self.as_mut_ptr(),
+                    pool.as_mut_ptr(),
+                )
+            };
+
+            // Keep list_cstrings alive until after the call
+            drop(list_cstrings);
+
+            svn_result(err)
+        })
+    }
+
+    /// Produces a summary of differences using a peg revision.
+    ///
+    /// This is like `diff_peg()` but returns a summary of changes instead of
+    /// generating full diff output.
+    pub fn diff_summarize_peg(
+        &mut self,
+        path_or_url: &str,
+        peg_revision: &Revision,
+        start_revision: &Revision,
+        end_revision: &Revision,
+        options: &DiffSummarizeOptions,
+        summarize_func: &mut dyn FnMut(DiffSummary) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        with_tmp_pool(|pool| {
+            let path_c = std::ffi::CString::new(path_or_url).unwrap();
+
+            // Convert changelists if provided
+            let (changelists_array, list_cstrings) = if let Some(lists) = &options.changelists {
+                let mut array = apr::tables::TypedArray::<*const i8>::new(pool, lists.len() as i32);
+                let cstrings: Vec<_> = lists
+                    .iter()
+                    .map(|l| std::ffi::CString::new(l.as_str()).unwrap())
+                    .collect();
+                for cstring in &cstrings {
+                    array.push(cstring.as_ptr());
+                }
+                (unsafe { array.as_ptr() }, Some(cstrings))
+            } else {
+                (std::ptr::null(), None)
+            };
+
+            extern "C" fn summarize_callback(
+                diff: *const subversion_sys::svn_client_diff_summarize_t,
+                baton: *mut std::ffi::c_void,
+                _pool: *mut apr_sys::apr_pool_t,
+            ) -> *mut subversion_sys::svn_error_t {
+                unsafe {
+                    let callback = &mut *(baton
+                        as *mut &mut dyn FnMut(DiffSummary) -> Result<(), Error>);
+                    let summary = DiffSummary::from_raw(diff);
+                    match callback(summary) {
+                        Ok(()) => std::ptr::null_mut(),
+                        Err(mut e) => e.detach(),
+                    }
+                }
+            }
+
+            let callback_baton = &summarize_func as *const _ as *mut std::ffi::c_void;
+
+            let err = unsafe {
+                subversion_sys::svn_client_diff_summarize_peg2(
+                    path_c.as_ptr(),
+                    &(*peg_revision).into(),
+                    &(*start_revision).into(),
+                    &(*end_revision).into(),
+                    options.depth.into(),
+                    options.ignore_ancestry as i32,
+                    changelists_array,
+                    Some(summarize_callback as unsafe extern "C" fn(_, _, _) -> _),
+                    callback_baton,
                     self.as_mut_ptr(),
                     pool.as_mut_ptr(),
                 )
