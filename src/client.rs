@@ -953,6 +953,57 @@ impl<'a> PatchOptions<'a> {
     }
 }
 
+/// Options for mkdir operations
+pub struct MkdirOptions<'a> {
+    /// Whether to create parent directories.
+    pub make_parents: bool,
+    /// Revision properties for the commit.
+    pub revprop_table: Option<std::collections::HashMap<String, Vec<u8>>>,
+    /// Optional callback to invoke after commit.
+    pub commit_callback: Option<&'a mut dyn FnMut(&crate::CommitInfo) -> Result<(), Error>>,
+}
+
+impl<'a> Default for MkdirOptions<'a> {
+    fn default() -> Self {
+        Self {
+            make_parents: false,
+            revprop_table: None,
+            commit_callback: None,
+        }
+    }
+}
+
+impl<'a> MkdirOptions<'a> {
+    /// Creates a new MkdirOptions with default values.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets whether to create parent directories.
+    pub fn with_make_parents(mut self, make_parents: bool) -> Self {
+        self.make_parents = make_parents;
+        self
+    }
+
+    /// Sets the revision properties.
+    pub fn with_revprop_table(
+        mut self,
+        revprops: std::collections::HashMap<String, Vec<u8>>,
+    ) -> Self {
+        self.revprop_table = Some(revprops);
+        self
+    }
+
+    /// Sets the commit callback.
+    pub fn with_commit_callback(
+        mut self,
+        callback: &'a mut dyn FnMut(&crate::CommitInfo) -> Result<(), Error>,
+    ) -> Self {
+        self.commit_callback = Some(callback);
+        self
+    }
+}
+
 /// Options for commit
 #[derive(Debug, Clone)]
 /// Options for committing changes to the repository.
@@ -1424,26 +1475,27 @@ impl Context {
     }
 
     /// Creates directories in version control.
-    pub fn mkdir(
-        &mut self,
-        paths: &[&str],
-        make_parents: bool,
-        revprop_table: std::collections::HashMap<&str, &[u8]>,
-        commit_callback: &dyn FnMut(&crate::CommitInfo) -> Result<(), Error>,
-    ) -> Result<(), Error> {
+    pub fn mkdir(&mut self, paths: &[&str], options: &mut MkdirOptions) -> Result<(), Error> {
         with_tmp_pool(|pool| unsafe {
-            // Convert revprops to BStr objects that live in the pool
-            let svn_strings: Vec<_> = revprop_table
-                .iter()
-                .map(|(k, v)| (*k, crate::string::BStr::from_bytes(v, pool)))
-                .collect();
-
-            let rps = apr::hash::Hash::from_iter(
-                pool,
-                svn_strings
+            // Convert revprop_table if provided
+            let revprop_hash = options.revprop_table.as_ref().map(|revprops| {
+                let svn_strings: Vec<_> = revprops
                     .iter()
-                    .map(|(k, v)| (k.as_bytes(), v.as_ptr() as *mut std::ffi::c_void)),
-            );
+                    .map(|(k, v)| (k.as_str(), crate::string::BStr::from_bytes(v, pool)))
+                    .collect();
+
+                apr::hash::Hash::from_iter(
+                    pool,
+                    svn_strings
+                        .iter()
+                        .map(|(k, v)| (k.as_bytes(), v.as_ptr() as *mut std::ffi::c_void)),
+                )
+            });
+
+            let revprop_ptr = revprop_hash
+                .as_ref()
+                .map_or(std::ptr::null_mut(), |h| h.as_ptr() as *mut _);
+
             // Keep CStrings alive for the duration of the function
             let path_cstrings: Vec<std::ffi::CString> = paths
                 .iter()
@@ -1453,12 +1505,24 @@ impl Context {
             for path in &path_cstrings {
                 ps.push(path.as_ptr() as *mut std::ffi::c_void);
             }
+
+            // Handle commit callback
+            let (callback_func, callback_baton) =
+                if let Some(ref mut cb) = options.commit_callback {
+                    (
+                        Some(crate::wrap_commit_callback2 as _),
+                        *cb as *const _ as *mut std::ffi::c_void,
+                    )
+                } else {
+                    (None, std::ptr::null_mut())
+                };
+
             let err = svn_client_mkdir4(
                 ps.as_ptr(),
-                make_parents.into(),
-                rps.as_ptr(),
-                Some(crate::wrap_commit_callback2),
-                &commit_callback as *const _ as *mut std::ffi::c_void,
+                options.make_parents.into(),
+                revprop_ptr,
+                callback_func,
+                callback_baton,
                 self.ptr,
                 pool.as_mut_ptr(),
             );
@@ -2466,7 +2530,11 @@ impl Context {
     }
 
     /// Create directories (supports multiple paths)
-    pub fn mkdir_multiple(&mut self, paths: &[&str], make_parents: bool) -> Result<(), Error> {
+    pub fn mkdir_multiple(
+        &mut self,
+        paths: &[&str],
+        options: &mut MkdirOptions,
+    ) -> Result<(), Error> {
         with_tmp_pool(|pool| {
             let paths_c: Vec<_> = paths
                 .iter()
@@ -2477,13 +2545,45 @@ impl Context {
                 paths_array.push(path.as_ptr());
             }
 
+            // Convert revprop_table if provided
+            let revprop_hash = options.revprop_table.as_ref().map(|revprops| {
+                let svn_strings: Vec<_> = revprops
+                    .iter()
+                    .map(|(k, v)| (k.as_str(), crate::string::BStr::from_bytes(v, pool)))
+                    .collect();
+
+                unsafe {
+                    apr::hash::Hash::from_iter(
+                        pool,
+                        svn_strings
+                            .iter()
+                            .map(|(k, v)| (k.as_bytes(), v.as_ptr() as *mut std::ffi::c_void)),
+                    )
+                }
+            });
+
+            let revprop_ptr = revprop_hash
+                .as_ref()
+                .map_or(std::ptr::null_mut(), |h| unsafe { h.as_ptr() as *mut _ });
+
+            // Handle commit callback
+            let (callback_func, callback_baton) =
+                if let Some(ref mut cb) = options.commit_callback {
+                    (
+                        Some(crate::wrap_commit_callback2 as _),
+                        *cb as *const _ as *mut std::ffi::c_void,
+                    )
+                } else {
+                    (None, std::ptr::null_mut())
+                };
+
             let err = unsafe {
                 subversion_sys::svn_client_mkdir4(
                     paths_array.as_ptr(),
-                    make_parents as i32,
-                    std::ptr::null_mut(), // revprop_table
-                    None,                 // commit_callback
-                    std::ptr::null_mut(), // commit_baton
+                    options.make_parents as i32,
+                    revprop_ptr,
+                    callback_func,
+                    callback_baton,
                     self.as_mut_ptr(),
                     pool.as_mut_ptr(),
                 )
@@ -3728,17 +3828,23 @@ impl<'a> MkdirBuilder<'a> {
     /// Executes the mkdir operation.
     pub fn execute(
         self,
-        commit_callback: &dyn FnMut(&crate::CommitInfo) -> Result<(), Error>,
+        commit_callback: &mut dyn FnMut(&crate::CommitInfo) -> Result<(), Error>,
     ) -> Result<(), Error> {
         let paths_ref: Vec<&str> = self.paths.iter().map(|s| s.as_str()).collect();
-        let revprop_ref: std::collections::HashMap<&str, &[u8]> = self
+        let revprop_table_owned: std::collections::HashMap<String, Vec<u8>> = self
             .revprop_table
-            .iter()
-            .map(|(k, v)| (k.as_str(), v.as_slice()))
+            .into_iter()
             .collect();
 
-        self.ctx
-            .mkdir(&paths_ref, self.make_parents, revprop_ref, commit_callback)
+        let mut options = MkdirOptions::new()
+            .with_make_parents(self.make_parents)
+            .with_commit_callback(commit_callback);
+
+        if !revprop_table_owned.is_empty() {
+            options = options.with_revprop_table(revprop_table_owned);
+        }
+
+        self.ctx.mkdir(&paths_ref, &mut options)
     }
 }
 
@@ -5037,7 +5143,7 @@ mod tests {
 
         let result = ctx.mkdir_multiple(
             &[dir1.to_str().unwrap(), dir2.to_str().unwrap()],
-            false, // make_parents
+            &mut MkdirOptions::new(),
         );
 
         // Should succeed in working copy
@@ -5856,7 +5962,7 @@ mod tests {
             .mkdir_builder()
             .add_path(new_dir.to_str().unwrap())
             .make_parents(true)
-            .execute(&|_info| Ok(()));
+            .execute(&mut |_info| Ok(()));
 
         assert!(result.is_ok(), "Mkdir failed: {:?}", result.err());
         assert!(new_dir.exists());
@@ -6227,9 +6333,7 @@ mod tests {
         // Create two unrelated directories in the repository
         ctx.mkdir(
             &[&dir1_url, &dir2_url],
-            true,
-            std::collections::HashMap::new(),
-            &|_info| Ok(()),
+            &mut MkdirOptions::new().with_make_parents(true),
         )
         .unwrap();
 
