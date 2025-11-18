@@ -127,6 +127,32 @@ extern "C" fn wrap_proplist_receiver2(
     }
 }
 
+extern "C" fn wrap_changelist_receiver(
+    baton: *mut std::ffi::c_void,
+    path: *const std::os::raw::c_char,
+    changelist: *const std::os::raw::c_char,
+    _pool: *mut apr_sys::apr_pool_t,
+) -> *mut subversion_sys::svn_error_t {
+    unsafe {
+        // SVN can call this with NULL changelist for paths without changelists
+        // We only want to report paths that actually have changelists
+        if changelist.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let callback = baton as *mut &mut dyn FnMut(&str, &str) -> Result<(), Error>;
+        let callback = &mut *callback;
+
+        let path_str = std::ffi::CStr::from_ptr(path).to_str().unwrap();
+        let changelist_str = std::ffi::CStr::from_ptr(changelist).to_str().unwrap();
+
+        match callback(path_str, changelist_str) {
+            Ok(()) => std::ptr::null_mut(),
+            Err(e) => e.into_raw(),
+        }
+    }
+}
+
 /// Information about a versioned item in the repository.
 pub struct Info(*const subversion_sys::svn_client_info2_t);
 
@@ -5534,6 +5560,59 @@ impl Context {
         Ok(())
     }
 
+    /// Get paths belonging to changelists
+    ///
+    /// Crawl the working copy starting at `path` to discover paths that belong
+    /// to one of the specified changelists. If `changelists` is None, discover
+    /// paths with any changelist. The callback is invoked for each path found.
+    pub fn get_changelists(
+        &mut self,
+        path: &str,
+        depth: Depth,
+        changelists: Option<&[&str]>,
+        receiver: &mut dyn FnMut(&str, &str) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        let pool = Pool::new();
+        let path_cstr = std::ffi::CString::new(path).unwrap();
+
+        // Convert changelists if provided - must keep cstrings alive until after the call
+        let cstrings: Vec<_> = changelists
+            .map(|lists| {
+                lists
+                    .iter()
+                    .map(|l| std::ffi::CString::new(*l).unwrap())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        let changelists_array = if changelists.is_some() {
+            let mut array = apr::tables::TypedArray::<*const i8>::new(&pool, cstrings.len() as i32);
+            for cstring in &cstrings {
+                array.push(cstring.as_ptr());
+            }
+            unsafe { array.as_ptr() }
+        } else {
+            std::ptr::null()
+        };
+
+        let callback_baton = &receiver as *const _ as *mut std::ffi::c_void;
+
+        let err = unsafe {
+            subversion_sys::svn_client_get_changelists(
+                path_cstr.as_ptr(),
+                changelists_array,
+                depth.into(),
+                Some(wrap_changelist_receiver),
+                callback_baton,
+                self.ptr,
+                pool.as_mut_ptr(),
+            )
+        };
+
+        Error::from_raw(err)?;
+        Ok(())
+    }
+
     /// Merge changes between two sources
     ///
     /// This wraps svn_client_merge5 for merging between two sources.
@@ -8511,5 +8590,114 @@ mod tests {
         let prop_val = props.get(&file_url);
         assert!(prop_val.is_some());
         assert_eq!(prop_val.unwrap(), b"test value");
+    }
+
+    #[test]
+    fn test_get_changelists() {
+        let td = tempfile::tempdir().unwrap();
+        let repo_path = td.path().join("repo");
+        let wc_path = td.path().join("wc");
+
+        // Create repository and check out working copy
+        crate::repos::Repos::create(&repo_path).unwrap();
+        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        let url = crate::uri::Uri::new(&url_str).unwrap();
+
+        let mut ctx = Context::new().unwrap();
+        ctx.checkout(
+            url,
+            &wc_path,
+            &CheckoutOptions {
+                peg_revision: Revision::Head,
+                revision: Revision::Head,
+                depth: Depth::Infinity,
+                ignore_externals: false,
+                allow_unver_obstructions: false,
+            },
+        )
+        .unwrap();
+
+        // First try on empty working copy to see if basic call works
+        let mut empty_found = Vec::new();
+        ctx.get_changelists(
+            wc_path.to_str().unwrap(),
+            Depth::Infinity,
+            None,
+            &mut |path, changelist| {
+                empty_found.push((path.to_string(), changelist.to_string()));
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(empty_found.len(), 0);
+
+        // Create some test files
+        let file1 = wc_path.join("file1.txt");
+        let file2 = wc_path.join("file2.txt");
+        let file3 = wc_path.join("file3.txt");
+        std::fs::write(&file1, "content1").unwrap();
+        std::fs::write(&file2, "content2").unwrap();
+        std::fs::write(&file3, "content3").unwrap();
+
+        ctx.add(&file1, &AddOptions::new()).unwrap();
+        ctx.add(&file2, &AddOptions::new()).unwrap();
+        ctx.add(&file3, &AddOptions::new()).unwrap();
+
+        // Add files to changelists
+        ctx.add_to_changelist(
+            &[file1.to_str().unwrap(), file2.to_str().unwrap()],
+            "changelist1",
+            Depth::Empty,
+            None,
+        )
+        .unwrap();
+
+        ctx.add_to_changelist(
+            &[file3.to_str().unwrap()],
+            "changelist2",
+            Depth::Empty,
+            None,
+        )
+        .unwrap();
+
+        // Get all changelists
+        let mut found_paths = Vec::new();
+        ctx.get_changelists(
+            wc_path.to_str().unwrap(),
+            Depth::Infinity,
+            None,
+            &mut |path, changelist| {
+                found_paths.push((path.to_string(), changelist.to_string()));
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(found_paths.len(), 3);
+        assert!(found_paths
+            .iter()
+            .any(|(p, cl)| p.ends_with("file1.txt") && cl == "changelist1"));
+        assert!(found_paths
+            .iter()
+            .any(|(p, cl)| p.ends_with("file2.txt") && cl == "changelist1"));
+        assert!(found_paths
+            .iter()
+            .any(|(p, cl)| p.ends_with("file3.txt") && cl == "changelist2"));
+
+        // Get specific changelist
+        let mut found_paths2 = Vec::new();
+        ctx.get_changelists(
+            wc_path.to_str().unwrap(),
+            Depth::Infinity,
+            Some(&["changelist1"]),
+            &mut |path, changelist| {
+                found_paths2.push((path.to_string(), changelist.to_string()));
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(found_paths2.len(), 2);
+        assert!(found_paths2.iter().all(|(_, cl)| cl == "changelist1"));
     }
 }
