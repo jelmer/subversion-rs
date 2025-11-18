@@ -1095,6 +1095,70 @@ impl<'a> ImportOptions<'a> {
     }
 }
 
+/// Options for revert operations
+#[derive(Debug, Clone)]
+pub struct RevertOptions {
+    /// Recursion depth.
+    pub depth: Depth,
+    /// Changelists to revert (None means all changelists).
+    pub changelists: Option<Vec<String>>,
+    /// Whether to clear changelists after reverting.
+    pub clear_changelists: bool,
+    /// If true, only revert metadata (properties), not file contents.
+    pub metadata_only: bool,
+    /// If true, keep local copies of added files when reverting.
+    pub added_keep_local: bool,
+}
+
+impl Default for RevertOptions {
+    fn default() -> Self {
+        Self {
+            depth: Depth::Infinity,
+            changelists: None,
+            clear_changelists: false,
+            metadata_only: false,
+            added_keep_local: false,
+        }
+    }
+}
+
+impl RevertOptions {
+    /// Creates a new RevertOptions with default values.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets the depth for the revert.
+    pub fn with_depth(mut self, depth: Depth) -> Self {
+        self.depth = depth;
+        self
+    }
+
+    /// Sets the changelists to revert.
+    pub fn with_changelists(mut self, changelists: Vec<String>) -> Self {
+        self.changelists = Some(changelists);
+        self
+    }
+
+    /// Sets whether to clear changelists.
+    pub fn with_clear_changelists(mut self, clear: bool) -> Self {
+        self.clear_changelists = clear;
+        self
+    }
+
+    /// Sets whether to only revert metadata.
+    pub fn with_metadata_only(mut self, metadata_only: bool) -> Self {
+        self.metadata_only = metadata_only;
+        self
+    }
+
+    /// Sets whether to keep local copies of added files.
+    pub fn with_added_keep_local(mut self, keep_local: bool) -> Self {
+        self.added_keep_local = keep_local;
+        self
+    }
+}
+
 /// Options for commit
 #[derive(Debug, Clone)]
 /// Options for committing changes to the repository.
@@ -3992,15 +4056,7 @@ impl Context {
     /// Revert changes in the working copy
     ///
     /// This wraps svn_client_revert4 to revert local modifications.
-    pub fn revert(
-        &mut self,
-        paths: &[&str],
-        depth: Depth,
-        changelists: Option<&[&str]>,
-        clear_changelists: bool,
-        metadata_only: bool,
-        added_keep_local: bool,
-    ) -> Result<(), Error> {
+    pub fn revert(&mut self, paths: &[&str], options: &RevertOptions) -> Result<(), Error> {
         let pool = Pool::new();
 
         // Convert paths to APR array
@@ -4014,32 +4070,35 @@ impl Context {
         }
 
         // Convert changelists if provided
-        let changelists_array = if let Some(lists) = changelists {
+        let (changelists_array, list_cstrings) = if let Some(lists) = &options.changelists {
             let mut array = apr::tables::TypedArray::<*const i8>::new(&pool, lists.len() as i32);
-            let list_cstrings: Vec<_> = lists
+            let cstrings: Vec<_> = lists
                 .iter()
-                .map(|l| std::ffi::CString::new(*l).unwrap())
+                .map(|l| std::ffi::CString::new(l.as_str()).unwrap())
                 .collect();
-            for cstring in &list_cstrings {
+            for cstring in &cstrings {
                 array.push(cstring.as_ptr());
             }
-            unsafe { array.as_ptr() }
+            (unsafe { array.as_ptr() }, Some(cstrings))
         } else {
-            std::ptr::null()
+            (std::ptr::null(), None)
         };
 
         let err = unsafe {
             subversion_sys::svn_client_revert4(
                 paths_array.as_ptr(),
-                depth.into(),
+                options.depth.into(),
                 changelists_array,
-                clear_changelists as i32,
-                metadata_only as i32,
-                added_keep_local as i32,
+                options.clear_changelists as i32,
+                options.metadata_only as i32,
+                options.added_keep_local as i32,
                 self.ptr,
                 pool.as_mut_ptr(),
             )
         };
+
+        // Keep list_cstrings alive until after the call
+        drop(list_cstrings);
 
         Error::from_raw(err)?;
         Ok(())
@@ -5460,11 +5519,7 @@ mod tests {
         // Revert the changes
         let result = ctx.revert(
             &[test_file.to_str().unwrap()],
-            Depth::Empty,
-            None,  // changelists
-            false, // clear_changelists
-            false, // metadata_only
-            false, // added_keep_local
+            &RevertOptions::new().with_depth(Depth::Empty),
         );
 
         assert!(result.is_ok());
