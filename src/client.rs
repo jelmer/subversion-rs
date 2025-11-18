@@ -784,6 +784,88 @@ impl<'a> MoveOptions<'a> {
     }
 }
 
+/// Options for merge_sources operations
+#[derive(Debug, Clone)]
+pub struct MergeSourcesOptions {
+    /// Whether to ignore mergeinfo.
+    pub ignore_mergeinfo: bool,
+    /// Whether to ignore ancestry when comparing trees.
+    pub diff_ignore_ancestry: bool,
+    /// Whether to force deletion of modified files.
+    pub force_delete: bool,
+    /// Whether to record merge info but not apply changes.
+    pub record_only: bool,
+    /// Whether to perform a dry run.
+    pub dry_run: bool,
+    /// Whether to allow mixed revisions.
+    pub allow_mixed_rev: bool,
+    /// Array of merge options (like --ignore-eol-style).
+    pub merge_options: Option<Vec<String>>,
+}
+
+impl Default for MergeSourcesOptions {
+    fn default() -> Self {
+        Self {
+            ignore_mergeinfo: false,
+            diff_ignore_ancestry: false,
+            force_delete: false,
+            record_only: false,
+            dry_run: false,
+            allow_mixed_rev: true,
+            merge_options: None,
+        }
+    }
+}
+
+impl MergeSourcesOptions {
+    /// Creates a new MergeSourcesOptions with default values.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets whether to ignore mergeinfo.
+    pub fn with_ignore_mergeinfo(mut self, ignore: bool) -> Self {
+        self.ignore_mergeinfo = ignore;
+        self
+    }
+
+    /// Sets whether to ignore ancestry when diffing.
+    pub fn with_diff_ignore_ancestry(mut self, ignore: bool) -> Self {
+        self.diff_ignore_ancestry = ignore;
+        self
+    }
+
+    /// Sets whether to force delete modified files.
+    pub fn with_force_delete(mut self, force: bool) -> Self {
+        self.force_delete = force;
+        self
+    }
+
+    /// Sets whether to record merge info only.
+    pub fn with_record_only(mut self, record_only: bool) -> Self {
+        self.record_only = record_only;
+        self
+    }
+
+    /// Sets whether to perform a dry run.
+    pub fn with_dry_run(mut self, dry_run: bool) -> Self {
+        self.dry_run = dry_run;
+        self
+    }
+
+    /// Sets whether to allow mixed revisions.
+    pub fn with_allow_mixed_rev(mut self, allow: bool) -> Self {
+        self.allow_mixed_rev = allow;
+        self
+    }
+
+    /// Sets the merge options (like "--ignore-eol-style").
+    pub fn with_merge_options(mut self, options: Vec<String>) -> Self {
+        self.merge_options = Some(options);
+        self
+    }
+}
+
 /// Options for commit
 #[derive(Debug, Clone)]
 /// Options for committing changes to the repository.
@@ -3787,16 +3869,29 @@ impl Context {
         revision2: &Revision,
         target_wcpath: &str,
         depth: Depth,
-        ignore_ancestry: bool,
-        record_only: bool,
-        force_delete: bool,
-        dry_run: bool,
-        allow_mixed_rev: bool,
+        options: &MergeSourcesOptions,
     ) -> Result<(), Error> {
         let pool = Pool::new();
         let source1 = std::ffi::CString::new(source1).unwrap();
         let source2 = std::ffi::CString::new(source2).unwrap();
         let target_wcpath = std::ffi::CString::new(target_wcpath).unwrap();
+
+        // Convert merge_options to APR array if provided
+        let merge_opts_array = options.merge_options.as_ref().map(|opts| {
+            let mut array = apr::tables::TypedArray::<*const i8>::new(&pool, opts.len() as i32);
+            let cstrings: Vec<_> = opts
+                .iter()
+                .map(|opt| std::ffi::CString::new(opt.as_str()).unwrap())
+                .collect();
+            for cstring in &cstrings {
+                array.push(cstring.as_ptr());
+            }
+            (array, cstrings)
+        });
+
+        let merge_opts_ptr = merge_opts_array
+            .as_ref()
+            .map_or(std::ptr::null(), |(arr, _)| unsafe { arr.as_ptr() });
 
         let err = unsafe {
             subversion_sys::svn_client_merge5(
@@ -3806,13 +3901,13 @@ impl Context {
                 &(*revision2).into(),
                 target_wcpath.as_ptr(),
                 depth.into(),
-                ignore_ancestry as i32,
-                ignore_ancestry as i32, // ignore_mergeinfo
-                record_only as i32,
-                force_delete as i32,
-                dry_run as i32,
-                allow_mixed_rev as i32,
-                std::ptr::null_mut(), // merge_options
+                options.ignore_mergeinfo as i32,
+                options.diff_ignore_ancestry as i32,
+                options.force_delete as i32,
+                options.record_only as i32,
+                options.dry_run as i32,
+                options.allow_mixed_rev as i32,
+                merge_opts_ptr,
                 self.ptr,
                 pool.as_mut_ptr(),
             )
@@ -6270,5 +6365,90 @@ mod tests {
             result
         );
         assert!(nested_move_path.exists(), "Nested moved file should exist");
+    }
+
+    #[test]
+    fn test_merge_sources_with_options() {
+        // Test that MergeSourcesOptions works with separate ignore flags
+        let td = tempfile::tempdir().unwrap();
+        let repo_path = td.path().join("repo");
+        let wc_path = td.path().join("wc");
+
+        crate::repos::Repos::create(&repo_path).unwrap();
+        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        let url = crate::uri::Uri::new(&url_str).unwrap();
+
+        let mut ctx = Context::new().unwrap();
+        ctx.checkout(
+            url,
+            &wc_path,
+            &CheckoutOptions {
+                peg_revision: Revision::Head,
+                revision: Revision::Head,
+                depth: Depth::Infinity,
+                ignore_externals: false,
+                allow_unver_obstructions: false,
+            },
+        )
+        .unwrap();
+
+        // Create a file and commit
+        let file_path = wc_path.join("file.txt");
+        std::fs::write(&file_path, "initial content").unwrap();
+        ctx.add(&file_path, &AddOptions::new()).unwrap();
+        ctx.commit(
+            &[wc_path.to_str().unwrap()],
+            &CommitOptions::default(),
+            std::collections::HashMap::new(),
+            &mut |_info: &crate::CommitInfo| Ok(()),
+        )
+        .unwrap();
+
+        // Modify the file and commit again
+        std::fs::write(&file_path, "modified content").unwrap();
+        ctx.commit(
+            &[wc_path.to_str().unwrap()],
+            &CommitOptions::default(),
+            std::collections::HashMap::new(),
+            &mut |_info: &crate::CommitInfo| Ok(()),
+        )
+        .unwrap();
+
+        // Test merge_sources with dry_run option
+        let result = ctx.merge_sources(
+            &url_str,
+            &Revision::Number(Revnum(1)),
+            &url_str,
+            &Revision::Number(Revnum(2)),
+            wc_path.to_str().unwrap(),
+            Depth::Infinity,
+            &MergeSourcesOptions::new().with_dry_run(true),
+        );
+
+        // Dry run should succeed without actually making changes
+        assert!(
+            result.is_ok(),
+            "Merge with dry_run should succeed: {:?}",
+            result
+        );
+
+        // Test merge_sources with different options
+        let result = ctx.merge_sources(
+            &url_str,
+            &Revision::Number(Revnum(1)),
+            &url_str,
+            &Revision::Number(Revnum(2)),
+            wc_path.to_str().unwrap(),
+            Depth::Infinity,
+            &MergeSourcesOptions::new()
+                .with_ignore_mergeinfo(true)
+                .with_diff_ignore_ancestry(true),
+        );
+
+        assert!(
+            result.is_ok(),
+            "Merge with custom options should succeed: {:?}",
+            result
+        );
     }
 }
