@@ -3065,20 +3065,14 @@ impl Context {
     pub fn info(
         &mut self,
         abspath_or_url: &str,
-        peg_revision: Revision,
-        revision: Revision,
-        depth: Depth,
-        fetch_excluded: bool,
-        fetch_actual_only: bool,
-        include_externals: bool,
-        changelists: Option<&[&str]>,
+        options: &InfoOptions,
         receiver: &dyn FnMut(&Info) -> Result<(), Error>,
     ) -> Result<(), Error> {
         with_tmp_pool(|pool| {
             let abspath_or_url = std::ffi::CString::new(abspath_or_url).unwrap();
-            let changelists = changelists.map(|cl| {
+            let changelists = options.changelists.as_ref().map(|cl| {
                 cl.iter()
-                    .map(|cl| std::ffi::CString::new(*cl).unwrap())
+                    .map(|cl| std::ffi::CString::new(cl.as_str()).unwrap())
                     .collect::<Vec<_>>()
             });
             let changelists = changelists.as_ref().map(|cl| {
@@ -3093,13 +3087,13 @@ impl Context {
             unsafe {
                 let err = subversion_sys::svn_client_info4(
                     abspath_or_url.as_ptr(),
-                    &peg_revision.into(),
-                    &revision.into(),
-                    depth.into(),
-                    fetch_excluded as i32,
-                    fetch_actual_only as i32,
-                    include_externals as i32,
-                    changelists.map_or(std::ptr::null(), |cl| cl.as_ptr()),
+                    &options.peg_revision.into(),
+                    &options.revision.into(),
+                    options.depth.into(),
+                    options.fetch_excluded as i32,
+                    options.fetch_actual_only as i32,
+                    options.include_externals as i32,
+                    changelists.map_or(std::ptr::null(), |cl| unsafe { cl.as_ptr() }),
                     Some(wrap_info_receiver2),
                     receiver,
                     self.as_mut_ptr(),
@@ -4171,22 +4165,17 @@ impl<'a> InfoBuilder<'a> {
 
     /// Executes the info operation.
     pub fn execute(self, receiver: &dyn FnMut(&Info) -> Result<(), Error>) -> Result<(), Error> {
-        let changelists = self
-            .changelists
-            .as_ref()
-            .map(|cl| cl.iter().map(|s| s.as_str()).collect::<Vec<_>>());
+        let options = InfoOptions {
+            peg_revision: self.peg_revision,
+            revision: self.revision,
+            depth: self.depth,
+            fetch_excluded: self.fetch_excluded,
+            fetch_actual_only: self.fetch_actual_only,
+            include_externals: self.include_externals,
+            changelists: self.changelists,
+        };
 
-        self.ctx.info(
-            &self.abspath_or_url,
-            self.peg_revision,
-            self.revision,
-            self.depth,
-            self.fetch_excluded,
-            self.fetch_actual_only,
-            self.include_externals,
-            changelists.as_deref(),
-            receiver,
-        )
+        self.ctx.info(&self.abspath_or_url, &options, receiver)
     }
 }
 
