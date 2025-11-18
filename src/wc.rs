@@ -1829,7 +1829,8 @@ impl Context {
         let path_cstr = std::ffi::CString::new(path).unwrap();
         let scratch_pool = apr::Pool::new();
 
-        let mut kind: subversion_sys::svn_node_kind_t = subversion_sys::svn_node_kind_t_svn_node_none;
+        let mut kind: subversion_sys::svn_node_kind_t =
+            subversion_sys::svn_node_kind_t_svn_node_none;
 
         let err = unsafe {
             subversion_sys::svn_wc_read_kind2(
@@ -1869,6 +1870,58 @@ impl Context {
 
         Error::from_raw(err)?;
         Ok(wc_root != 0)
+    }
+
+    /// Exclude a versioned directory from a working copy
+    ///
+    /// This function removes @a local_abspath from the working copy, but
+    /// unlike delete, keeps it in the repository. This is useful for
+    /// sparse checkouts - excluding subtrees you don't need locally.
+    ///
+    /// The excluded item will not appear in status output and will not
+    /// be included in commits. Use update with depth=infinity to bring
+    /// it back.
+    ///
+    /// @a local_abspath must be a versioned directory.
+    pub fn exclude(
+        &mut self,
+        local_abspath: &std::path::Path,
+        cancel_func: Option<&dyn Fn() -> Result<(), Error>>,
+        notify_func: Option<&dyn Fn(&Notify)>,
+    ) -> Result<(), Error> {
+        let path = local_abspath.to_str().unwrap();
+        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let scratch_pool = apr::Pool::new();
+
+        let cancel_baton = cancel_func
+            .map(|f| box_cancel_baton(f))
+            .unwrap_or(std::ptr::null_mut());
+
+        let notify_baton = notify_func
+            .map(|f| box_notify_baton(f))
+            .unwrap_or(std::ptr::null_mut());
+
+        let err = unsafe {
+            subversion_sys::svn_wc_exclude(
+                self.ptr,
+                path_cstr.as_ptr(),
+                if cancel_func.is_some() {
+                    Some(crate::wrap_cancel_func)
+                } else {
+                    None
+                },
+                cancel_baton,
+                if notify_func.is_some() {
+                    Some(wrap_notify_func)
+                } else {
+                    None
+                },
+                notify_baton,
+                scratch_pool.as_mut_ptr(),
+            )
+        };
+
+        Error::from_raw(err)
     }
 }
 
@@ -2832,8 +2885,12 @@ mod tests {
         let dir_path = wc_path.join("subdir");
         std::fs::create_dir(&dir_path).unwrap();
 
-        client_ctx.add(&file_path, &crate::client::AddOptions::new()).unwrap();
-        client_ctx.add(&dir_path, &crate::client::AddOptions::new()).unwrap();
+        client_ctx
+            .add(&file_path, &crate::client::AddOptions::new())
+            .unwrap();
+        client_ctx
+            .add(&dir_path, &crate::client::AddOptions::new())
+            .unwrap();
 
         // Test read_kind
         let mut wc_ctx = Context::new().unwrap();
@@ -2885,7 +2942,9 @@ mod tests {
         // Create a subdirectory
         let subdir = wc_path.join("subdir");
         std::fs::create_dir(&subdir).unwrap();
-        client_ctx.add(&subdir, &crate::client::AddOptions::new()).unwrap();
+        client_ctx
+            .add(&subdir, &crate::client::AddOptions::new())
+            .unwrap();
 
         // Test is_wc_root
         let mut wc_ctx = Context::new().unwrap();
@@ -2901,8 +2960,8 @@ mod tests {
 
     #[test]
     fn test_get_pristine_contents() {
-        use tempfile::TempDir;
         use std::io::Read;
+        use tempfile::TempDir;
 
         // Create a repository and working copy
         let temp_dir = TempDir::new().unwrap();
@@ -2931,7 +2990,9 @@ mod tests {
         let original_content = "original content";
         std::fs::write(&file_path, original_content).unwrap();
 
-        client_ctx.add(&file_path, &crate::client::AddOptions::new()).unwrap();
+        client_ctx
+            .add(&file_path, &crate::client::AddOptions::new())
+            .unwrap();
 
         let commit_opts = crate::client::CommitOptions::default();
         let revprops = std::collections::HashMap::new();
@@ -2950,24 +3011,172 @@ mod tests {
 
         // Get pristine contents
         let mut wc_ctx = Context::new().unwrap();
-        let pristine_stream = wc_ctx.get_pristine_contents(file_path.to_str().unwrap()).unwrap();
+        let pristine_stream = wc_ctx
+            .get_pristine_contents(file_path.to_str().unwrap())
+            .unwrap();
 
         // Should have pristine contents
-        assert!(pristine_stream.is_some(), "Should have pristine contents for committed file");
+        assert!(
+            pristine_stream.is_some(),
+            "Should have pristine contents for committed file"
+        );
 
         // Read and verify pristine contents match original
         let mut pristine_stream = pristine_stream.unwrap();
         let mut pristine_content = String::new();
-        pristine_stream.read_to_string(&mut pristine_content).unwrap();
+        pristine_stream
+            .read_to_string(&mut pristine_content)
+            .unwrap();
 
-        assert_eq!(pristine_content, original_content, "Pristine content should match original");
+        assert_eq!(
+            pristine_content, original_content,
+            "Pristine content should match original"
+        );
 
         // Test with a newly added file (no pristine)
         let new_file = wc_path.join("new.txt");
         std::fs::write(&new_file, "new file content").unwrap();
-        client_ctx.add(&new_file, &crate::client::AddOptions::new()).unwrap();
+        client_ctx
+            .add(&new_file, &crate::client::AddOptions::new())
+            .unwrap();
 
-        let pristine = wc_ctx.get_pristine_contents(new_file.to_str().unwrap()).unwrap();
-        assert!(pristine.is_none(), "Newly added file should have no pristine contents");
+        let pristine = wc_ctx
+            .get_pristine_contents(new_file.to_str().unwrap())
+            .unwrap();
+        assert!(
+            pristine.is_none(),
+            "Newly added file should have no pristine contents"
+        );
+    }
+
+    #[test]
+    fn test_exclude() {
+        use std::cell::{Cell, RefCell};
+        use tempfile::TempDir;
+
+        // Create a repository and working copy
+        let temp_dir = TempDir::new().unwrap();
+        let repos_path = temp_dir.path().join("repos");
+        let wc_path = temp_dir.path().join("wc");
+
+        // Create a repository
+        let _repos = crate::repos::Repos::create(&repos_path).unwrap();
+
+        // Create a working copy using client API
+        let url_str = format!("file://{}", repos_path.display());
+        let url = crate::uri::Uri::new(&url_str).unwrap();
+        let mut client_ctx = crate::client::Context::new().unwrap();
+
+        let checkout_opts = crate::client::CheckoutOptions {
+            revision: crate::Revision::Head,
+            peg_revision: crate::Revision::Head,
+            depth: crate::Depth::Infinity,
+            ignore_externals: false,
+            allow_unver_obstructions: false,
+        };
+        client_ctx.checkout(url, &wc_path, &checkout_opts).unwrap();
+
+        // Create a subdirectory with a file and commit it
+        let subdir = wc_path.join("subdir");
+        std::fs::create_dir(&subdir).unwrap();
+
+        let file_in_subdir = subdir.join("file.txt");
+        std::fs::write(&file_in_subdir, "content").unwrap();
+
+        client_ctx
+            .add(&subdir, &crate::client::AddOptions::new())
+            .unwrap();
+
+        let commit_opts = crate::client::CommitOptions::default();
+        let revprops = std::collections::HashMap::new();
+        client_ctx
+            .commit(
+                &[wc_path.to_str().unwrap()],
+                &commit_opts,
+                revprops,
+                &|_info| Ok(()),
+            )
+            .unwrap();
+
+        // Verify the subdirectory exists
+        assert!(subdir.exists(), "Subdirectory should exist before exclude");
+        assert!(file_in_subdir.exists(), "File should exist before exclude");
+
+        // Test exclude with notification callback
+        let mut wc_ctx = Context::new().unwrap();
+        let notifications = RefCell::new(Vec::new());
+
+        let result = wc_ctx.exclude(
+            &subdir,
+            None,
+            Some(&|notify: &Notify| {
+                // Collect notifications to verify exclude is working
+                notifications
+                    .borrow_mut()
+                    .push(format!("{:?}", notify.action()));
+            }),
+        );
+
+        // Should succeed
+        assert!(result.is_ok(), "Exclude should succeed: {:?}", result);
+
+        // Verify the directory is now excluded (removed from disk)
+        assert!(
+            !subdir.exists(),
+            "Subdirectory should not exist after exclude"
+        );
+
+        // Verify we got notification callbacks
+        assert!(
+            !notifications.borrow().is_empty(),
+            "Should have received notifications"
+        );
+
+        // Verify the directory can be checked for kind (should return None/excluded)
+        let kind = wc_ctx.read_kind(&subdir, false, false).unwrap();
+        assert_eq!(
+            kind,
+            crate::NodeKind::None,
+            "Excluded directory should show as None"
+        );
+
+        // Test exclude with cancel callback
+        let subdir2 = wc_path.join("subdir2");
+        std::fs::create_dir(&subdir2).unwrap();
+        client_ctx
+            .add(&subdir2, &crate::client::AddOptions::new())
+            .unwrap();
+
+        let commit_opts = crate::client::CommitOptions::default();
+        let revprops = std::collections::HashMap::new();
+        client_ctx
+            .commit(
+                &[wc_path.to_str().unwrap()],
+                &commit_opts,
+                revprops,
+                &|_info| Ok(()),
+            )
+            .unwrap();
+
+        // Test that cancel callback is called (but don't actually cancel)
+        let cancel_called = Cell::new(false);
+        let result = wc_ctx.exclude(
+            &subdir2,
+            Some(&|| {
+                cancel_called.set(true);
+                Ok(()) // Don't actually cancel
+            }),
+            None,
+        );
+
+        assert!(
+            result.is_ok(),
+            "Exclude with cancel callback should succeed"
+        );
+        assert!(
+            cancel_called.get(),
+            "Cancel callback should have been called"
+        );
+        assert!(!subdir2.exists(), "Second subdirectory should be excluded");
     }
 }
