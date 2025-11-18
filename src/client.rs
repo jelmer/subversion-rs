@@ -1004,6 +1004,97 @@ impl<'a> MkdirOptions<'a> {
     }
 }
 
+/// Options for import operations
+pub struct ImportOptions<'a> {
+    /// Recursion depth.
+    pub depth: Depth,
+    /// If true, don't use default ignores.
+    pub no_ignore: bool,
+    /// If true, don't use auto-props.
+    pub no_autoprops: bool,
+    /// If true, ignore unknown node types instead of erroring.
+    pub ignore_unknown_node_types: bool,
+    /// Revision properties for the commit.
+    pub revprop_table: Option<std::collections::HashMap<String, String>>,
+    /// Optional filter callback to control which files are imported.
+    pub filter_callback:
+        Option<&'a mut dyn FnMut(&mut bool, &std::path::Path, &Dirent) -> Result<(), Error>>,
+    /// Optional callback to invoke after commit.
+    pub commit_callback: Option<&'a mut dyn FnMut(&crate::CommitInfo) -> Result<(), Error>>,
+}
+
+impl<'a> Default for ImportOptions<'a> {
+    fn default() -> Self {
+        Self {
+            depth: Depth::Infinity,
+            no_ignore: false,
+            no_autoprops: false,
+            ignore_unknown_node_types: false,
+            revprop_table: None,
+            filter_callback: None,
+            commit_callback: None,
+        }
+    }
+}
+
+impl<'a> ImportOptions<'a> {
+    /// Creates a new ImportOptions with default values.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets the depth for the import.
+    pub fn with_depth(mut self, depth: Depth) -> Self {
+        self.depth = depth;
+        self
+    }
+
+    /// Sets whether to ignore default ignores.
+    pub fn with_no_ignore(mut self, no_ignore: bool) -> Self {
+        self.no_ignore = no_ignore;
+        self
+    }
+
+    /// Sets whether to disable auto-props.
+    pub fn with_no_autoprops(mut self, no_autoprops: bool) -> Self {
+        self.no_autoprops = no_autoprops;
+        self
+    }
+
+    /// Sets whether to ignore unknown node types.
+    pub fn with_ignore_unknown_node_types(mut self, ignore: bool) -> Self {
+        self.ignore_unknown_node_types = ignore;
+        self
+    }
+
+    /// Sets the revision properties.
+    pub fn with_revprop_table(
+        mut self,
+        revprops: std::collections::HashMap<String, String>,
+    ) -> Self {
+        self.revprop_table = Some(revprops);
+        self
+    }
+
+    /// Sets the filter callback.
+    pub fn with_filter_callback(
+        mut self,
+        callback: &'a mut dyn FnMut(&mut bool, &std::path::Path, &Dirent) -> Result<(), Error>,
+    ) -> Self {
+        self.filter_callback = Some(callback);
+        self
+    }
+
+    /// Sets the commit callback.
+    pub fn with_commit_callback(
+        mut self,
+        callback: &'a mut dyn FnMut(&crate::CommitInfo) -> Result<(), Error>,
+    ) -> Self {
+        self.commit_callback = Some(callback);
+        self
+    }
+}
+
 /// Options for commit
 #[derive(Debug, Clone)]
 /// Options for committing changes to the repository.
@@ -1636,50 +1727,78 @@ impl Context {
         &mut self,
         path: impl AsCanonicalDirent,
         url: &str,
-        depth: Depth,
-        no_ignore: bool,
-        no_autoprops: bool,
-        ignore_unknown_node_types: bool,
-        revprop_table: std::collections::HashMap<&str, &str>,
-        filter_callback: &dyn FnMut(&mut bool, &std::path::Path, &Dirent) -> Result<(), Error>,
-        commit_callback: &dyn FnMut(&crate::CommitInfo) -> Result<(), Error>,
+        options: &mut ImportOptions,
     ) -> Result<(), Error> {
         let path = path.as_canonical_dirent()?;
         with_tmp_pool(|pool| {
-            // Convert revprops to BStr objects that live in the pool
-            let svn_strings: Vec<_> = revprop_table
-                .iter()
-                .map(|(k, v)| (*k, crate::string::BStr::from_str(v, pool)))
-                .collect();
-
-            let rps = apr::hash::Hash::from_iter(
-                pool,
-                svn_strings
+            // Convert revprop_table if provided
+            let revprop_hash = options.revprop_table.as_ref().map(|revprops| {
+                let svn_strings: Vec<_> = revprops
                     .iter()
-                    .map(|(k, v)| (k.as_bytes(), v.as_ptr() as *mut std::ffi::c_void)),
-            );
+                    .map(|(k, v)| (k.as_str(), crate::string::BStr::from_str(v, pool)))
+                    .collect();
+
+                apr::hash::Hash::from_iter(
+                    pool,
+                    svn_strings
+                        .iter()
+                        .map(|(k, v)| (k.as_bytes(), v.as_ptr() as *mut std::ffi::c_void)),
+                )
+            });
+
+            let revprop_ptr = revprop_hash
+                .as_ref()
+                .map_or(std::ptr::null_mut(), |h| unsafe {
+                    h.as_ptr() as *mut _
+                });
+
             unsafe {
-                let filter_callback = Box::into_raw(Box::new(filter_callback));
-                let commit_callback = Box::into_raw(Box::new(commit_callback));
+                // Handle filter callback
+                let (filter_func, filter_baton) = if let Some(ref mut cb) = options.filter_callback
+                {
+                    let boxed = Box::into_raw(Box::new(cb));
+                    (Some(wrap_filter_callback as _), boxed as *mut std::ffi::c_void)
+                } else {
+                    (None, std::ptr::null_mut())
+                };
+
+                // Handle commit callback
+                let (commit_func, commit_baton) = if let Some(ref mut cb) = options.commit_callback
+                {
+                    let boxed = Box::into_raw(Box::new(cb));
+                    (
+                        Some(crate::wrap_commit_callback2 as _),
+                        boxed as *mut std::ffi::c_void,
+                    )
+                } else {
+                    (None, std::ptr::null_mut())
+                };
+
                 let path_cstr = std::ffi::CString::new(path.as_str())?;
                 let err = svn_client_import5(
                     path_cstr.as_ptr(),
                     url.as_ptr() as *const i8,
-                    depth.into(),
-                    no_ignore.into(),
-                    no_autoprops.into(),
-                    ignore_unknown_node_types.into(),
-                    rps.as_ptr(),
-                    Some(wrap_filter_callback),
-                    filter_callback as *mut std::ffi::c_void,
-                    Some(crate::wrap_commit_callback2),
-                    commit_callback as *mut std::ffi::c_void,
+                    options.depth.into(),
+                    options.no_ignore.into(),
+                    options.no_autoprops.into(),
+                    options.ignore_unknown_node_types.into(),
+                    revprop_ptr,
+                    filter_func,
+                    filter_baton,
+                    commit_func,
+                    commit_baton,
                     self.ptr,
                     pool.as_mut_ptr(),
                 );
+
                 // Free the boxed callbacks to prevent memory leak
-                drop(Box::from_raw(filter_callback));
-                drop(Box::from_raw(commit_callback));
+                if !filter_baton.is_null() {
+                    drop(Box::from_raw(filter_baton));
+                }
+                if !commit_baton.is_null() {
+                    drop(Box::from_raw(commit_baton));
+                }
+
                 Error::from_raw(err)?;
                 Ok(())
             }
