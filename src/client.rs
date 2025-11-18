@@ -7606,4 +7606,86 @@ mod tests {
             "File should be patched"
         );
     }
+
+    #[test]
+    fn test_propset_remote() {
+        let td = tempfile::tempdir().unwrap();
+        let repo_path = td.path().join("repo");
+        let wc_path = td.path().join("wc");
+
+        // Create a test repository
+        crate::repos::Repos::create(&repo_path).unwrap();
+
+        let mut ctx = Context::new().unwrap();
+        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        let url = crate::uri::Uri::new(&url_str).unwrap();
+
+        // Check out working copy
+        ctx.checkout(
+            url,
+            &wc_path,
+            &CheckoutOptions {
+                peg_revision: Revision::Head,
+                revision: Revision::Head,
+                depth: Depth::Infinity,
+                ignore_externals: false,
+                allow_unver_obstructions: false,
+            },
+        )
+        .unwrap();
+
+        // Create and commit a file
+        let test_file = wc_path.join("file.txt");
+        std::fs::write(&test_file, b"test content").unwrap();
+        ctx.add(&test_file, &AddOptions::default()).unwrap();
+
+        let mut committed_rev = Revnum(0);
+        ctx.commit(
+                &[wc_path.to_str().unwrap()],
+                &CommitOptions::default(),
+                std::collections::HashMap::new(),
+                &|info| {
+                    committed_rev = info.revision();
+                    Ok(())
+                },
+            )
+            .unwrap();
+
+        // Set a property on the remote URL
+        let file_url = format!("{}/file.txt", url_str);
+        let mut options = PropSetRemoteOptions::new()
+            .with_skip_checks(false)
+            .with_base_revision_for_url(committed_rev);
+
+        let result = ctx.propset_remote(
+            "test:property",
+            Some(b"test value"),
+            &file_url,
+            &mut options,
+        );
+
+        assert!(result.is_ok(), "propset_remote should succeed: {:?}", result);
+
+        // Verify the property was set by getting it back
+        let props_result = ctx.propget(
+            "test:property",
+            &file_url,
+            &PropGetOptions {
+                peg_revision: Revision::Head,
+                revision: Revision::Head,
+                depth: Depth::Empty,
+                changelists: None,
+            },
+            None,
+        );
+
+        assert!(props_result.is_ok());
+        let props = props_result.unwrap();
+        assert!(!props.is_empty(), "Property should be set");
+
+        // Check the property value
+        let prop_val = props.get(&file_url);
+        assert!(prop_val.is_some());
+        assert_eq!(prop_val.unwrap(), b"test value");
+    }
 }
