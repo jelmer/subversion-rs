@@ -706,6 +706,84 @@ impl<'a> CopyOptions<'a> {
     }
 }
 
+/// Options for move operations
+pub struct MoveOptions<'a> {
+    /// Whether to move sources as children of the destination.
+    pub move_as_child: bool,
+    /// Whether to create parent directories.
+    pub make_parents: bool,
+    /// Whether to allow mixed revisions.
+    pub allow_mixed_revisions: bool,
+    /// Whether to move only metadata (not file contents).
+    pub metadata_only: bool,
+    /// Revision properties for the commit.
+    pub revprop_table: Option<std::collections::HashMap<String, Vec<u8>>>,
+    /// Optional callback to invoke after commit.
+    pub commit_callback: Option<&'a mut dyn FnMut(&crate::CommitInfo) -> Result<(), Error>>,
+}
+
+impl<'a> Default for MoveOptions<'a> {
+    fn default() -> Self {
+        Self {
+            move_as_child: false,
+            make_parents: false,
+            allow_mixed_revisions: true,
+            metadata_only: false,
+            revprop_table: None,
+            commit_callback: None,
+        }
+    }
+}
+
+impl<'a> MoveOptions<'a> {
+    /// Creates a new MoveOptions with default values.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets whether to move as child.
+    pub fn with_move_as_child(mut self, move_as_child: bool) -> Self {
+        self.move_as_child = move_as_child;
+        self
+    }
+
+    /// Sets whether to create parent directories.
+    pub fn with_make_parents(mut self, make_parents: bool) -> Self {
+        self.make_parents = make_parents;
+        self
+    }
+
+    /// Sets whether to allow mixed revisions.
+    pub fn with_allow_mixed_revisions(mut self, allow_mixed_revisions: bool) -> Self {
+        self.allow_mixed_revisions = allow_mixed_revisions;
+        self
+    }
+
+    /// Sets whether to move only metadata.
+    pub fn with_metadata_only(mut self, metadata_only: bool) -> Self {
+        self.metadata_only = metadata_only;
+        self
+    }
+
+    /// Sets the revision properties.
+    pub fn with_revprop_table(
+        mut self,
+        revprops: std::collections::HashMap<String, Vec<u8>>,
+    ) -> Self {
+        self.revprop_table = Some(revprops);
+        self
+    }
+
+    /// Sets the commit callback.
+    pub fn with_commit_callback(
+        mut self,
+        callback: &'a mut dyn FnMut(&crate::CommitInfo) -> Result<(), Error>,
+    ) -> Self {
+        self.commit_callback = Some(callback);
+        self
+    }
+}
+
 /// Options for commit
 #[derive(Debug, Clone)]
 /// Options for committing changes to the repository.
@@ -3751,11 +3829,7 @@ impl Context {
         &mut self,
         src_paths: &[&str],
         dst_path: &str,
-        move_as_child: bool,
-        make_parents: bool,
-        allow_mixed_revisions: bool,
-        metadata_only: bool,
-        revprop_table: Option<HashMap<String, Vec<u8>>>,
+        options: &mut MoveOptions,
     ) -> Result<(), Error> {
         let pool = Pool::new();
 
@@ -3774,11 +3848,11 @@ impl Context {
 
         // Convert revprop table if provided
         let mut revprop_hash = std::ptr::null_mut();
-        if let Some(revprops) = revprop_table {
+        if let Some(ref revprops) = options.revprop_table {
             let mut hash = apr::hash::Hash::new(&pool);
             for (key, value) in revprops {
-                let key_cstring = std::ffi::CString::new(key).unwrap();
-                let svn_string = crate::string::BStr::from_bytes(&value, &pool);
+                let key_cstring = std::ffi::CString::new(key.as_str()).unwrap();
+                let svn_string = crate::string::BStr::from_bytes(value, &pool);
                 unsafe {
                     hash.insert(
                         key_cstring.as_bytes(),
@@ -3791,17 +3865,27 @@ impl Context {
             }
         }
 
+        // Handle commit callback
+        let (callback_func, callback_baton) = if let Some(ref mut cb) = options.commit_callback {
+            (
+                Some(crate::wrap_commit_callback2 as _),
+                *cb as *const _ as *mut std::ffi::c_void,
+            )
+        } else {
+            (None, std::ptr::null_mut())
+        };
+
         let err = unsafe {
             subversion_sys::svn_client_move7(
                 src_paths_array.as_ptr(),
                 dst_path.as_ptr(),
-                move_as_child as i32,
-                make_parents as i32,
-                allow_mixed_revisions as i32,
-                metadata_only as i32,
+                options.move_as_child as i32,
+                options.make_parents as i32,
+                options.allow_mixed_revisions as i32,
+                options.metadata_only as i32,
                 revprop_hash,
-                None,                 // commit_callback
-                std::ptr::null_mut(), // commit_baton
+                callback_func,
+                callback_baton,
                 self.ptr,
                 pool.as_mut_ptr(),
             )
@@ -4855,11 +4939,7 @@ mod tests {
         let result = ctx.move_path(
             &[test_file.to_str().unwrap()],
             new_path.to_str().unwrap(),
-            false, // move_as_child
-            false, // make_parents
-            true,  // allow_mixed_revisions
-            false, // metadata_only
-            None,  // revprop_table
+            &mut MoveOptions::new(),
         );
 
         assert!(result.is_ok());
@@ -6116,5 +6196,79 @@ mod tests {
             result
         );
         assert!(nested_copy_path.exists(), "Nested copy should exist");
+    }
+
+    #[test]
+    fn test_move_with_options() {
+        // Test that MoveOptions works with make_parents and callback
+        let td = tempfile::tempdir().unwrap();
+        let repo_path = td.path().join("repo");
+        let wc_path = td.path().join("wc");
+
+        crate::repos::Repos::create(&repo_path).unwrap();
+        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        let url = crate::uri::Uri::new(&url_str).unwrap();
+
+        let mut ctx = Context::new().unwrap();
+        ctx.checkout(
+            url,
+            &wc_path,
+            &CheckoutOptions {
+                peg_revision: Revision::Head,
+                revision: Revision::Head,
+                depth: Depth::Infinity,
+                ignore_externals: false,
+                allow_unver_obstructions: false,
+            },
+        )
+        .unwrap();
+
+        // Create and commit a file
+        let file_path = wc_path.join("original.txt");
+        std::fs::write(&file_path, "move test content").unwrap();
+        ctx.add(&file_path, &AddOptions::new()).unwrap();
+        ctx.commit(
+            &[wc_path.to_str().unwrap()],
+            &CommitOptions::default(),
+            std::collections::HashMap::new(),
+            &mut |_info: &crate::CommitInfo| Ok(()),
+        )
+        .unwrap();
+
+        // Test 1: Basic move with default options
+        let move_path = wc_path.join("moved.txt");
+        let result = ctx.move_path(
+            &[file_path.to_str().unwrap()],
+            move_path.to_str().unwrap(),
+            &mut MoveOptions::new(),
+        );
+        assert!(result.is_ok(), "Basic move should succeed: {:?}", result);
+        assert!(move_path.exists(), "Moved file should exist");
+        assert!(!file_path.exists(), "Original file should not exist");
+
+        // Test 2: Move with make_parents option
+        let file_path2 = wc_path.join("file2.txt");
+        std::fs::write(&file_path2, "another file").unwrap();
+        ctx.add(&file_path2, &AddOptions::new()).unwrap();
+        ctx.commit(
+            &[wc_path.to_str().unwrap()],
+            &CommitOptions::default(),
+            std::collections::HashMap::new(),
+            &mut |_info: &crate::CommitInfo| Ok(()),
+        )
+        .unwrap();
+
+        let nested_move_path = wc_path.join("subdir/nested/moved2.txt");
+        let result = ctx.move_path(
+            &[file_path2.to_str().unwrap()],
+            nested_move_path.to_str().unwrap(),
+            &mut MoveOptions::new().with_make_parents(true),
+        );
+        assert!(
+            result.is_ok(),
+            "Move with make_parents should create intermediate directories: {:?}",
+            result
+        );
+        assert!(nested_move_path.exists(), "Nested moved file should exist");
     }
 }
