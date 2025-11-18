@@ -1542,6 +1542,52 @@ impl BlameOptions {
     }
 }
 
+/// Options for setting revision properties
+#[derive(Debug, Clone)]
+pub struct RevpropSetOptions {
+    /// The revision to set the property on.
+    pub revision: Revision,
+    /// Original property value for atomic updates (None = don't check).
+    pub original_propval: Option<Vec<u8>>,
+    /// Whether to force the operation.
+    pub force: bool,
+}
+
+impl Default for RevpropSetOptions {
+    fn default() -> Self {
+        Self {
+            revision: Revision::Head,
+            original_propval: None,
+            force: false,
+        }
+    }
+}
+
+impl RevpropSetOptions {
+    /// Creates a new RevpropSetOptions with default values.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets the revision.
+    pub fn with_revision(mut self, revision: Revision) -> Self {
+        self.revision = revision;
+        self
+    }
+
+    /// Sets the original property value for atomic updates.
+    pub fn with_original_propval(mut self, original_propval: Vec<u8>) -> Self {
+        self.original_propval = Some(original_propval);
+        self
+    }
+
+    /// Sets whether to force the operation.
+    pub fn with_force(mut self, force: bool) -> Self {
+        self.force = force;
+        self
+    }
+}
+
 /// Options for commit
 #[derive(Debug, Clone)]
 /// Options for committing changes to the repository.
@@ -4996,9 +5042,7 @@ impl Context {
         propname: &str,
         propval: Option<&[u8]>,
         url: &str,
-        revision: &Revision,
-        original_propval: Option<&[u8]>,
-        force: bool,
+        options: &RevpropSetOptions,
     ) -> Result<(), Error> {
         let pool = apr::Pool::new();
         let propname_cstr = std::ffi::CString::new(propname)?;
@@ -5018,7 +5062,7 @@ impl Context {
             std::ptr::null_mut()
         };
 
-        let original_propval_svn = if let Some(val) = original_propval {
+        let original_propval_svn = if let Some(ref val) = options.original_propval {
             unsafe {
                 let svn_str = apr_sys::apr_palloc(
                     pool.as_mut_ptr(),
@@ -5038,9 +5082,9 @@ impl Context {
                 propval_svn,
                 original_propval_svn,
                 url_cstr.as_ptr(),
-                &(*revision).into(),
+                &options.revision.into(),
                 std::ptr::null_mut(), // base_revision_for_url - not used
-                force as i32,
+                options.force as i32,
                 self.as_mut_ptr(),
                 pool.as_mut_ptr(),
             );
@@ -6588,9 +6632,7 @@ mod tests {
             "test:property",
             Some(b"test value"),
             "file:///non/existent/repo",
-            &Revision::Head,
-            None,
-            false, // force
+            &RevpropSetOptions::new().with_revision(Revision::Head),
         );
 
         // Should return error for invalid repository
