@@ -2898,4 +2898,76 @@ mod tests {
         let is_root = wc_ctx.is_wc_root(&subdir).unwrap();
         assert!(!is_root, "Subdirectory should not be a WC root");
     }
+
+    #[test]
+    fn test_get_pristine_contents() {
+        use tempfile::TempDir;
+        use std::io::Read;
+
+        // Create a repository and working copy
+        let temp_dir = TempDir::new().unwrap();
+        let repos_path = temp_dir.path().join("repos");
+        let wc_path = temp_dir.path().join("wc");
+
+        // Create a repository
+        let _repos = crate::repos::Repos::create(&repos_path).unwrap();
+
+        // Create a working copy using client API
+        let url_str = format!("file://{}", repos_path.display());
+        let url = crate::uri::Uri::new(&url_str).unwrap();
+        let mut client_ctx = crate::client::Context::new().unwrap();
+
+        let checkout_opts = crate::client::CheckoutOptions {
+            revision: crate::Revision::Head,
+            peg_revision: crate::Revision::Head,
+            depth: crate::Depth::Infinity,
+            ignore_externals: false,
+            allow_unver_obstructions: false,
+        };
+        client_ctx.checkout(url, &wc_path, &checkout_opts).unwrap();
+
+        // Create and commit a file with original content
+        let file_path = wc_path.join("test.txt");
+        let original_content = "original content";
+        std::fs::write(&file_path, original_content).unwrap();
+
+        client_ctx.add(&file_path, &crate::client::AddOptions::new()).unwrap();
+
+        let commit_opts = crate::client::CommitOptions::default();
+        let revprops = std::collections::HashMap::new();
+        client_ctx
+            .commit(
+                &[wc_path.to_str().unwrap()],
+                &commit_opts,
+                revprops,
+                &|_info| Ok(()),
+            )
+            .unwrap();
+
+        // Modify the file
+        let modified_content = "modified content";
+        std::fs::write(&file_path, modified_content).unwrap();
+
+        // Get pristine contents
+        let mut wc_ctx = Context::new().unwrap();
+        let pristine_stream = wc_ctx.get_pristine_contents(file_path.to_str().unwrap()).unwrap();
+
+        // Should have pristine contents
+        assert!(pristine_stream.is_some(), "Should have pristine contents for committed file");
+
+        // Read and verify pristine contents match original
+        let mut pristine_stream = pristine_stream.unwrap();
+        let mut pristine_content = String::new();
+        pristine_stream.read_to_string(&mut pristine_content).unwrap();
+
+        assert_eq!(pristine_content, original_content, "Pristine content should match original");
+
+        // Test with a newly added file (no pristine)
+        let new_file = wc_path.join("new.txt");
+        std::fs::write(&new_file, "new file content").unwrap();
+        client_ctx.add(&new_file, &crate::client::AddOptions::new()).unwrap();
+
+        let pristine = wc_ctx.get_pristine_contents(new_file.to_str().unwrap()).unwrap();
+        assert!(pristine.is_none(), "Newly added file should have no pristine contents");
+    }
 }
