@@ -866,6 +866,93 @@ impl MergeSourcesOptions {
     }
 }
 
+/// Options for patch operations
+pub struct PatchOptions<'a> {
+    /// Whether to perform a dry run without modifying files.
+    pub dry_run: bool,
+    /// Number of leading path components to strip from paths in the patch.
+    pub strip_count: i32,
+    /// Whether to apply the patch in reverse.
+    pub reverse: bool,
+    /// Whether to ignore whitespace differences.
+    pub ignore_whitespace: bool,
+    /// Whether to remove temporary files after patching.
+    pub remove_tempfiles: bool,
+    /// Optional callback to filter patch targets.
+    pub patch_func: Option<
+        &'a mut dyn FnMut(
+            &mut bool,
+            &str,
+            &std::path::Path,
+            &std::path::Path,
+        ) -> Result<(), Error>,
+    >,
+}
+
+impl<'a> Default for PatchOptions<'a> {
+    fn default() -> Self {
+        Self {
+            dry_run: false,
+            strip_count: 0,
+            reverse: false,
+            ignore_whitespace: false,
+            remove_tempfiles: true,
+            patch_func: None,
+        }
+    }
+}
+
+impl<'a> PatchOptions<'a> {
+    /// Creates a new PatchOptions with default values.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets whether to perform a dry run.
+    pub fn with_dry_run(mut self, dry_run: bool) -> Self {
+        self.dry_run = dry_run;
+        self
+    }
+
+    /// Sets the number of leading path components to strip.
+    pub fn with_strip_count(mut self, count: i32) -> Self {
+        self.strip_count = count;
+        self
+    }
+
+    /// Sets whether to apply the patch in reverse.
+    pub fn with_reverse(mut self, reverse: bool) -> Self {
+        self.reverse = reverse;
+        self
+    }
+
+    /// Sets whether to ignore whitespace.
+    pub fn with_ignore_whitespace(mut self, ignore: bool) -> Self {
+        self.ignore_whitespace = ignore;
+        self
+    }
+
+    /// Sets whether to remove temporary files.
+    pub fn with_remove_tempfiles(mut self, remove: bool) -> Self {
+        self.remove_tempfiles = remove;
+        self
+    }
+
+    /// Sets the patch filter callback.
+    pub fn with_patch_func(
+        mut self,
+        func: &'a mut dyn FnMut(
+            &mut bool,
+            &str,
+            &std::path::Path,
+            &std::path::Path,
+        ) -> Result<(), Error>,
+    ) -> Self {
+        self.patch_func = Some(func);
+        self
+    }
+}
+
 /// Options for commit
 #[derive(Debug, Clone)]
 /// Options for committing changes to the repository.
@@ -4022,27 +4109,75 @@ impl Context {
         &mut self,
         patch_path: &std::path::Path,
         wc_dir_path: &std::path::Path,
-        dry_run: bool,
-        strip_count: i32,
-        reverse: bool,
-        ignore_whitespace: bool,
-        remove_tempfiles: bool,
+        options: &mut PatchOptions,
     ) -> Result<(), Error> {
         let pool = apr::Pool::new();
         let patch_path_cstr = std::ffi::CString::new(patch_path.to_str().unwrap())?;
         let wc_dir_path_cstr = std::ffi::CString::new(wc_dir_path.to_str().unwrap())?;
 
+        // Create C-compatible callback wrapper for patch_func
+        extern "C" fn c_patch_callback(
+            baton: *mut std::ffi::c_void,
+            filtered: *mut i32,
+            canon_path: *const i8,
+            patch_abspath: *const i8,
+            reject_abspath: *const i8,
+            _pool: *mut apr_sys::apr_pool_t,
+        ) -> *mut subversion_sys::svn_error_t {
+            unsafe {
+                let callback = &mut *(baton
+                    as *mut &mut dyn FnMut(
+                        &mut bool,
+                        &str,
+                        &std::path::Path,
+                        &std::path::Path,
+                    ) -> Result<(), Error>);
+
+                let canon_path_str = std::ffi::CStr::from_ptr(canon_path)
+                    .to_str()
+                    .unwrap_or("");
+                let patch_path = std::path::Path::new(
+                    std::ffi::CStr::from_ptr(patch_abspath)
+                        .to_str()
+                        .unwrap_or(""),
+                );
+                let reject_path = std::path::Path::new(
+                    std::ffi::CStr::from_ptr(reject_abspath)
+                        .to_str()
+                        .unwrap_or(""),
+                );
+
+                let mut filtered_bool = *filtered != 0;
+                match callback(&mut filtered_bool, canon_path_str, patch_path, reject_path) {
+                    Ok(()) => {
+                        *filtered = filtered_bool as i32;
+                        std::ptr::null_mut()
+                    }
+                    Err(mut err) => err.as_mut_ptr(),
+                }
+            }
+        }
+
+        let (callback_func, callback_baton) = if let Some(ref mut cb) = options.patch_func {
+            (
+                Some(c_patch_callback as _),
+                *cb as *const _ as *mut std::ffi::c_void,
+            )
+        } else {
+            (None, std::ptr::null_mut())
+        };
+
         unsafe {
             let err = subversion_sys::svn_client_patch(
                 patch_path_cstr.as_ptr(),
                 wc_dir_path_cstr.as_ptr(),
-                dry_run as i32,
-                strip_count,
-                reverse as i32,
-                ignore_whitespace as i32,
-                remove_tempfiles as i32,
-                None,                 // patch_func - NULL for default behavior
-                std::ptr::null_mut(), // patch_baton
+                options.dry_run as i32,
+                options.strip_count,
+                options.reverse as i32,
+                options.ignore_whitespace as i32,
+                options.remove_tempfiles as i32,
+                callback_func,
+                callback_baton,
                 self.as_mut_ptr(),
                 pool.as_mut_ptr(),
             );
@@ -5748,11 +5883,7 @@ mod tests {
         let result = ctx.patch(
             &patch_file,
             &wc_dir,
-            true,  // dry_run
-            0,     // strip_count
-            false, // reverse
-            false, // ignore_whitespace
-            true,  // remove_tempfiles
+            &mut PatchOptions::new().with_dry_run(true),
         );
 
         // Clean up
@@ -6449,6 +6580,75 @@ mod tests {
             result.is_ok(),
             "Merge with custom options should succeed: {:?}",
             result
+        );
+    }
+
+    #[test]
+    fn test_patch_with_options() {
+        // Test that PatchOptions works with different settings
+        let td = tempfile::tempdir().unwrap();
+        let repo_path = td.path().join("repo");
+        let wc_path = td.path().join("wc");
+
+        crate::repos::Repos::create(&repo_path).unwrap();
+        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        let url = crate::uri::Uri::new(&url_str).unwrap();
+
+        let mut ctx = Context::new().unwrap();
+        ctx.checkout(
+            url,
+            &wc_path,
+            &CheckoutOptions {
+                peg_revision: Revision::Head,
+                revision: Revision::Head,
+                depth: Depth::Infinity,
+                ignore_externals: false,
+                allow_unver_obstructions: false,
+            },
+        )
+        .unwrap();
+
+        // Create and commit a file
+        let file_path = wc_path.join("test.txt");
+        std::fs::write(&file_path, "line 1\nline 2\nline 3\n").unwrap();
+        ctx.add(&file_path, &AddOptions::new()).unwrap();
+        ctx.commit(
+            &[wc_path.to_str().unwrap()],
+            &CommitOptions::default(),
+            std::collections::HashMap::new(),
+            &mut |_info: &crate::CommitInfo| Ok(()),
+        )
+        .unwrap();
+
+        // Create a patch file
+        let patch_path = td.path().join("test.patch");
+        std::fs::write(
+            &patch_path,
+            "--- test.txt\n+++ test.txt\n@@ -1,3 +1,3 @@\n line 1\n-line 2\n+line 2 modified\n line 3\n",
+        )
+        .unwrap();
+
+        // Test 1: Apply patch with dry_run
+        let result = ctx.patch(
+            &patch_path,
+            &wc_path,
+            &mut PatchOptions::new().with_dry_run(true),
+        );
+        assert!(result.is_ok(), "Patch dry_run should succeed: {:?}", result);
+
+        // Verify file was not modified (dry run)
+        let content = std::fs::read_to_string(&file_path).unwrap();
+        assert_eq!(content, "line 1\nline 2\nline 3\n");
+
+        // Test 2: Apply patch for real
+        let result = ctx.patch(&patch_path, &wc_path, &mut PatchOptions::new());
+        assert!(result.is_ok(), "Patch should succeed: {:?}", result);
+
+        // Verify file was modified
+        let content = std::fs::read_to_string(&file_path).unwrap();
+        assert!(
+            content.contains("line 2 modified"),
+            "File should be patched"
         );
     }
 }
