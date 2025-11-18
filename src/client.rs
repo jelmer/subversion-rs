@@ -607,6 +607,105 @@ impl<'a> DeleteOptions<'a> {
     }
 }
 
+/// Options for copy operations
+pub struct CopyOptions<'a> {
+    /// Whether to copy sources as children of the destination.
+    pub copy_as_child: bool,
+    /// Whether to create parent directories.
+    pub make_parents: bool,
+    /// Whether to ignore externals.
+    pub ignore_externals: bool,
+    /// Whether to copy only metadata (not file contents).
+    pub metadata_only: bool,
+    /// Whether to pin externals.
+    pub pin_externals: bool,
+    /// Hash mapping external URLs to their pinned revisions.
+    pub externals_to_pin: Option<std::collections::HashMap<String, String>>,
+    /// Revision properties for the commit.
+    pub revprop_table: Option<std::collections::HashMap<String, String>>,
+    /// Optional callback to invoke after commit.
+    pub commit_callback: Option<&'a mut dyn FnMut(&crate::CommitInfo) -> Result<(), Error>>,
+}
+
+impl<'a> Default for CopyOptions<'a> {
+    fn default() -> Self {
+        Self {
+            copy_as_child: false,
+            make_parents: false,
+            ignore_externals: false,
+            metadata_only: false,
+            pin_externals: false,
+            externals_to_pin: None,
+            revprop_table: None,
+            commit_callback: None,
+        }
+    }
+}
+
+impl<'a> CopyOptions<'a> {
+    /// Creates a new CopyOptions with default values.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets whether to copy as child.
+    pub fn with_copy_as_child(mut self, copy_as_child: bool) -> Self {
+        self.copy_as_child = copy_as_child;
+        self
+    }
+
+    /// Sets whether to create parent directories.
+    pub fn with_make_parents(mut self, make_parents: bool) -> Self {
+        self.make_parents = make_parents;
+        self
+    }
+
+    /// Sets whether to ignore externals.
+    pub fn with_ignore_externals(mut self, ignore_externals: bool) -> Self {
+        self.ignore_externals = ignore_externals;
+        self
+    }
+
+    /// Sets whether to copy only metadata.
+    pub fn with_metadata_only(mut self, metadata_only: bool) -> Self {
+        self.metadata_only = metadata_only;
+        self
+    }
+
+    /// Sets whether to pin externals.
+    pub fn with_pin_externals(mut self, pin_externals: bool) -> Self {
+        self.pin_externals = pin_externals;
+        self
+    }
+
+    /// Sets the externals to pin mapping.
+    pub fn with_externals_to_pin(
+        mut self,
+        externals: std::collections::HashMap<String, String>,
+    ) -> Self {
+        self.externals_to_pin = Some(externals);
+        self
+    }
+
+    /// Sets the revision properties.
+    pub fn with_revprop_table(
+        mut self,
+        revprops: std::collections::HashMap<String, String>,
+    ) -> Self {
+        self.revprop_table = Some(revprops);
+        self
+    }
+
+    /// Sets the commit callback.
+    pub fn with_commit_callback(
+        mut self,
+        callback: &'a mut dyn FnMut(&crate::CommitInfo) -> Result<(), Error>,
+    ) -> Self {
+        self.commit_callback = Some(callback);
+        self
+    }
+}
+
 /// Options for commit
 #[derive(Debug, Clone)]
 /// Options for committing changes to the repository.
@@ -1150,8 +1249,12 @@ impl Context {
             for path in &path_cstrings {
                 ps.push(path.as_ptr() as *mut std::ffi::c_void);
             }
-            let (callback_func, callback_baton) = if let Some(ref mut cb) = options.commit_callback {
-                (Some(crate::wrap_commit_callback2 as _), *cb as *const _ as *mut std::ffi::c_void)
+            let (callback_func, callback_baton) = if let Some(ref mut cb) = options.commit_callback
+            {
+                (
+                    Some(crate::wrap_commit_callback2 as _),
+                    *cb as *const _ as *mut std::ffi::c_void,
+                )
             } else {
                 (None, std::ptr::null_mut())
             };
@@ -2015,12 +2118,7 @@ impl Context {
         &mut self,
         sources: &[(&str, Option<Revision>)],
         dst_path: &str,
-        copy_as_child: bool,
-        make_parents: bool,
-        ignore_externals: bool,
-        metadata_only: bool,
-        pin_externals: bool,
-        // TODO: Add proper externals_to_pin support
+        options: &mut CopyOptions,
     ) -> Result<(), Error> {
         with_tmp_pool(|pool| {
             // Keep CStrings alive for the duration of the function
@@ -2056,19 +2154,62 @@ impl Context {
 
             let dst_c = std::ffi::CString::new(dst_path).unwrap();
 
+            // Handle externals_to_pin
+            let externals_hash = options.externals_to_pin.as_ref().map(|ext| {
+                let svn_strings: Vec<_> = ext
+                    .iter()
+                    .map(|(k, v)| (k.as_str(), crate::string::BStr::from_str(v, pool)))
+                    .collect();
+                apr::hash::Hash::from_iter(
+                    pool,
+                    svn_strings
+                        .iter()
+                        .map(|(k, v)| (k.as_bytes(), v.as_ptr() as *mut std::ffi::c_void)),
+                )
+            });
+
+            // Handle revprop_table
+            let revprop_hash = options.revprop_table.as_ref().map(|rp| {
+                let svn_strings: Vec<_> = rp
+                    .iter()
+                    .map(|(k, v)| (k.as_str(), crate::string::BStr::from_str(v, pool)))
+                    .collect();
+                apr::hash::Hash::from_iter(
+                    pool,
+                    svn_strings
+                        .iter()
+                        .map(|(k, v)| (k.as_bytes(), v.as_ptr() as *mut std::ffi::c_void)),
+                )
+            });
+
+            // Handle commit_callback
+            let (callback_func, callback_baton) = if let Some(ref mut cb) = options.commit_callback
+            {
+                (
+                    Some(crate::wrap_commit_callback2 as _),
+                    *cb as *const _ as *mut std::ffi::c_void,
+                )
+            } else {
+                (None, std::ptr::null_mut())
+            };
+
             let err = unsafe {
                 subversion_sys::svn_client_copy7(
                     sources_apr_array.as_ptr(),
                     dst_c.as_ptr(),
-                    copy_as_child as i32,
-                    make_parents as i32,
-                    ignore_externals as i32,
-                    metadata_only as i32,
-                    pin_externals as i32,
-                    std::ptr::null_mut(), // externals_to_pin - TODO
-                    std::ptr::null_mut(), // revprop_table
-                    None,                 // commit_callback
-                    std::ptr::null_mut(), // commit_baton
+                    options.copy_as_child as i32,
+                    options.make_parents as i32,
+                    options.ignore_externals as i32,
+                    options.metadata_only as i32,
+                    options.pin_externals as i32,
+                    externals_hash
+                        .as_ref()
+                        .map_or(std::ptr::null_mut(), |h| h.as_ptr()),
+                    revprop_hash
+                        .as_ref()
+                        .map_or(std::ptr::null_mut(), |h| h.as_ptr()),
+                    callback_func,
+                    callback_baton,
                     self.as_mut_ptr(),
                     pool.as_mut_ptr(),
                 )
@@ -2833,15 +2974,14 @@ impl<'a> CopyBuilder<'a> {
             .map(|(path, rev)| (path.as_str(), *rev))
             .collect();
 
-        self.ctx.copy(
-            &sources,
-            &self.dst_path,
-            self.copy_as_child,
-            self.make_parents,
-            self.ignore_externals,
-            self.metadata_only,
-            self.pin_externals,
-        )
+        let mut options = CopyOptions::new()
+            .with_copy_as_child(self.copy_as_child)
+            .with_make_parents(self.make_parents)
+            .with_ignore_externals(self.ignore_externals)
+            .with_metadata_only(self.metadata_only)
+            .with_pin_externals(self.pin_externals);
+
+        self.ctx.copy(&sources, &self.dst_path, &mut options)
     }
 }
 
@@ -4542,11 +4682,7 @@ mod tests {
         let copy_result = ctx.copy(
             &[(test_file.to_str().unwrap(), None)],
             wc_path.join("test_copy.txt").to_str().unwrap(),
-            false, // copy_as_child
-            false, // make_parents
-            false, // ignore_externals
-            false, // metadata_only
-            false, // pin_externals
+            &mut CopyOptions::new(),
         );
 
         // Copy in working copy requires committed files, so this might fail
@@ -5788,7 +5924,8 @@ mod tests {
             true,
             std::collections::HashMap::new(),
             &|_info| Ok(()),
-        ).unwrap();
+        )
+        .unwrap();
 
         // Checkout dir1
         let dir1_uri = crate::uri::Uri::new(&dir1_url).unwrap();
@@ -5802,7 +5939,8 @@ mod tests {
                 ignore_externals: false,
                 allow_unver_obstructions: false,
             },
-        ).unwrap();
+        )
+        .unwrap();
 
         // Test switch to unrelated dir2 with ignore_ancestry=false - should fail
         let dir2_uri = crate::uri::Uri::new(&dir2_url).unwrap();
@@ -5821,7 +5959,10 @@ mod tests {
         );
 
         // Should fail because dir1 and dir2 don't share ancestry
-        assert!(result.is_err(), "Switch without ignore_ancestry should fail for unrelated paths");
+        assert!(
+            result.is_err(),
+            "Switch without ignore_ancestry should fail for unrelated paths"
+        );
 
         // Test switch with ignore_ancestry=true - should succeed
         let result = ctx.switch(
@@ -5831,7 +5972,11 @@ mod tests {
         );
 
         // Should succeed with ignore_ancestry=true
-        assert!(result.is_ok(), "Switch with ignore_ancestry=true should succeed: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "Switch with ignore_ancestry=true should succeed: {:?}",
+            result
+        );
     }
 
     #[test]
@@ -5856,7 +6001,8 @@ mod tests {
                 ignore_externals: false,
                 allow_unver_obstructions: false,
             },
-        ).unwrap();
+        )
+        .unwrap();
 
         // Create and commit a file
         let file_path = wc_path.join("test.txt");
@@ -5868,12 +6014,11 @@ mod tests {
             &CommitOptions::default(),
             std::collections::HashMap::new(),
             &mut |_info: &crate::CommitInfo| Ok(()),
-        ).unwrap();
+        )
+        .unwrap();
 
         // Test delete with callback (callback only invoked for URL deletes, not WC deletes)
-        let mut callback = |_info: &crate::CommitInfo| {
-            Ok(())
-        };
+        let mut callback = |_info: &crate::CommitInfo| Ok(());
 
         let result = ctx.delete(
             &[file_path.to_str().unwrap()],
@@ -5881,7 +6026,11 @@ mod tests {
             &mut DeleteOptions::new().with_commit_callback(&mut callback),
         );
 
-        assert!(result.is_ok(), "Delete with callback should succeed: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "Delete with callback should succeed: {:?}",
+            result
+        );
 
         // Also test delete without callback
         let file_path2 = wc_path.join("test2.txt");
@@ -5892,7 +6041,8 @@ mod tests {
             &CommitOptions::default(),
             std::collections::HashMap::new(),
             &mut |_info: &crate::CommitInfo| Ok(()),
-        ).unwrap();
+        )
+        .unwrap();
 
         let result = ctx.delete(
             &[file_path2.to_str().unwrap()],
@@ -5900,6 +6050,71 @@ mod tests {
             &mut DeleteOptions::new(),
         );
 
-        assert!(result.is_ok(), "Delete without callback should succeed: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "Delete without callback should succeed: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_copy_with_options() {
+        // Test that CopyOptions works with revprop_table and commit_callback
+        let td = tempfile::tempdir().unwrap();
+        let repo_path = td.path().join("repo");
+        let wc_path = td.path().join("wc");
+
+        crate::repos::Repos::create(&repo_path).unwrap();
+        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        let url = crate::uri::Uri::new(&url_str).unwrap();
+
+        let mut ctx = Context::new().unwrap();
+        ctx.checkout(
+            url,
+            &wc_path,
+            &CheckoutOptions {
+                peg_revision: Revision::Head,
+                revision: Revision::Head,
+                depth: Depth::Infinity,
+                ignore_externals: false,
+                allow_unver_obstructions: false,
+            },
+        )
+        .unwrap();
+
+        // Create and commit a file
+        let file_path = wc_path.join("original.txt");
+        std::fs::write(&file_path, "original content").unwrap();
+        ctx.add(&file_path, &AddOptions::new()).unwrap();
+        ctx.commit(
+            &[wc_path.to_str().unwrap()],
+            &CommitOptions::default(),
+            std::collections::HashMap::new(),
+            &mut |_info: &crate::CommitInfo| Ok(()),
+        )
+        .unwrap();
+
+        // Test 1: Basic copy with default options (WC to WC)
+        let copy_path = wc_path.join("copy1.txt");
+        let result = ctx.copy(
+            &[(file_path.to_str().unwrap(), None)],
+            copy_path.to_str().unwrap(),
+            &mut CopyOptions::new(),
+        );
+        assert!(result.is_ok(), "Basic copy should succeed: {:?}", result);
+
+        // Test 2: Copy with make_parents option
+        let nested_copy_path = wc_path.join("subdir/nested/copy2.txt");
+        let result = ctx.copy(
+            &[(file_path.to_str().unwrap(), None)],
+            nested_copy_path.to_str().unwrap(),
+            &mut CopyOptions::new().with_make_parents(true),
+        );
+        assert!(
+            result.is_ok(),
+            "Copy with make_parents should create intermediate directories: {:?}",
+            result
+        );
+        assert!(nested_copy_path.exists(), "Nested copy should exist");
     }
 }
