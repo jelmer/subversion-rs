@@ -3476,11 +3476,7 @@ impl Context {
     pub fn proplist_all(
         &mut self,
         target: &str,
-        peg_revision: &Revision,
-        revision: &Revision,
-        depth: Depth,
-        changelists: Option<&[&str]>,
-        get_target_inherited_props: bool,
+        options: &ProplistOptions,
         receiver: &mut dyn FnMut(
             &str,
             std::collections::HashMap<String, Vec<u8>>,
@@ -3489,7 +3485,7 @@ impl Context {
         with_tmp_pool(|pool| {
             let target_c = std::ffi::CString::new(target).unwrap();
 
-            let changelists = changelists.map(|cl| {
+            let changelists = options.changelists.map(|cl| {
                 let mut array = apr::tables::TypedArray::<*const i8>::new(pool, 0);
                 for item in cl.iter() {
                     let item_c = std::ffi::CString::new(*item).unwrap();
@@ -3529,11 +3525,11 @@ impl Context {
             let err = unsafe {
                 subversion_sys::svn_client_proplist4(
                     target_c.as_ptr(),
-                    &(*peg_revision).into(),
-                    &(*revision).into(),
-                    depth.into(),
+                    &options.peg_revision.into(),
+                    &options.revision.into(),
+                    options.depth.into(),
                     changelists.map_or(std::ptr::null(), |cl| cl.as_ptr()),
-                    get_target_inherited_props as i32,
+                    options.get_target_inherited_props as i32,
                     Some(proplist_receiver),
                     receiver_ptr,
                     self.as_mut_ptr(),
@@ -6180,13 +6176,16 @@ mod tests {
 
         // Test listing properties
         let mut prop_count = 0;
+        let options = ProplistOptions {
+            peg_revision: Revision::Working,
+            revision: Revision::Working,
+            depth: Depth::Empty,
+            changelists: None,
+            get_target_inherited_props: false,
+        };
         let result = ctx.proplist_all(
             wc_path.to_str().unwrap(),
-            &Revision::Working,
-            &Revision::Working,
-            Depth::Empty,
-            None,  // changelists
-            false, // get_target_inherited_props
+            &options,
             &mut |_path, _props| {
                 prop_count += 1;
                 Ok(())
