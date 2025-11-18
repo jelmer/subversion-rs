@@ -29,16 +29,25 @@ url = { version = "2.5.7", optional = true }
 subversion-sys = { version = "0.0.8", path = "subversion-sys", default-features = false }
 
 [features]
-default = ["ra", "wc", "client", "delta"]
+default = ["ra", "wc", "client", "delta", "repos"]
 pyo3 = ["dep:pyo3"]
 url = ["dep:url"]
 client = ["wc", "ra", "subversion-sys/client"]
 ra = ["delta", "subversion-sys/ra"]
 wc = ["delta", "subversion-sys/wc"]
 delta = ["subversion-sys/delta"]
+repos = ["delta"]
 # Enable zero-copy borrowed views for high-performance operations
 # This exposes lifetime-bound types that borrow from pools
 zero-copy = []
+# Optional utility modules
+xml = []
+x509 = []
+cmdline = []
+sorts = []
+nls = []
+utf = []
+cache = []
 
 [dev-dependencies]
 tempfile = "3.23.0"

@@ -39,11 +39,13 @@ pub(crate) fn svn_result(code: *mut subversion_sys::svn_error_t) -> Result<(), E
 /// Authentication and credential management.
 pub mod auth;
 /// Cache configuration and management.
+#[cfg(feature = "cache")]
 pub mod cache;
 /// Subversion client operations.
 #[cfg(feature = "client")]
 pub mod client;
 /// Command-line utilities and helpers.
+#[cfg(feature = "cmdline")]
 pub mod cmdline;
 /// Configuration file handling.
 pub mod config;
@@ -75,6 +77,7 @@ pub mod merge;
 /// Merge tracking information.
 pub mod mergeinfo;
 /// Native language support and internationalization.
+#[cfg(feature = "nls")]
 pub mod nls;
 /// Option parsing and command-line argument handling.
 pub mod opt;
@@ -84,8 +87,10 @@ pub mod props;
 #[cfg(feature = "ra")]
 pub mod ra;
 /// Repository administration and management.
+#[cfg(feature = "repos")]
 pub mod repos;
 /// Sorting utilities for Subversion data.
+#[cfg(feature = "sorts")]
 pub mod sorts;
 /// String manipulation utilities.
 pub mod string;
@@ -96,6 +101,7 @@ pub mod time;
 /// URI manipulation and validation.
 pub mod uri;
 /// UTF-8 string validation and conversion.
+#[cfg(feature = "utf")]
 pub mod utf;
 /// Version information and compatibility checking.
 pub mod version;
@@ -103,8 +109,10 @@ pub mod version;
 #[cfg(feature = "wc")]
 pub mod wc;
 /// X.509 certificate handling.
+#[cfg(feature = "x509")]
 pub mod x509;
 /// XML parsing and generation utilities.
+#[cfg(feature = "xml")]
 pub mod xml;
 use bitflags::bitflags;
 use std::str::FromStr;
@@ -113,6 +121,7 @@ use subversion_sys::{svn_opt_revision_t, svn_opt_revision_value_t};
 pub use version::Version;
 
 // Re-export important types for API consumers
+#[cfg(feature = "repos")]
 pub use repos::{LoadUUID, Notify};
 
 bitflags! {

@@ -736,7 +736,7 @@ pub fn get_ssl_server_trust_prompt_provider(
             pool: unsafe { apr::PoolHandle::from_borrowed_raw(pool) },
             _phantom: PhantomData,
         };
-        
+
         f(
             realm,
             failures.try_into().unwrap(),

@@ -285,7 +285,7 @@ pub fn stream_translated(
 
     // Copy eol_str into result_pool so it survives
     let eol_ptr = match eol_str {
-        Some(s) => unsafe { apr::strings::pstrdup_raw(s, &result_pool)? },
+        Some(s) => apr::strings::pstrdup_raw(s, &result_pool)?,
         None => std::ptr::null(),
     };
 
@@ -340,7 +340,7 @@ pub fn stream_translated_to_normal_form(
 
     // Copy eol_str into result_pool so it survives
     let eol_ptr = match eol_str {
-        Some(s) => unsafe { apr::strings::pstrdup_raw(s, &result_pool)? },
+        Some(s) => apr::strings::pstrdup_raw(s, &result_pool)?,
         None => std::ptr::null(),
     };
 
