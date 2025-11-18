@@ -1469,6 +1469,79 @@ impl LogOptions {
     }
 }
 
+/// Options for blame operations
+#[derive(Debug, Clone)]
+pub struct BlameOptions {
+    /// Peg revision for the target.
+    pub peg_revision: Revision,
+    /// Start revision for blame range.
+    pub start_revision: Revision,
+    /// End revision for blame range.
+    pub end_revision: Revision,
+    /// Diff options to pass to the diff engine.
+    pub diff_options: Vec<String>,
+    /// Whether to ignore MIME type.
+    pub ignore_mime_type: bool,
+    /// Whether to include merged revisions.
+    pub include_merged_revisions: bool,
+}
+
+impl Default for BlameOptions {
+    fn default() -> Self {
+        Self {
+            peg_revision: Revision::Unspecified,
+            start_revision: Revision::Number(Revnum(1)),
+            end_revision: Revision::Head,
+            diff_options: Vec::new(),
+            ignore_mime_type: false,
+            include_merged_revisions: false,
+        }
+    }
+}
+
+impl BlameOptions {
+    /// Creates a new BlameOptions with default values.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets the peg revision.
+    pub fn with_peg_revision(mut self, peg_revision: Revision) -> Self {
+        self.peg_revision = peg_revision;
+        self
+    }
+
+    /// Sets the start revision.
+    pub fn with_start_revision(mut self, start_revision: Revision) -> Self {
+        self.start_revision = start_revision;
+        self
+    }
+
+    /// Sets the end revision.
+    pub fn with_end_revision(mut self, end_revision: Revision) -> Self {
+        self.end_revision = end_revision;
+        self
+    }
+
+    /// Sets the diff options.
+    pub fn with_diff_options(mut self, diff_options: Vec<String>) -> Self {
+        self.diff_options = diff_options;
+        self
+    }
+
+    /// Sets whether to ignore MIME type.
+    pub fn with_ignore_mime_type(mut self, ignore: bool) -> Self {
+        self.ignore_mime_type = ignore;
+        self
+    }
+
+    /// Sets whether to include merged revisions.
+    pub fn with_include_merged_revisions(mut self, include: bool) -> Self {
+        self.include_merged_revisions = include;
+        self
+    }
+}
+
 /// Options for commit
 #[derive(Debug, Clone)]
 /// Options for committing changes to the repository.
@@ -2832,12 +2905,7 @@ impl Context {
     pub fn blame(
         &mut self,
         path_or_url: &str,
-        peg_revision: Revision,
-        start_revision: Revision,
-        end_revision: Revision,
-        diff_options: Vec<String>,
-        ignore_mime_type: bool,
-        include_merged_revisions: bool,
+        options: &BlameOptions,
         receiver: &mut dyn FnMut(BlameInfo) -> Result<(), Error>,
     ) -> Result<(Revnum, Revnum), Error> {
         with_tmp_pool(|pool| {
@@ -2848,8 +2916,9 @@ impl Context {
             let diff_file_options =
                 unsafe { subversion_sys::svn_diff_file_options_create(pool.as_mut_ptr()) };
 
-            if !diff_options.is_empty() {
-                let diff_options_cstrings: Vec<std::ffi::CString> = diff_options
+            if !options.diff_options.is_empty() {
+                let diff_options_cstrings: Vec<std::ffi::CString> = options
+                    .diff_options
                     .iter()
                     .map(|opt| std::ffi::CString::new(opt.as_str()).unwrap())
                     .collect();
@@ -2883,12 +2952,12 @@ impl Context {
                     &mut start_revnum,
                     &mut end_revnum,
                     path_or_url.as_ptr(),
-                    &peg_revision.into(),
-                    &start_revision.into(),
-                    &end_revision.into(),
+                    &options.peg_revision.into(),
+                    &options.start_revision.into(),
+                    &options.end_revision.into(),
                     diff_file_options,
-                    ignore_mime_type as subversion_sys::svn_boolean_t,
-                    include_merged_revisions as subversion_sys::svn_boolean_t,
+                    options.ignore_mime_type as subversion_sys::svn_boolean_t,
+                    options.include_merged_revisions as subversion_sys::svn_boolean_t,
                     Some(blame_receiver_wrapper),
                     receiver_baton,
                     self.as_mut_ptr(),
@@ -6675,12 +6744,10 @@ mod tests {
         // Test blame with invalid path/URL (should fail gracefully)
         let result = ctx.blame(
             "file:///non/existent/file.txt",
-            Revision::Head,
-            Revision::Number(Revnum::from(1u64)),
-            Revision::Head,
-            vec![], // diff_options
-            false,  // ignore_mime_type
-            false,  // include_merged_revisions
+            &BlameOptions::new()
+                .with_peg_revision(Revision::Head)
+                .with_start_revision(Revision::Number(Revnum::from(1u64)))
+                .with_end_revision(Revision::Head),
             &mut receiver,
         );
 
