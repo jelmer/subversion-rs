@@ -426,8 +426,8 @@ pub struct SwitchOptions {
     pub ignore_externals: bool,
     /// Whether to allow unversioned obstructions.
     pub allow_unver_obstructions: bool,
-    /// Whether to create parent directories.
-    pub make_parents: bool,
+    /// Whether to ignore ancestry when comparing trees.
+    pub ignore_ancestry: bool,
 }
 
 impl Default for SwitchOptions {
@@ -439,7 +439,7 @@ impl Default for SwitchOptions {
             depth_is_sticky: false,
             ignore_externals: false,
             allow_unver_obstructions: false,
-            make_parents: false,
+            ignore_ancestry: false,
         }
     }
 }
@@ -486,9 +486,9 @@ impl SwitchOptions {
         self
     }
 
-    /// Sets whether to create parent directories.
-    pub fn with_make_parents(mut self, make_parents: bool) -> Self {
-        self.make_parents = make_parents;
+    /// Sets whether to ignore ancestry when comparing trees.
+    pub fn with_ignore_ancestry(mut self, ignore_ancestry: bool) -> Self {
+        self.ignore_ancestry = ignore_ancestry;
         self
     }
 }
@@ -1028,7 +1028,7 @@ impl Context {
                 options.depth_is_sticky.into(),
                 options.ignore_externals.into(),
                 options.allow_unver_obstructions.into(),
-                options.make_parents.into(),
+                options.ignore_ancestry.into(),
                 self.ptr,
                 pool.as_mut_ptr(),
             );
@@ -5741,5 +5741,73 @@ mod tests {
 
         // Should return error for invalid working copy path
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_switch_with_ignore_ancestry() {
+        // Create a repository with two unrelated directories
+        let td = tempfile::tempdir().unwrap();
+        let repo_path = td.path().join("repo");
+        let wc_path = td.path().join("wc");
+
+        // Create repository
+        crate::repos::Repos::create(&repo_path).unwrap();
+
+        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        let dir1_url = format!("{}/dir1", url_str);
+        let dir2_url = format!("{}/dir2", url_str);
+
+        let mut ctx = Context::new().unwrap();
+
+        // Create two unrelated directories in the repository
+        ctx.mkdir(
+            &[&dir1_url, &dir2_url],
+            true,
+            std::collections::HashMap::new(),
+            &|_info| Ok(()),
+        ).unwrap();
+
+        // Checkout dir1
+        let dir1_uri = crate::uri::Uri::new(&dir1_url).unwrap();
+        ctx.checkout(
+            dir1_uri.clone(),
+            &wc_path,
+            &CheckoutOptions {
+                peg_revision: Revision::Head,
+                revision: Revision::Head,
+                depth: Depth::Infinity,
+                ignore_externals: false,
+                allow_unver_obstructions: false,
+            },
+        ).unwrap();
+
+        // Test switch to unrelated dir2 with ignore_ancestry=false - should fail
+        let dir2_uri = crate::uri::Uri::new(&dir2_url).unwrap();
+        let result = ctx.switch(
+            &wc_path,
+            dir2_uri.clone(),
+            &SwitchOptions {
+                peg_revision: Revision::Head,
+                revision: Revision::Head,
+                depth: Depth::Infinity,
+                depth_is_sticky: false,
+                ignore_externals: false,
+                allow_unver_obstructions: false,
+                ignore_ancestry: false,
+            },
+        );
+
+        // Should fail because dir1 and dir2 don't share ancestry
+        assert!(result.is_err(), "Switch without ignore_ancestry should fail for unrelated paths");
+
+        // Test switch with ignore_ancestry=true - should succeed
+        let result = ctx.switch(
+            &wc_path,
+            dir2_uri.clone(),
+            &SwitchOptions::new().with_ignore_ancestry(true),
+        );
+
+        // Should succeed with ignore_ancestry=true
+        assert!(result.is_ok(), "Switch with ignore_ancestry=true should succeed: {:?}", result);
     }
 }
