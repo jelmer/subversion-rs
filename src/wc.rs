@@ -2,6 +2,29 @@ use crate::{svn_result, with_tmp_pool, Error};
 use std::marker::PhantomData;
 use subversion_sys::{svn_wc_context_t, svn_wc_version};
 
+// Helper functions for properly boxing callback batons
+// wrap_cancel_func expects *mut Box<dyn Fn()>, not *mut Box<&dyn Fn()>
+// We need double-boxing to avoid UB
+fn box_cancel_baton(f: &dyn Fn() -> Result<(), Error>) -> *mut std::ffi::c_void {
+    let boxed: Box<dyn Fn() -> Result<(), Error>> = Box::new(move || f());
+    Box::into_raw(Box::new(boxed)) as *mut std::ffi::c_void
+}
+
+fn box_notify_baton(f: &dyn Fn(&Notify)) -> *mut std::ffi::c_void {
+    let boxed: Box<dyn Fn(&Notify)> = Box::new(move |n| f(n));
+    Box::into_raw(Box::new(boxed)) as *mut std::ffi::c_void
+}
+
+unsafe fn free_cancel_baton(baton: *mut std::ffi::c_void) {
+    drop(Box::from_raw(
+        baton as *mut Box<Box<dyn Fn() -> Result<(), Error>>>,
+    ));
+}
+
+unsafe fn free_notify_baton(baton: *mut std::ffi::c_void) {
+    drop(Box::from_raw(baton as *mut Box<Box<dyn Fn(&Notify)>>));
+}
+
 /// Returns the version information for the working copy library.
 pub fn version() -> crate::Version {
     unsafe { crate::Version(svn_wc_version()) }
@@ -1250,7 +1273,7 @@ impl Context {
         let path_cstr = std::ffi::CString::new(path).unwrap();
 
         let cancel_baton = cancel_func
-            .map(|f| Box::into_raw(Box::new(f)) as *mut std::ffi::c_void)
+            .map(|f| box_cancel_baton(f))
             .unwrap_or(std::ptr::null_mut());
 
         let ret = unsafe {
@@ -1272,11 +1295,7 @@ impl Context {
 
         // Free callback baton
         if !cancel_baton.is_null() {
-            unsafe {
-                drop(Box::from_raw(
-                    cancel_baton as *mut Box<dyn Fn() -> Result<(), Error>>,
-                ))
-            };
+            unsafe { free_cancel_baton(cancel_baton) };
         }
 
         Error::from_raw(ret)
@@ -1304,7 +1323,7 @@ impl Context {
         let prop_ptr = prop_cstr.as_ref().map_or(std::ptr::null(), |p| p.as_ptr());
 
         let cancel_baton = cancel_func
-            .map(|f| Box::into_raw(Box::new(f)) as *mut std::ffi::c_void)
+            .map(|f| box_cancel_baton(f))
             .unwrap_or(std::ptr::null_mut());
 
         let ret = unsafe {
@@ -1353,7 +1372,7 @@ impl Context {
         let pool = apr::Pool::new();
 
         let notify_baton = notify_func
-            .map(|f| Box::into_raw(Box::new(f)) as *mut std::ffi::c_void)
+            .map(|f| box_notify_baton(f))
             .unwrap_or(std::ptr::null_mut());
 
         let ret = unsafe {
@@ -1373,7 +1392,7 @@ impl Context {
         };
 
         if !notify_baton.is_null() {
-            unsafe { drop(Box::from_raw(notify_baton as *mut Box<dyn Fn(&Notify)>)) };
+            unsafe { free_notify_baton(notify_baton) };
         }
 
         Error::from_raw(ret)
@@ -1396,11 +1415,11 @@ impl Context {
         let pool = apr::Pool::new();
 
         let cancel_baton = cancel_func
-            .map(|f| Box::into_raw(Box::new(f)) as *mut std::ffi::c_void)
+            .map(|f| box_cancel_baton(f))
             .unwrap_or(std::ptr::null_mut());
 
         let notify_baton = notify_func
-            .map(|f| Box::into_raw(Box::new(f)) as *mut std::ffi::c_void)
+            .map(|f| box_notify_baton(f))
             .unwrap_or(std::ptr::null_mut());
 
         let ret = unsafe {
@@ -1433,7 +1452,7 @@ impl Context {
             };
         }
         if !notify_baton.is_null() {
-            unsafe { drop(Box::from_raw(notify_baton as *mut Box<dyn Fn(&Notify)>)) };
+            unsafe { free_notify_baton(notify_baton) };
         }
 
         Error::from_raw(ret)
@@ -1584,11 +1603,11 @@ impl Context {
         let pool = apr::Pool::new();
 
         let cancel_baton = cancel_func
-            .map(|f| Box::into_raw(Box::new(f)) as *mut std::ffi::c_void)
+            .map(|f| box_cancel_baton(f))
             .unwrap_or(std::ptr::null_mut());
 
         let notify_baton = notify_func
-            .map(|f| Box::into_raw(Box::new(f)) as *mut std::ffi::c_void)
+            .map(|f| box_notify_baton(f))
             .unwrap_or(std::ptr::null_mut());
 
         let ret = unsafe {
@@ -1621,10 +1640,176 @@ impl Context {
             };
         }
         if !notify_baton.is_null() {
-            unsafe { drop(Box::from_raw(notify_baton as *mut Box<dyn Fn(&Notify)>)) };
+            unsafe { free_notify_baton(notify_baton) };
         }
 
         Error::from_raw(ret)
+    }
+
+    /// Get a versioned property value from a working copy path
+    ///
+    /// Retrieves the value of property @a name for @a local_abspath.
+    /// Returns None if the property doesn't exist.
+    pub fn prop_get(
+        &mut self,
+        local_abspath: &std::path::Path,
+        name: &str,
+    ) -> Result<Option<Vec<u8>>, Error> {
+        let path = local_abspath.to_str().unwrap();
+        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let name_cstr = std::ffi::CString::new(name).unwrap();
+        let result_pool = apr::Pool::new();
+        let scratch_pool = apr::Pool::new();
+
+        let mut value: *const subversion_sys::svn_string_t = std::ptr::null();
+
+        let err = unsafe {
+            subversion_sys::svn_wc_prop_get2(
+                &mut value,
+                self.ptr,
+                path_cstr.as_ptr(),
+                name_cstr.as_ptr(),
+                result_pool.as_mut_ptr(),
+                scratch_pool.as_mut_ptr(),
+            )
+        };
+
+        Error::from_raw(err)?;
+
+        if value.is_null() {
+            Ok(None)
+        } else {
+            Ok(Some(Vec::from(unsafe {
+                std::slice::from_raw_parts((*value).data as *const u8, (*value).len)
+            })))
+        }
+    }
+
+    /// Set a versioned property on a working copy path
+    ///
+    /// Sets property @a name to @a value on @a local_abspath.
+    /// If @a value is None, deletes the property.
+    pub fn prop_set(
+        &mut self,
+        local_abspath: &std::path::Path,
+        name: &str,
+        value: Option<&[u8]>,
+        depth: crate::Depth,
+        skip_checks: bool,
+        changelist_filter: Option<&[&str]>,
+        cancel_func: Option<&dyn Fn() -> Result<(), Error>>,
+        notify_func: Option<&dyn Fn(&Notify)>,
+    ) -> Result<(), Error> {
+        let path = local_abspath.to_str().unwrap();
+        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let name_cstr = std::ffi::CString::new(name).unwrap();
+        let scratch_pool = apr::Pool::new();
+
+        // Create svn_string_t for the value if provided
+        let value_svn = value.map(|v| crate::string::BStr::from_bytes(v, &scratch_pool));
+        let value_ptr = value_svn
+            .as_ref()
+            .map(|v| v.as_ptr())
+            .unwrap_or(std::ptr::null());
+
+        // Convert changelist_filter if provided
+        let changelist_cstrings: Vec<_> = changelist_filter
+            .map(|lists| {
+                lists
+                    .iter()
+                    .map(|l| std::ffi::CString::new(*l).unwrap())
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let changelist_array = if changelist_filter.is_some() {
+            let mut array = apr::tables::TypedArray::<*const i8>::new(
+                &scratch_pool,
+                changelist_cstrings.len() as i32,
+            );
+            for cstring in &changelist_cstrings {
+                array.push(cstring.as_ptr());
+            }
+            unsafe { array.as_ptr() }
+        } else {
+            std::ptr::null()
+        };
+
+        let cancel_baton = cancel_func
+            .map(|f| box_cancel_baton(f))
+            .unwrap_or(std::ptr::null_mut());
+
+        let notify_baton = notify_func
+            .map(|f| box_notify_baton(f))
+            .unwrap_or(std::ptr::null_mut());
+
+        let err = unsafe {
+            subversion_sys::svn_wc_prop_set4(
+                self.ptr,
+                path_cstr.as_ptr(),
+                name_cstr.as_ptr(),
+                value_ptr,
+                depth.into(),
+                skip_checks.into(),
+                changelist_array,
+                if cancel_func.is_some() {
+                    Some(crate::wrap_cancel_func)
+                } else {
+                    None
+                },
+                cancel_baton,
+                if notify_func.is_some() {
+                    Some(wrap_notify_func)
+                } else {
+                    None
+                },
+                notify_baton,
+                scratch_pool.as_mut_ptr(),
+            )
+        };
+
+        if !cancel_baton.is_null() {
+            unsafe {
+                drop(Box::from_raw(
+                    cancel_baton as *mut Box<dyn Fn() -> Result<(), Error>>,
+                ))
+            };
+        }
+        if !notify_baton.is_null() {
+            unsafe { free_notify_baton(notify_baton) };
+        }
+
+        Error::from_raw(err)
+    }
+
+    /// List all versioned properties on a working copy path
+    ///
+    /// Returns a HashMap of all properties set on @a local_abspath.
+    pub fn prop_list(
+        &mut self,
+        local_abspath: &std::path::Path,
+    ) -> Result<std::collections::HashMap<String, Vec<u8>>, Error> {
+        let path = local_abspath.to_str().unwrap();
+        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let result_pool = apr::Pool::new();
+        let scratch_pool = apr::Pool::new();
+
+        let mut props: *mut apr::hash::apr_hash_t = std::ptr::null_mut();
+
+        let err = unsafe {
+            subversion_sys::svn_wc_prop_list2(
+                &mut props,
+                self.ptr,
+                path_cstr.as_ptr(),
+                result_pool.as_mut_ptr(),
+                scratch_pool.as_mut_ptr(),
+            )
+        };
+
+        Error::from_raw(err)?;
+
+        let prop_hash = unsafe { crate::props::PropHash::from_ptr(props) };
+        Ok(prop_hash.to_hashmap())
     }
 }
 
@@ -2487,5 +2672,71 @@ mod tests {
         // We can't easily create a real notify, but we can test the structure exists
         use std::mem::size_of;
         assert!(size_of::<Notify>() > 0);
+    }
+
+    #[test]
+    fn test_wc_prop_operations() {
+        use tempfile::TempDir;
+
+        // Create a repository and working copy
+        let temp_dir = TempDir::new().unwrap();
+        let repos_path = temp_dir.path().join("repos");
+        let wc_path = temp_dir.path().join("wc");
+
+        // Create a repository
+        let _repos = crate::repos::Repos::create(&repos_path).unwrap();
+
+        // Create a working copy using client API
+        let url_str = format!("file://{}", repos_path.display());
+        let url = crate::uri::Uri::new(&url_str).unwrap();
+        let mut client_ctx = crate::client::Context::new().unwrap();
+        client_ctx
+            .checkout(
+                url,
+                &wc_path,
+                &crate::client::CheckoutOptions {
+                    peg_revision: crate::Revision::Head,
+                    revision: crate::Revision::Head,
+                    depth: crate::Depth::Infinity,
+                    ignore_externals: false,
+                    allow_unver_obstructions: false,
+                },
+            )
+            .unwrap();
+
+        // Create a file in the working copy
+        let file_path = wc_path.join("test.txt");
+        std::fs::write(&file_path, "test content").unwrap();
+
+        // Add the file to version control
+        client_ctx
+            .add(&file_path, &crate::client::AddOptions::new())
+            .unwrap();
+
+        // Use client API to set a property (it handles locking)
+        client_ctx
+            .propset(
+                "test:property",
+                Some(b"test value"),
+                file_path.to_str().unwrap(),
+                &crate::client::PropSetOptions::default(),
+            )
+            .unwrap();
+
+        // Now test the wc property functions for reading
+        let mut wc_ctx = Context::new().unwrap();
+
+        // Test prop_get - retrieve the property we set via client
+        let value = wc_ctx.prop_get(&file_path, "test:property").unwrap();
+        assert_eq!(value, Some(b"test value".to_vec()));
+
+        // Test prop_get for non-existent property
+        let missing = wc_ctx.prop_get(&file_path, "test:missing").unwrap();
+        assert_eq!(missing, None);
+
+        // Test prop_list - list all properties
+        let props = wc_ctx.prop_list(&file_path).unwrap();
+        assert!(props.contains_key("test:property"));
+        assert_eq!(props.get("test:property").unwrap(), b"test value");
     }
 }

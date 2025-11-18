@@ -1,6 +1,33 @@
 use crate::{svn_result, with_tmp_pool, Error, Revnum};
 use std::ffi::{CStr, CString};
 
+// Helper functions for properly boxing callback batons
+// The callbacks expect *const Box<dyn Fn...>, not *const Box<&dyn Fn...>
+// We need double-boxing to avoid UB
+fn box_pack_notify_baton(f: Box<dyn Fn(&str) + Send>) -> *mut std::ffi::c_void {
+    Box::into_raw(Box::new(f)) as *mut std::ffi::c_void
+}
+
+fn box_verify_notify_baton(f: Box<dyn Fn(Revnum, &str) + Send>) -> *mut std::ffi::c_void {
+    Box::into_raw(Box::new(f)) as *mut std::ffi::c_void
+}
+
+fn box_cancel_baton(f: Box<dyn Fn() -> bool + Send>) -> *mut std::ffi::c_void {
+    Box::into_raw(Box::new(f)) as *mut std::ffi::c_void
+}
+
+unsafe fn free_pack_notify_baton(baton: *mut std::ffi::c_void) {
+    drop(Box::from_raw(baton as *mut Box<dyn Fn(&str) + Send>));
+}
+
+unsafe fn free_verify_notify_baton(baton: *mut std::ffi::c_void) {
+    drop(Box::from_raw(baton as *mut Box<dyn Fn(Revnum, &str) + Send>));
+}
+
+unsafe fn free_cancel_baton(baton: *mut std::ffi::c_void) {
+    drop(Box::from_raw(baton as *mut Box<dyn Fn() -> bool + Send>));
+}
+
 /// A canonical absolute filesystem path for use with Subversion filesystem operations.
 ///
 /// SVN filesystem paths must be canonical and absolute (start with '/').
@@ -706,8 +733,8 @@ pub fn pack(
     let pool = apr::Pool::new();
 
     // Create notify callback wrapper
-    let notify_baton = notify.map(|f| Box::into_raw(Box::new(f)) as *mut std::ffi::c_void);
-    let cancel_baton = cancel.map(|f| Box::into_raw(Box::new(f)) as *mut std::ffi::c_void);
+    let notify_baton = notify.map(|f| box_pack_notify_baton(f));
+    let cancel_baton = cancel.map(|f| box_cancel_baton(f));
 
     extern "C" fn notify_wrapper(
         baton: *mut std::ffi::c_void,
@@ -745,14 +772,10 @@ pub fn pack(
 
     // Clean up callbacks
     if let Some(baton) = notify_baton {
-        unsafe {
-            let _ = Box::from_raw(baton as *mut Box<dyn Fn(&str) + Send>);
-        }
+        unsafe { free_pack_notify_baton(baton) };
     }
     if let Some(baton) = cancel_baton {
-        unsafe {
-            let _ = Box::from_raw(baton as *mut Box<dyn Fn() -> bool + Send>);
-        }
+        unsafe { free_cancel_baton(baton) };
     }
 
     svn_result(err)?;
@@ -774,8 +797,8 @@ pub fn verify(
     let end_rev = end.map(|r| r.0).unwrap_or(-1); // SVN_INVALID_REVNUM means HEAD
 
     // Create callback wrappers
-    let notify_baton = notify.map(|f| Box::into_raw(Box::new(f)) as *mut std::ffi::c_void);
-    let cancel_baton = cancel.map(|f| Box::into_raw(Box::new(f)) as *mut std::ffi::c_void);
+    let notify_baton = notify.map(|f| box_verify_notify_baton(f));
+    let cancel_baton = cancel.map(|f| box_cancel_baton(f));
 
     extern "C" fn notify_wrapper(
         revision: subversion_sys::svn_revnum_t,
@@ -814,14 +837,10 @@ pub fn verify(
 
     // Clean up callbacks
     if let Some(baton) = notify_baton {
-        unsafe {
-            let _ = Box::from_raw(baton as *mut Box<dyn Fn(Revnum, &str) + Send>);
-        }
+        unsafe { free_verify_notify_baton(baton) };
     }
     if let Some(baton) = cancel_baton {
-        unsafe {
-            let _ = Box::from_raw(baton as *mut Box<dyn Fn() -> bool + Send>);
-        }
+        unsafe { free_cancel_baton(baton) };
     }
 
     svn_result(err)?;
@@ -842,8 +861,8 @@ pub fn hotcopy(
     let pool = apr::Pool::new();
 
     // Create callback wrappers
-    let notify_baton = notify.map(|f| Box::into_raw(Box::new(f)) as *mut std::ffi::c_void);
-    let cancel_baton = cancel.map(|f| Box::into_raw(Box::new(f)) as *mut std::ffi::c_void);
+    let notify_baton = notify.map(|f| box_pack_notify_baton(f));
+    let cancel_baton = cancel.map(|f| box_cancel_baton(f));
 
     extern "C" fn notify_wrapper(
         baton: *mut std::ffi::c_void,
@@ -886,14 +905,10 @@ pub fn hotcopy(
 
     // Clean up callbacks
     if let Some(baton) = notify_baton {
-        unsafe {
-            let _ = Box::from_raw(baton as *mut Box<dyn Fn(&str) + Send>);
-        }
+        unsafe { free_pack_notify_baton(baton) };
     }
     if let Some(baton) = cancel_baton {
-        unsafe {
-            let _ = Box::from_raw(baton as *mut Box<dyn Fn() -> bool + Send>);
-        }
+        unsafe { free_cancel_baton(baton) };
     }
 
     svn_result(err)?;
@@ -908,7 +923,7 @@ pub fn recover(
     let path_cstr = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     let pool = apr::Pool::new();
 
-    let cancel_baton = cancel.map(|f| Box::into_raw(Box::new(f)) as *mut std::ffi::c_void);
+    let cancel_baton = cancel.map(|f| box_cancel_baton(f));
 
     extern "C" fn cancel_wrapper(baton: *mut std::ffi::c_void) -> *mut subversion_sys::svn_error_t {
         if !baton.is_null() {
@@ -931,9 +946,7 @@ pub fn recover(
 
     // Clean up callback
     if let Some(baton) = cancel_baton {
-        unsafe {
-            let _ = Box::from_raw(baton as *mut Box<dyn Fn() -> bool + Send>);
-        }
+        unsafe { free_cancel_baton(baton) };
     }
 
     svn_result(err)?;
