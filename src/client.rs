@@ -1396,6 +1396,79 @@ impl DiffOptions {
     }
 }
 
+/// Options for log operations
+#[derive(Debug, Clone)]
+pub struct LogOptions {
+    /// Peg revision for the target.
+    pub peg_revision: Revision,
+    /// Maximum number of log entries to retrieve (None = unlimited).
+    pub limit: Option<i32>,
+    /// Whether to discover changed paths.
+    pub discover_changed_paths: bool,
+    /// Whether to follow strict node history.
+    pub strict_node_history: bool,
+    /// Whether to include merged revisions.
+    pub include_merged_revisions: bool,
+    /// Revision properties to retrieve (empty = all).
+    pub revprops: Vec<String>,
+}
+
+impl Default for LogOptions {
+    fn default() -> Self {
+        Self {
+            peg_revision: Revision::Unspecified,
+            limit: None,
+            discover_changed_paths: false,
+            strict_node_history: false,
+            include_merged_revisions: false,
+            revprops: Vec::new(),
+        }
+    }
+}
+
+impl LogOptions {
+    /// Creates a new LogOptions with default values.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets the peg revision.
+    pub fn with_peg_revision(mut self, peg_revision: Revision) -> Self {
+        self.peg_revision = peg_revision;
+        self
+    }
+
+    /// Sets the limit for number of log entries.
+    pub fn with_limit(mut self, limit: i32) -> Self {
+        self.limit = Some(limit);
+        self
+    }
+
+    /// Sets whether to discover changed paths.
+    pub fn with_discover_changed_paths(mut self, discover: bool) -> Self {
+        self.discover_changed_paths = discover;
+        self
+    }
+
+    /// Sets whether to follow strict node history.
+    pub fn with_strict_node_history(mut self, strict: bool) -> Self {
+        self.strict_node_history = strict;
+        self
+    }
+
+    /// Sets whether to include merged revisions.
+    pub fn with_include_merged_revisions(mut self, include: bool) -> Self {
+        self.include_merged_revisions = include;
+        self
+    }
+
+    /// Sets the revision properties to retrieve.
+    pub fn with_revprops(mut self, revprops: Vec<String>) -> Self {
+        self.revprops = revprops;
+        self
+    }
+}
+
 /// Options for commit
 #[derive(Debug, Clone)]
 /// Options for committing changes to the repository.
@@ -2263,13 +2336,8 @@ impl Context {
     pub fn log(
         &mut self,
         targets: &[&str],
-        peg_revision: Revision,
         revision_ranges: &[RevisionRange],
-        limit: i32,
-        discover_changed_paths: bool,
-        strict_node_history: bool,
-        include_merged_revisions: bool,
-        revprops: &[&str],
+        options: &LogOptions,
         log_entry_receiver: &dyn FnMut(&LogEntry) -> Result<(), Error>,
     ) -> Result<(), Error> {
         with_tmp_pool(|pool| unsafe {
@@ -2293,22 +2361,23 @@ impl Context {
             }
 
             // Keep CStrings alive for the duration of the function
-            let revprop_cstrings: Vec<std::ffi::CString> = revprops
+            let revprop_cstrings: Vec<std::ffi::CString> = options
+                .revprops
                 .iter()
-                .map(|r| std::ffi::CString::new(*r).unwrap())
+                .map(|r| std::ffi::CString::new(r.as_str()).unwrap())
                 .collect();
-            let mut rps = apr::tables::TypedArray::new(pool, revprops.len() as i32);
+            let mut rps = apr::tables::TypedArray::new(pool, options.revprops.len() as i32);
             for revprop in &revprop_cstrings {
                 rps.push(revprop.as_ptr() as *mut std::ffi::c_void);
             }
             let err = svn_client_log5(
                 ps.as_ptr(),
-                &peg_revision.into(),
+                &options.peg_revision.into(),
                 rrs.as_ptr(),
-                limit,
-                discover_changed_paths.into(),
-                strict_node_history.into(),
-                include_merged_revisions.into(),
+                options.limit.unwrap_or(0),
+                options.discover_changed_paths.into(),
+                options.strict_node_history.into(),
+                options.include_merged_revisions.into(),
                 rps.as_ptr(),
                 Some(crate::wrap_log_entry_receiver),
                 &log_entry_receiver as *const _ as *mut std::ffi::c_void,
@@ -2327,13 +2396,8 @@ impl Context {
     pub fn log_with_control<F>(
         &mut self,
         targets: &[&str],
-        peg_revision: Revision,
         revision_ranges: &[RevisionRange],
-        limit: i32,
-        discover_changed_paths: bool,
-        strict_node_history: bool,
-        include_merged_revisions: bool,
-        revprops: &[&str],
+        options: &LogOptions,
         mut receiver: F,
     ) -> Result<(), Error>
     where
@@ -2341,13 +2405,8 @@ impl Context {
     {
         self.log(
             targets,
-            peg_revision,
             revision_ranges,
-            limit,
-            discover_changed_paths,
-            strict_node_history,
-            include_merged_revisions,
-            revprops,
+            options,
             &|entry| match receiver(entry) {
                 ControlFlow::Continue(()) => Ok(()),
                 ControlFlow::Break(()) => {
@@ -4093,17 +4152,22 @@ impl<'a> LogBuilder<'a> {
         log_entry_receiver: &dyn FnMut(&LogEntry) -> Result<(), Error>,
     ) -> Result<(), Error> {
         let targets_ref: Vec<&str> = self.targets.iter().map(|s| s.as_str()).collect();
-        let revprops_ref: Vec<&str> = self.revprops.iter().map(|s| s.as_str()).collect();
+
+        let mut options = LogOptions::new()
+            .with_peg_revision(self.peg_revision)
+            .with_discover_changed_paths(self.discover_changed_paths)
+            .with_strict_node_history(self.strict_node_history)
+            .with_include_merged_revisions(self.include_merged_revisions)
+            .with_revprops(self.revprops);
+
+        if self.limit != 0 {
+            options = options.with_limit(self.limit);
+        }
 
         self.ctx.log(
             &targets_ref,
-            self.peg_revision,
             &self.revision_ranges,
-            self.limit,
-            self.discover_changed_paths,
-            self.strict_node_history,
-            self.include_merged_revisions,
-            &revprops_ref,
+            &options,
             log_entry_receiver,
         )
     }
