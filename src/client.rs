@@ -880,12 +880,7 @@ pub struct PatchOptions<'a> {
     pub remove_tempfiles: bool,
     /// Optional callback to filter patch targets.
     pub patch_func: Option<
-        &'a mut dyn FnMut(
-            &mut bool,
-            &str,
-            &std::path::Path,
-            &std::path::Path,
-        ) -> Result<(), Error>,
+        &'a mut dyn FnMut(&mut bool, &str, &std::path::Path, &std::path::Path) -> Result<(), Error>,
     >,
 }
 
@@ -1280,13 +1275,19 @@ impl<'a> PropSetRemoteOptions<'a> {
     }
 
     /// Sets the revision properties for the commit.
-    pub fn with_revprop_table(mut self, revprop_table: std::collections::HashMap<String, String>) -> Self {
+    pub fn with_revprop_table(
+        mut self,
+        revprop_table: std::collections::HashMap<String, String>,
+    ) -> Self {
         self.revprop_table = Some(revprop_table);
         self
     }
 
     /// Sets the commit callback.
-    pub fn with_commit_callback(mut self, callback: &'a mut dyn FnMut(&crate::CommitInfo) -> Result<(), Error>) -> Self {
+    pub fn with_commit_callback(
+        mut self,
+        callback: &'a mut dyn FnMut(&crate::CommitInfo) -> Result<(), Error>,
+    ) -> Self {
         self.commit_callback = Some(callback);
         self
     }
@@ -1620,6 +1621,97 @@ impl LogOptions {
     /// Sets whether to include merged revisions.
     pub fn with_include_merged_revisions(mut self, include: bool) -> Self {
         self.include_merged_revisions = include;
+        self
+    }
+
+    /// Sets the revision properties to retrieve.
+    pub fn with_revprops(mut self, revprops: Vec<String>) -> Self {
+        self.revprops = revprops;
+        self
+    }
+}
+
+/// Options for mergeinfo log operations
+#[derive(Debug, Clone)]
+pub struct MergeinfoLogOptions {
+    /// Whether to find merged revisions (true) or eligible revisions (false)
+    pub finding_merged: bool,
+    /// Target peg revision
+    pub target_peg_revision: Revision,
+    /// Source peg revision
+    pub source_peg_revision: Revision,
+    /// Source start revision
+    pub source_start_revision: Revision,
+    /// Source end revision
+    pub source_end_revision: Revision,
+    /// Whether to discover changed paths
+    pub discover_changed_paths: bool,
+    /// Recursion depth
+    pub depth: Depth,
+    /// Revision properties to retrieve
+    pub revprops: Vec<String>,
+}
+
+impl Default for MergeinfoLogOptions {
+    fn default() -> Self {
+        Self {
+            finding_merged: true,
+            target_peg_revision: Revision::Head,
+            source_peg_revision: Revision::Head,
+            source_start_revision: Revision::Head,
+            source_end_revision: Revision::Number(Revnum(1)),
+            discover_changed_paths: false,
+            depth: Depth::Empty,
+            revprops: vec![],
+        }
+    }
+}
+
+impl MergeinfoLogOptions {
+    /// Creates new MergeinfoLogOptions with default values.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets whether to find merged (true) or eligible (false) revisions.
+    pub fn with_finding_merged(mut self, finding_merged: bool) -> Self {
+        self.finding_merged = finding_merged;
+        self
+    }
+
+    /// Sets the target peg revision.
+    pub fn with_target_peg_revision(mut self, revision: Revision) -> Self {
+        self.target_peg_revision = revision;
+        self
+    }
+
+    /// Sets the source peg revision.
+    pub fn with_source_peg_revision(mut self, revision: Revision) -> Self {
+        self.source_peg_revision = revision;
+        self
+    }
+
+    /// Sets the source start revision.
+    pub fn with_source_start_revision(mut self, revision: Revision) -> Self {
+        self.source_start_revision = revision;
+        self
+    }
+
+    /// Sets the source end revision.
+    pub fn with_source_end_revision(mut self, revision: Revision) -> Self {
+        self.source_end_revision = revision;
+        self
+    }
+
+    /// Sets whether to discover changed paths.
+    pub fn with_discover_changed_paths(mut self, discover: bool) -> Self {
+        self.discover_changed_paths = discover;
+        self
+    }
+
+    /// Sets the recursion depth.
+    pub fn with_depth(mut self, depth: Depth) -> Self {
+        self.depth = depth;
         self
     }
 
@@ -2416,15 +2508,15 @@ impl Context {
             }
 
             // Handle commit callback
-            let (callback_func, callback_baton) =
-                if let Some(ref mut cb) = options.commit_callback {
-                    (
-                        Some(crate::wrap_commit_callback2 as _),
-                        *cb as *const _ as *mut std::ffi::c_void,
-                    )
-                } else {
-                    (None, std::ptr::null_mut())
-                };
+            let (callback_func, callback_baton) = if let Some(ref mut cb) = options.commit_callback
+            {
+                (
+                    Some(crate::wrap_commit_callback2 as _),
+                    *cb as *const _ as *mut std::ffi::c_void,
+                )
+            } else {
+                (None, std::ptr::null_mut())
+            };
 
             let err = svn_client_mkdir4(
                 ps.as_ptr(),
@@ -2566,16 +2658,17 @@ impl Context {
 
             let revprop_ptr = revprop_hash
                 .as_ref()
-                .map_or(std::ptr::null_mut(), |h| unsafe {
-                    h.as_ptr() as *mut _
-                });
+                .map_or(std::ptr::null_mut(), |h| unsafe { h.as_ptr() as *mut _ });
 
             unsafe {
                 // Handle filter callback
                 let (filter_func, filter_baton) = if let Some(ref mut cb) = options.filter_callback
                 {
                     let boxed = Box::into_raw(Box::new(cb));
-                    (Some(wrap_filter_callback as _), boxed as *mut std::ffi::c_void)
+                    (
+                        Some(wrap_filter_callback as _),
+                        boxed as *mut std::ffi::c_void,
+                    )
                 } else {
                     (None, std::ptr::null_mut())
                 };
@@ -2863,6 +2956,56 @@ impl Context {
                 }
             },
         )
+    }
+
+    /// Retrieve log messages for revisions related to mergeinfo.
+    ///
+    /// This shows either merged revisions (finding_merged=true) or eligible
+    /// revisions that could be merged (finding_merged=false) between a source
+    /// and target.
+    pub fn mergeinfo_log(
+        &mut self,
+        target_path_or_url: &str,
+        source_path_or_url: &str,
+        options: &MergeinfoLogOptions,
+        log_entry_receiver: &mut dyn FnMut(&crate::LogEntry) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        with_tmp_pool(|pool| {
+            let target_c = std::ffi::CString::new(target_path_or_url).unwrap();
+            let source_c = std::ffi::CString::new(source_path_or_url).unwrap();
+
+            // Convert revprops to C strings and create APR array
+            let revprop_cstrings: Vec<std::ffi::CString> = options
+                .revprops
+                .iter()
+                .map(|s| std::ffi::CString::new(s.as_str()).unwrap())
+                .collect();
+            let mut rps = apr::tables::TypedArray::new(pool, revprop_cstrings.len() as i32);
+            for revprop in &revprop_cstrings {
+                rps.push(revprop.as_ptr() as *mut std::ffi::c_void);
+            }
+
+            let err = unsafe {
+                subversion_sys::svn_client_mergeinfo_log2(
+                    options.finding_merged as i32,
+                    target_c.as_ptr(),
+                    &options.target_peg_revision.into(),
+                    source_c.as_ptr(),
+                    &options.source_peg_revision.into(),
+                    &options.source_start_revision.into(),
+                    &options.source_end_revision.into(),
+                    Some(crate::wrap_log_entry_receiver),
+                    &log_entry_receiver as *const _ as *mut std::ffi::c_void,
+                    options.discover_changed_paths as i32,
+                    options.depth.into(),
+                    rps.as_ptr(),
+                    self.as_mut_ptr(),
+                    pool.as_mut_ptr(),
+                )
+            };
+            Error::from_raw(err)?;
+            Ok(())
+        })
     }
 
     // TODO: This method needs to be reworked to handle lifetime-bound Context
@@ -3254,7 +3397,7 @@ impl Context {
                     options.fetch_excluded as i32,
                     options.fetch_actual_only as i32,
                     options.include_externals as i32,
-                    changelists.map_or(std::ptr::null(), |cl| unsafe { cl.as_ptr() }),
+                    changelists.map_or(std::ptr::null(), |cl| cl.as_ptr()),
                     Some(wrap_info_receiver2),
                     receiver,
                     self.as_mut_ptr(),
@@ -3465,14 +3608,12 @@ impl Context {
                     .map(|(k, v)| (k.as_str(), crate::string::BStr::from_bytes(v, pool)))
                     .collect();
 
-                unsafe {
-                    apr::hash::Hash::from_iter(
-                        pool,
-                        svn_strings
-                            .iter()
-                            .map(|(k, v)| (k.as_bytes(), v.as_ptr() as *mut std::ffi::c_void)),
-                    )
-                }
+                apr::hash::Hash::from_iter(
+                    pool,
+                    svn_strings
+                        .iter()
+                        .map(|(k, v)| (k.as_bytes(), v.as_ptr() as *mut std::ffi::c_void)),
+                )
             });
 
             let revprop_ptr = revprop_hash
@@ -3480,15 +3621,15 @@ impl Context {
                 .map_or(std::ptr::null_mut(), |h| unsafe { h.as_ptr() as *mut _ });
 
             // Handle commit callback
-            let (callback_func, callback_baton) =
-                if let Some(ref mut cb) = options.commit_callback {
-                    (
-                        Some(crate::wrap_commit_callback2 as _),
-                        *cb as *const _ as *mut std::ffi::c_void,
-                    )
-                } else {
-                    (None, std::ptr::null_mut())
-                };
+            let (callback_func, callback_baton) = if let Some(ref mut cb) = options.commit_callback
+            {
+                (
+                    Some(crate::wrap_commit_callback2 as _),
+                    *cb as *const _ as *mut std::ffi::c_void,
+                )
+            } else {
+                (None, std::ptr::null_mut())
+            };
 
             let err = unsafe {
                 subversion_sys::svn_client_mkdir4(
@@ -3668,7 +3809,9 @@ impl Context {
             });
 
             unsafe {
-                let (callback_func, callback_baton) = if let Some(ref mut cb) = options.commit_callback {
+                let (callback_func, callback_baton) = if let Some(ref mut cb) =
+                    options.commit_callback
+                {
                     (
                         Some(crate::wrap_commit_callback2 as unsafe extern "C" fn(_, _, _) -> _),
                         Box::into_raw(Box::new(cb)) as *mut std::ffi::c_void,
@@ -3781,7 +3924,8 @@ impl Context {
         with_tmp_pool(|pool| {
             let path1_c = std::ffi::CString::new(path_or_url1).unwrap();
             let path2_c = std::ffi::CString::new(path_or_url2).unwrap();
-            let header_encoding_c = std::ffi::CString::new(options.header_encoding.as_str()).unwrap();
+            let header_encoding_c =
+                std::ffi::CString::new(options.header_encoding.as_str()).unwrap();
 
             let diff_options_c: Vec<_> = options
                 .diff_options
@@ -3862,7 +4006,8 @@ impl Context {
     ) -> Result<(), Error> {
         with_tmp_pool(|pool| {
             let path_c = std::ffi::CString::new(path_or_url).unwrap();
-            let header_encoding_c = std::ffi::CString::new(options.header_encoding.as_str()).unwrap();
+            let header_encoding_c =
+                std::ffi::CString::new(options.header_encoding.as_str()).unwrap();
             let relative_to_dir_c = relative_to_dir.map(|s| std::ffi::CString::new(s).unwrap());
 
             // Create diff file options struct
@@ -3886,7 +4031,7 @@ impl Context {
                 let parse_err = unsafe {
                     subversion_sys::svn_diff_file_options_parse(
                         diff_file_options,
-                        unsafe { diff_opts_array.as_ptr() },
+                        diff_opts_array.as_ptr(),
                         pool.as_mut_ptr(),
                     )
                 };
@@ -3969,29 +4114,14 @@ impl Context {
             let path1_c = std::ffi::CString::new(path_or_url1).unwrap();
             let path2_c = std::ffi::CString::new(path_or_url2).unwrap();
 
-            // Convert changelists if provided
-            let (changelists_array, list_cstrings) = if let Some(lists) = &options.changelists {
-                let mut array = apr::tables::TypedArray::<*const i8>::new(pool, lists.len() as i32);
-                let cstrings: Vec<_> = lists
-                    .iter()
-                    .map(|l| std::ffi::CString::new(l.as_str()).unwrap())
-                    .collect();
-                for cstring in &cstrings {
-                    array.push(cstring.as_ptr());
-                }
-                (unsafe { array.as_ptr() }, Some(cstrings))
-            } else {
-                (std::ptr::null(), None)
-            };
-
             extern "C" fn summarize_callback(
                 diff: *const subversion_sys::svn_client_diff_summarize_t,
                 baton: *mut std::ffi::c_void,
                 _pool: *mut apr_sys::apr_pool_t,
             ) -> *mut subversion_sys::svn_error_t {
                 unsafe {
-                    let callback = &mut *(baton
-                        as *mut &mut dyn FnMut(DiffSummary) -> Result<(), Error>);
+                    let callback =
+                        &mut *(baton as *mut &mut dyn FnMut(DiffSummary) -> Result<(), Error>);
                     let summary = DiffSummary::from_raw(diff);
                     match callback(summary) {
                         Ok(()) => std::ptr::null_mut(),
@@ -4009,7 +4139,7 @@ impl Context {
                     &(*revision1).into(),
                     path2_c.as_ptr(),
                     &(*revision2).into(),
-                    (options.depth != Depth::Empty) as i32,  // recurse boolean
+                    (options.depth != Depth::Empty) as i32, // recurse boolean
                     options.ignore_ancestry as i32,
                     Some(summarize_callback as unsafe extern "C" fn(_, _, _) -> _),
                     callback_baton,
@@ -4017,9 +4147,6 @@ impl Context {
                     pool.as_mut_ptr(),
                 )
             };
-
-            // Keep list_cstrings alive until after the call
-            drop(list_cstrings);
 
             svn_result(err)
         })
@@ -4062,8 +4189,8 @@ impl Context {
                 _pool: *mut apr_sys::apr_pool_t,
             ) -> *mut subversion_sys::svn_error_t {
                 unsafe {
-                    let callback = &mut *(baton
-                        as *mut &mut dyn FnMut(DiffSummary) -> Result<(), Error>);
+                    let callback =
+                        &mut *(baton as *mut &mut dyn FnMut(DiffSummary) -> Result<(), Error>);
                     let summary = DiffSummary::from_raw(diff);
                     match callback(summary) {
                         Ok(()) => std::ptr::null_mut(),
@@ -5064,10 +5191,8 @@ impl<'a> MkdirBuilder<'a> {
         commit_callback: &mut dyn FnMut(&crate::CommitInfo) -> Result<(), Error>,
     ) -> Result<(), Error> {
         let paths_ref: Vec<&str> = self.paths.iter().map(|s| s.as_str()).collect();
-        let revprop_table_owned: std::collections::HashMap<String, Vec<u8>> = self
-            .revprop_table
-            .into_iter()
-            .collect();
+        let revprop_table_owned: std::collections::HashMap<String, Vec<u8>> =
+            self.revprop_table.into_iter().collect();
 
         let mut options = MkdirOptions::new()
             .with_make_parents(self.make_parents)
@@ -5467,9 +5592,7 @@ impl Context {
                         &std::path::Path,
                     ) -> Result<(), Error>);
 
-                let canon_path_str = std::ffi::CStr::from_ptr(canon_path)
-                    .to_str()
-                    .unwrap_or("");
+                let canon_path_str = std::ffi::CStr::from_ptr(canon_path).to_str().unwrap_or("");
                 let patch_path = std::path::Path::new(
                     std::ffi::CStr::from_ptr(patch_abspath)
                         .to_str()
@@ -6661,14 +6784,10 @@ mod tests {
             changelists: None,
             get_target_inherited_props: false,
         };
-        let result = ctx.proplist_all(
-            wc_path.to_str().unwrap(),
-            &options,
-            &mut |_path, _props| {
-                prop_count += 1;
-                Ok(())
-            },
-        );
+        let result = ctx.proplist_all(wc_path.to_str().unwrap(), &options, &mut |_path, _props| {
+            prop_count += 1;
+            Ok(())
+        });
 
         // Should not fail even if no properties
         assert!(result.is_ok());
@@ -6795,14 +6914,10 @@ mod tests {
             fetch_locks: false,
             include_externals: false,
         };
-        let result = ctx.list(
-            &url_str,
-            &options,
-            &mut |path: &str, _dirent, _lock| {
-                entries.push(path.to_string());
-                Ok(())
-            },
-        );
+        let result = ctx.list(&url_str, &options, &mut |path: &str, _dirent, _lock| {
+            entries.push(path.to_string());
+            Ok(())
+        });
 
         // Should succeed for empty repository
         assert!(result.is_ok());
@@ -7898,6 +8013,123 @@ mod tests {
     }
 
     #[test]
+    fn test_mergeinfo_log() {
+        let td = tempfile::tempdir().unwrap();
+        let repo_path = td.path().join("repo");
+        let wc_path = td.path().join("wc");
+        let branch_path = td.path().join("branch");
+
+        // Create repository and check out working copy
+        crate::repos::Repos::create(&repo_path).unwrap();
+        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        let url = crate::uri::Uri::new(&url_str).unwrap();
+
+        let mut ctx = Context::new().unwrap();
+        ctx.checkout(
+            url.clone(),
+            &wc_path,
+            &CheckoutOptions {
+                peg_revision: Revision::Head,
+                revision: Revision::Head,
+                depth: Depth::Infinity,
+                ignore_externals: false,
+                allow_unver_obstructions: false,
+            },
+        )
+        .unwrap();
+
+        // Create a file and commit to trunk
+        let file_path = wc_path.join("file.txt");
+        std::fs::write(&file_path, "initial content").unwrap();
+        ctx.add(&file_path, &AddOptions::new()).unwrap();
+        let mut trunk_rev = Revnum(0);
+        ctx.commit(
+            &[wc_path.to_str().unwrap()],
+            &CommitOptions::default(),
+            std::collections::HashMap::new(),
+            &mut |info: &crate::CommitInfo| {
+                trunk_rev = info.revision();
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        // Create a branch URL
+        let branch_url = format!("{}/branch", url_str);
+
+        // Copy trunk to branch
+        ctx.copy(
+            &[(url_str.as_str(), Some(Revision::Number(trunk_rev)))],
+            &branch_url,
+            &mut CopyOptions::new(),
+        )
+        .unwrap();
+
+        // Check out the branch
+        ctx.checkout(
+            crate::uri::Uri::new(&branch_url).unwrap(),
+            &branch_path,
+            &CheckoutOptions {
+                peg_revision: Revision::Head,
+                revision: Revision::Head,
+                depth: Depth::Infinity,
+                ignore_externals: false,
+                allow_unver_obstructions: false,
+            },
+        )
+        .unwrap();
+
+        // Modify trunk
+        std::fs::write(&file_path, "trunk modification").unwrap();
+        ctx.commit(
+            &[wc_path.to_str().unwrap()],
+            &CommitOptions::default(),
+            std::collections::HashMap::new(),
+            &mut |_info: &crate::CommitInfo| Ok(()),
+        )
+        .unwrap();
+
+        // Merge trunk changes to branch
+        ctx.merge_sources(
+            &url_str,
+            &Revision::Number(trunk_rev),
+            &url_str,
+            &Revision::Head,
+            branch_path.to_str().unwrap(),
+            Depth::Infinity,
+            &MergeSourcesOptions::new(),
+        )
+        .unwrap();
+
+        // Commit the merge
+        ctx.commit(
+            &[branch_path.to_str().unwrap()],
+            &CommitOptions::default(),
+            std::collections::HashMap::new(),
+            &mut |_info: &crate::CommitInfo| Ok(()),
+        )
+        .unwrap();
+
+        // Test mergeinfo_log - query what was merged to branch from trunk
+        let mut log_count = 0;
+        let options = MergeinfoLogOptions::new()
+            .with_finding_merged(true)
+            .with_discover_changed_paths(true);
+
+        let result = ctx.mergeinfo_log(&branch_url, &url_str, &options, &mut |_entry| {
+            log_count += 1;
+            Ok(())
+        });
+
+        // The call should succeed
+        assert!(result.is_ok(), "mergeinfo_log should succeed: {:?}", result);
+
+        // We should get at least one log entry (the merged revision)
+        // Note: This is a basic smoke test - the exact count depends on implementation
+        assert!(log_count > 0, "Should get at least one merge log entry");
+    }
+
+    #[test]
     fn test_patch_with_options() {
         // Test that PatchOptions works with different settings
         let td = tempfile::tempdir().unwrap();
@@ -8000,15 +8232,15 @@ mod tests {
 
         let mut committed_rev = Revnum(0);
         ctx.commit(
-                &[wc_path.to_str().unwrap()],
-                &CommitOptions::default(),
-                std::collections::HashMap::new(),
-                &|info| {
-                    committed_rev = info.revision();
-                    Ok(())
-                },
-            )
-            .unwrap();
+            &[wc_path.to_str().unwrap()],
+            &CommitOptions::default(),
+            std::collections::HashMap::new(),
+            &|info| {
+                committed_rev = info.revision();
+                Ok(())
+            },
+        )
+        .unwrap();
 
         // Set a property on the remote URL
         let file_url = format!("{}/file.txt", url_str);
@@ -8023,7 +8255,11 @@ mod tests {
             &mut options,
         );
 
-        assert!(result.is_ok(), "propset_remote should succeed: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "propset_remote should succeed: {:?}",
+            result
+        );
 
         // Verify the property was set by getting it back
         let props_result = ctx.propget(
