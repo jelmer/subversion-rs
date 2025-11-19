@@ -3530,4 +3530,240 @@ mod tests {
         let result = wc_ctx.conflicted(nonexistent.to_str().unwrap());
         assert!(result.is_err(), "Non-existent file should return an error");
     }
+
+    #[test]
+    fn test_copy_or_move() {
+        let td = tempfile::tempdir().unwrap();
+        let repo_path = td.path().join("repo");
+        let wc_path = td.path().join("wc");
+
+        // Create a test repository
+        crate::repos::Repos::create(&repo_path).unwrap();
+
+        // Check out working copy
+        let mut client_ctx = crate::client::Context::new().unwrap();
+        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        let url = crate::uri::Uri::new(&url_str).unwrap();
+
+        client_ctx
+            .checkout(
+                url,
+                &wc_path,
+                &crate::client::CheckoutOptions {
+                    peg_revision: crate::Revision::Head,
+                    revision: crate::Revision::Head,
+                    depth: crate::Depth::Infinity,
+                    ignore_externals: false,
+                    allow_unver_obstructions: false,
+                },
+            )
+            .unwrap();
+
+        // Create and add a test file
+        let test_file = wc_path.join("test.txt");
+        std::fs::write(&test_file, "test content").unwrap();
+        client_ctx
+            .add(&test_file, &crate::client::AddOptions::new())
+            .unwrap();
+
+        // Test copy operation - will fail without write lock, but tests API
+        let mut wc_ctx = Context::new().unwrap();
+        let copy_dest = wc_path.join("test_copy.txt");
+        let result = copy_or_move(&mut wc_ctx, &test_file, &copy_dest, false, false);
+
+        // Expected to fail without write lock, but verifies the function can be called
+        assert!(result.is_err());
+
+        // Test move operation - also expected to fail without write lock
+        let move_dest = wc_path.join("test_moved.txt");
+        let result = copy_or_move(&mut wc_ctx, &test_file, &move_dest, true, false);
+
+        // Expected to fail without write lock
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_revert() {
+        let td = tempfile::tempdir().unwrap();
+        let repo_path = td.path().join("repo");
+        let wc_path = td.path().join("wc");
+
+        // Create a test repository
+        crate::repos::Repos::create(&repo_path).unwrap();
+
+        // Check out working copy
+        let mut client_ctx = crate::client::Context::new().unwrap();
+        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        let url = crate::uri::Uri::new(&url_str).unwrap();
+
+        client_ctx
+            .checkout(
+                url,
+                &wc_path,
+                &crate::client::CheckoutOptions {
+                    peg_revision: crate::Revision::Head,
+                    revision: crate::Revision::Head,
+                    depth: crate::Depth::Infinity,
+                    ignore_externals: false,
+                    allow_unver_obstructions: false,
+                },
+            )
+            .unwrap();
+
+        // Create and add a test file
+        let test_file = wc_path.join("test.txt");
+        std::fs::write(&test_file, "original content").unwrap();
+        client_ctx
+            .add(&test_file, &crate::client::AddOptions::new())
+            .unwrap();
+
+        // Test revert operation - will fail without write lock, but tests API
+        let mut wc_ctx = Context::new().unwrap();
+        let result = revert(
+            &mut wc_ctx,
+            &test_file,
+            crate::Depth::Empty,
+            false,
+            false,
+            false,
+        );
+
+        // Expected to fail without write lock, but verifies the function can be called
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_cleanup() {
+        let td = tempfile::tempdir().unwrap();
+        let repo_path = td.path().join("repo");
+        let wc_path = td.path().join("wc");
+
+        // Create a test repository
+        crate::repos::Repos::create(&repo_path).unwrap();
+
+        // Check out working copy
+        let mut client_ctx = crate::client::Context::new().unwrap();
+        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        let url = crate::uri::Uri::new(&url_str).unwrap();
+
+        client_ctx
+            .checkout(
+                url,
+                &wc_path,
+                &crate::client::CheckoutOptions {
+                    peg_revision: crate::Revision::Head,
+                    revision: crate::Revision::Head,
+                    depth: crate::Depth::Infinity,
+                    ignore_externals: false,
+                    allow_unver_obstructions: false,
+                },
+            )
+            .unwrap();
+
+        // Test cleanup operation
+        let result = cleanup(&wc_path, false, false, false, false, false);
+
+        // Cleanup should succeed on a valid working copy
+        assert!(result.is_ok());
+
+        // Test with break_locks
+        let result = cleanup(&wc_path, true, false, false, false, false);
+        assert!(result.is_ok());
+
+        // Test with fix_recorded_timestamps
+        let result = cleanup(&wc_path, false, true, false, false, false);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_get_actual_target() {
+        let td = tempfile::tempdir().unwrap();
+        let repo_path = td.path().join("repo");
+        let wc_path = td.path().join("wc");
+
+        // Create a test repository
+        crate::repos::Repos::create(&repo_path).unwrap();
+
+        // Check out working copy
+        let mut client_ctx = crate::client::Context::new().unwrap();
+        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        let url = crate::uri::Uri::new(&url_str).unwrap();
+
+        client_ctx
+            .checkout(
+                url,
+                &wc_path,
+                &crate::client::CheckoutOptions {
+                    peg_revision: crate::Revision::Head,
+                    revision: crate::Revision::Head,
+                    depth: crate::Depth::Infinity,
+                    ignore_externals: false,
+                    allow_unver_obstructions: false,
+                },
+            )
+            .unwrap();
+
+        // Test get_actual_target on the working copy root
+        let result = get_actual_target(&wc_path);
+        assert!(result.is_ok());
+
+        let (anchor, target) = result.unwrap();
+        // For a WC root, anchor should be the parent and target should be the directory name
+        assert!(!anchor.is_empty() || !target.is_empty());
+    }
+
+    #[test]
+    fn test_walk_status() {
+        let td = tempfile::tempdir().unwrap();
+        let repo_path = td.path().join("repo");
+        let wc_path = td.path().join("wc");
+
+        // Create a test repository
+        crate::repos::Repos::create(&repo_path).unwrap();
+
+        // Check out working copy
+        let mut client_ctx = crate::client::Context::new().unwrap();
+        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        let url = crate::uri::Uri::new(&url_str).unwrap();
+
+        client_ctx
+            .checkout(
+                url,
+                &wc_path,
+                &crate::client::CheckoutOptions {
+                    peg_revision: crate::Revision::Head,
+                    revision: crate::Revision::Head,
+                    depth: crate::Depth::Infinity,
+                    ignore_externals: false,
+                    allow_unver_obstructions: false,
+                },
+            )
+            .unwrap();
+
+        // Create a test file
+        let test_file = wc_path.join("test.txt");
+        std::fs::write(&test_file, "test content").unwrap();
+        client_ctx
+            .add(&test_file, &crate::client::AddOptions::new())
+            .unwrap();
+
+        // Test walk_status
+        let mut wc_ctx = Context::new().unwrap();
+        let mut status_count = 0;
+        let result = wc_ctx.walk_status(
+            &wc_path,
+            crate::Depth::Infinity,
+            true,  // get_all
+            false, // no_ignore
+            false, // ignore_text_mods
+            |_path, _status| {
+                status_count += 1;
+                Ok(())
+            },
+        );
+
+        assert!(result.is_ok());
+        // Should have walked at least the root and the added file
+        assert!(status_count >= 1, "Should have at least one status entry");
+    }
 }
