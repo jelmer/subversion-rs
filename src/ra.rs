@@ -462,14 +462,14 @@ impl<'a> Session<'a> {
     }
 
     /// Gets the revision at a specific time.
-    pub fn get_dated_revision(&mut self, tm: impl apr::time::IntoTime) -> Result<Revnum, Error> {
+    pub fn get_dated_revision(&mut self, tm: apr::apr_time_t) -> Result<Revnum, Error> {
         with_tmp_pool(|pool| {
             let mut revnum = 0;
             let err = unsafe {
                 subversion_sys::svn_ra_get_dated_revision(
                     self.ptr,
                     &mut revnum,
-                    tm.as_apr_time().into(),
+                    tm,
                     pool.as_mut_ptr(),
                 )
             };
@@ -3148,6 +3148,141 @@ mod tests {
             empty_count.load(Ordering::SeqCst),
             1,
             "Depth::Empty should list only the directory itself"
+        );
+    }
+
+    #[test]
+    fn test_get_dated_revision() {
+        let (_temp_dir, repo, mut session, _callbacks) = create_test_repo_with_session();
+
+        // Create some revisions with different timestamps
+        let fs = repo.fs().unwrap();
+
+        // Create revision 1
+        let mut txn = fs.begin_txn(crate::Revnum(0), 0).unwrap();
+        let mut root = txn.root().unwrap();
+        root.make_file("/file1.txt").unwrap();
+        let rev1 = txn.commit().unwrap();
+
+        // Sleep a bit to ensure different timestamps
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        // Create revision 2
+        let mut txn = fs.begin_txn(rev1, 0).unwrap();
+        let mut root = txn.root().unwrap();
+        root.make_file("/file2.txt").unwrap();
+        let rev2 = txn.commit().unwrap();
+
+        // Get the timestamp of rev1
+        let props = fs.revision_proplist(rev1).unwrap();
+        let rev1_date = props.get("svn:date").unwrap();
+        let rev1_time = crate::time::from_cstring(&String::from_utf8_lossy(rev1_date)).unwrap();
+
+        // Query for revision at rev1's timestamp - should return rev1
+        let result = session.get_dated_revision(rev1_time.as_micros());
+        assert!(
+            result.is_ok(),
+            "get_dated_revision should succeed: {:?}",
+            result
+        );
+        assert_eq!(
+            result.unwrap(),
+            rev1,
+            "Should return rev1 for rev1's timestamp"
+        );
+
+        // Query for current time - should return rev2 (latest)
+        let result = session.get_dated_revision(apr::time::Time::now().as_micros());
+        assert!(
+            result.is_ok(),
+            "get_dated_revision for current time should succeed"
+        );
+        assert_eq!(result.unwrap(), rev2, "Should return rev2 for current time");
+    }
+
+    #[test]
+    fn test_rev_proplist() {
+        let (_temp_dir, repo, mut session, _callbacks) = create_test_repo_with_session();
+
+        // Create a revision
+        let fs = repo.fs().unwrap();
+        let mut txn = fs.begin_txn(crate::Revnum(0), 0).unwrap();
+        let mut root = txn.root().unwrap();
+        root.make_file("/file.txt").unwrap();
+        let rev = txn.commit().unwrap();
+
+        // Get the revision properties
+        let result = session.rev_proplist(rev);
+        assert!(result.is_ok(), "rev_proplist should succeed: {:?}", result);
+
+        let props = result.unwrap();
+        // Standard SVN revision properties should be present
+        assert!(
+            props.contains_key("svn:date"),
+            "Should have svn:date property"
+        );
+        // svn:author may not be set in file:// repos without authentication
+
+        // Verify we can read the svn:date property
+        let date = props.get("svn:date").unwrap();
+        assert!(!date.is_empty(), "svn:date should not be empty");
+    }
+
+    #[test]
+    fn test_change_revprop() {
+        use std::fs;
+        use std::io::Write;
+
+        let (temp_dir, repo, mut session, _callbacks) = create_test_repo_with_session();
+
+        // Create a pre-revprop-change hook to allow revprop changes
+        let hooks_dir = temp_dir.path().join("test_repo/hooks");
+        let hook_path = hooks_dir.join("pre-revprop-change");
+        let mut hook_file = fs::File::create(&hook_path).unwrap();
+        writeln!(hook_file, "#!/bin/sh").unwrap();
+        writeln!(hook_file, "exit 0").unwrap();
+        drop(hook_file); // Close the file before changing permissions
+                         // Make it executable
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(&hook_path).unwrap().permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&hook_path, perms).unwrap();
+        }
+
+        // Create a revision
+        let fs_obj = repo.fs().unwrap();
+        let mut txn = fs_obj.begin_txn(crate::Revnum(0), 0).unwrap();
+        let mut root = txn.root().unwrap();
+        root.make_file("/file.txt").unwrap();
+        let rev = txn.commit().unwrap();
+
+        // Set a custom revision property
+        let prop_name = "custom:test";
+        let prop_value = b"test value";
+
+        let result = session.change_revprop(rev, prop_name, None, prop_value);
+        assert!(
+            result.is_ok(),
+            "change_revprop should succeed: {:?}",
+            result
+        );
+
+        // Verify the property was set
+        let props = session.rev_proplist(rev).unwrap();
+        assert!(
+            props.contains_key(prop_name),
+            "Should have custom:test property"
+        );
+        assert_eq!(props.get(prop_name).unwrap(), prop_value);
+
+        // Try to change with wrong old value - should fail
+        let result =
+            session.change_revprop(rev, prop_name, Some(b"wrong old value"), b"another value");
+        assert!(
+            result.is_err(),
+            "change_revprop with wrong old value should fail"
         );
     }
 }
