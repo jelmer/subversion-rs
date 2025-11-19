@@ -2665,6 +2665,8 @@ impl Context {
                     self.ptr,
                     pool.as_mut_ptr(),
                 );
+                // Clean up the boxed receiver
+                let _ = Box::from_raw(receiver);
                 Error::from_raw(err)?;
                 Ok(())
             }
@@ -2902,6 +2904,8 @@ impl Context {
                     status_func as *mut std::ffi::c_void,
                     pool.as_mut_ptr(),
                 );
+                // Clean up the boxed status_func
+                let _ = Box::from_raw(status_func);
                 Error::from_raw(err)?;
                 Ok(Revnum::from_raw(revnum).unwrap())
             }
