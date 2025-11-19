@@ -782,6 +782,7 @@ impl<'a> Session<'a> {
         ignore_ancestry: bool,
         editor: &mut dyn Editor,
     ) -> Result<Box<dyn Reporter + Send>, Error> {
+        let update_target = std::ffi::CString::new(update_target)?;
         let pool = Pool::new();
         let scratch_pool = Pool::new();
         let mut reporter = std::ptr::null();
@@ -792,7 +793,7 @@ impl<'a> Session<'a> {
                 &mut reporter,
                 &mut report_baton,
                 revision_to_update_to.into(),
-                update_target.as_ptr() as *const _,
+                update_target.as_ptr(),
                 depth.into(),
                 send_copyfrom_args.into(),
                 ignore_ancestry.into(),
@@ -822,7 +823,8 @@ impl<'a> Session<'a> {
         ignore_ancestry: bool,
         editor: &mut dyn Editor,
     ) -> Result<Box<dyn Reporter + Send>, Error> {
-        let switch_target = std::ffi::CString::new(switch_target).unwrap();
+        let switch_target = std::ffi::CString::new(switch_target)?;
+        let switch_url = std::ffi::CString::new(switch_url)?;
         let pool = Pool::new();
         let scratch_pool = Pool::new();
         let mut reporter = std::ptr::null();
@@ -833,9 +835,9 @@ impl<'a> Session<'a> {
                 &mut reporter,
                 &mut report_baton,
                 revision_to_switch_to.into(),
-                switch_target.as_ptr() as *const _,
+                switch_target.as_ptr(),
                 depth.into(),
-                switch_url.as_ptr() as *const _,
+                switch_url.as_ptr(),
                 send_copyfrom_args.into(),
                 ignore_ancestry.into(),
                 &crate::delta::WRAP_EDITOR,
@@ -3358,5 +3360,505 @@ mod tests {
             rev.unwrap().as_u64() > base_rev.as_u64(),
             "Should have created a new revision"
         );
+    }
+
+    #[test]
+    fn test_do_update() {
+        let (_temp_dir, _repo, mut session, _callbacks) = create_test_repo_with_session();
+
+        // Create a simple editor to track operations
+        struct UpdateEditor {
+            operations: std::rc::Rc<std::cell::RefCell<Vec<String>>>,
+        }
+
+        impl crate::delta::Editor for UpdateEditor {
+            fn set_target_revision(
+                &mut self,
+                revision: Option<crate::Revnum>,
+            ) -> Result<(), crate::Error> {
+                eprintln!(
+                    "UpdateEditor::set_target_revision called with {:?}",
+                    revision
+                );
+                self.operations
+                    .borrow_mut()
+                    .push(format!("set_target_revision({:?})", revision));
+                Ok(())
+            }
+
+            fn open_root(
+                &mut self,
+                _base_revision: Option<crate::Revnum>,
+            ) -> Result<Box<dyn crate::delta::DirectoryEditor + 'static>, crate::Error>
+            {
+                eprintln!("UpdateEditor::open_root called");
+                self.operations.borrow_mut().push("open_root".to_string());
+                Ok(Box::new(UpdateDirEditor {
+                    operations: self.operations.clone(),
+                }))
+            }
+
+            fn close(&mut self) -> Result<(), crate::Error> {
+                self.operations.borrow_mut().push("close".to_string());
+                Ok(())
+            }
+
+            fn abort(&mut self) -> Result<(), crate::Error> {
+                self.operations.borrow_mut().push("abort".to_string());
+                Ok(())
+            }
+
+            fn as_raw_parts(
+                &self,
+            ) -> (
+                *const subversion_sys::svn_delta_editor_t,
+                *mut std::ffi::c_void,
+            ) {
+                (std::ptr::null(), std::ptr::null_mut())
+            }
+        }
+
+        struct UpdateDirEditor {
+            operations: std::rc::Rc<std::cell::RefCell<Vec<String>>>,
+        }
+
+        impl crate::delta::DirectoryEditor for UpdateDirEditor {
+            fn delete_entry(
+                &mut self,
+                path: &str,
+                _revision: Option<crate::Revnum>,
+            ) -> Result<(), crate::Error> {
+                self.operations
+                    .borrow_mut()
+                    .push(format!("delete_entry({})", path));
+                Ok(())
+            }
+
+            fn add_directory(
+                &mut self,
+                path: &str,
+                _copyfrom: Option<(&str, crate::Revnum)>,
+            ) -> Result<Box<dyn crate::delta::DirectoryEditor + 'static>, crate::Error>
+            {
+                self.operations
+                    .borrow_mut()
+                    .push(format!("add_directory({})", path));
+                Ok(Box::new(UpdateDirEditor {
+                    operations: self.operations.clone(),
+                }))
+            }
+
+            fn open_directory(
+                &mut self,
+                path: &str,
+                _base_revision: Option<crate::Revnum>,
+            ) -> Result<Box<dyn crate::delta::DirectoryEditor + 'static>, crate::Error>
+            {
+                self.operations
+                    .borrow_mut()
+                    .push(format!("open_directory({})", path));
+                Ok(Box::new(UpdateDirEditor {
+                    operations: self.operations.clone(),
+                }))
+            }
+
+            fn change_prop(&mut self, name: &str, _value: &[u8]) -> Result<(), crate::Error> {
+                self.operations
+                    .borrow_mut()
+                    .push(format!("change_prop({})", name));
+                Ok(())
+            }
+
+            fn add_file(
+                &mut self,
+                path: &str,
+                _copyfrom: Option<(&str, crate::Revnum)>,
+            ) -> Result<Box<dyn crate::delta::FileEditor + 'static>, crate::Error> {
+                self.operations
+                    .borrow_mut()
+                    .push(format!("add_file({})", path));
+                Ok(Box::new(UpdateFileEditor {
+                    operations: self.operations.clone(),
+                }))
+            }
+
+            fn open_file(
+                &mut self,
+                path: &str,
+                _base_revision: Option<crate::Revnum>,
+            ) -> Result<Box<dyn crate::delta::FileEditor + 'static>, crate::Error> {
+                self.operations
+                    .borrow_mut()
+                    .push(format!("open_file({})", path));
+                Ok(Box::new(UpdateFileEditor {
+                    operations: self.operations.clone(),
+                }))
+            }
+
+            fn absent_file(&mut self, path: &str) -> Result<(), crate::Error> {
+                self.operations
+                    .borrow_mut()
+                    .push(format!("absent_file({})", path));
+                Ok(())
+            }
+
+            fn absent_directory(&mut self, path: &str) -> Result<(), crate::Error> {
+                self.operations
+                    .borrow_mut()
+                    .push(format!("absent_directory({})", path));
+                Ok(())
+            }
+
+            fn close(&mut self) -> Result<(), crate::Error> {
+                self.operations
+                    .borrow_mut()
+                    .push("close_directory".to_string());
+                Ok(())
+            }
+        }
+
+        struct UpdateFileEditor {
+            operations: std::rc::Rc<std::cell::RefCell<Vec<String>>>,
+        }
+
+        impl crate::delta::FileEditor for UpdateFileEditor {
+            fn apply_textdelta(
+                &mut self,
+                _base_checksum: Option<&str>,
+            ) -> Result<
+                Box<
+                    dyn for<'b> Fn(
+                        &'b mut crate::delta::TxDeltaWindowRef,
+                    ) -> Result<(), crate::Error>,
+                >,
+                crate::Error,
+            > {
+                self.operations
+                    .borrow_mut()
+                    .push("apply_textdelta".to_string());
+                Ok(Box::new(|_window| Ok(())))
+            }
+
+            fn change_prop(&mut self, name: &str, _value: &[u8]) -> Result<(), crate::Error> {
+                self.operations
+                    .borrow_mut()
+                    .push(format!("file_change_prop({})", name));
+                Ok(())
+            }
+
+            fn close(&mut self, _text_checksum: Option<&str>) -> Result<(), crate::Error> {
+                self.operations.borrow_mut().push("close_file".to_string());
+                Ok(())
+            }
+        }
+
+        let operations = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut editor = UpdateEditor {
+            operations: operations.clone(),
+        };
+
+        // Test do_update - we just verify it can be called and returns a reporter
+        // Don't actually drive the update to completion as that requires a fully
+        // functional editor implementation
+        let result = session.do_update(
+            crate::Revnum(0),
+            "",
+            crate::Depth::Infinity,
+            false,
+            false,
+            &mut editor,
+        );
+        assert!(result.is_ok(), "do_update should succeed");
+
+        let mut reporter = result.unwrap();
+
+        // Abort the report instead of finishing it to avoid needing a complete editor
+        reporter.abort_report().unwrap();
+    }
+
+    #[test]
+    fn test_do_switch() {
+        let (_temp_dir, _repo, mut session, _callbacks) = create_test_repo_with_session();
+
+        // Create a minimal editor (reuse UpdateEditor from test_do_update)
+        struct SwitchEditor;
+
+        impl crate::delta::Editor for SwitchEditor {
+            fn set_target_revision(
+                &mut self,
+                _revision: Option<crate::Revnum>,
+            ) -> Result<(), crate::Error> {
+                Ok(())
+            }
+
+            fn open_root(
+                &mut self,
+                _base_revision: Option<crate::Revnum>,
+            ) -> Result<Box<dyn crate::delta::DirectoryEditor + 'static>, crate::Error>
+            {
+                Ok(Box::new(SwitchDirEditor))
+            }
+
+            fn close(&mut self) -> Result<(), crate::Error> {
+                Ok(())
+            }
+
+            fn abort(&mut self) -> Result<(), crate::Error> {
+                Ok(())
+            }
+
+            fn as_raw_parts(
+                &self,
+            ) -> (
+                *const subversion_sys::svn_delta_editor_t,
+                *mut std::ffi::c_void,
+            ) {
+                (std::ptr::null(), std::ptr::null_mut())
+            }
+        }
+
+        struct SwitchDirEditor;
+
+        impl crate::delta::DirectoryEditor for SwitchDirEditor {
+            fn delete_entry(
+                &mut self,
+                _path: &str,
+                _revision: Option<crate::Revnum>,
+            ) -> Result<(), crate::Error> {
+                Ok(())
+            }
+
+            fn add_directory(
+                &mut self,
+                _path: &str,
+                _copyfrom: Option<(&str, crate::Revnum)>,
+            ) -> Result<Box<dyn crate::delta::DirectoryEditor + 'static>, crate::Error>
+            {
+                Ok(Box::new(SwitchDirEditor))
+            }
+
+            fn open_directory(
+                &mut self,
+                _path: &str,
+                _base_revision: Option<crate::Revnum>,
+            ) -> Result<Box<dyn crate::delta::DirectoryEditor + 'static>, crate::Error>
+            {
+                Ok(Box::new(SwitchDirEditor))
+            }
+
+            fn change_prop(&mut self, _name: &str, _value: &[u8]) -> Result<(), crate::Error> {
+                Ok(())
+            }
+
+            fn add_file(
+                &mut self,
+                _path: &str,
+                _copyfrom: Option<(&str, crate::Revnum)>,
+            ) -> Result<Box<dyn crate::delta::FileEditor + 'static>, crate::Error> {
+                Ok(Box::new(SwitchFileEditor))
+            }
+
+            fn open_file(
+                &mut self,
+                _path: &str,
+                _base_revision: Option<crate::Revnum>,
+            ) -> Result<Box<dyn crate::delta::FileEditor + 'static>, crate::Error> {
+                Ok(Box::new(SwitchFileEditor))
+            }
+
+            fn absent_file(&mut self, _path: &str) -> Result<(), crate::Error> {
+                Ok(())
+            }
+
+            fn absent_directory(&mut self, _path: &str) -> Result<(), crate::Error> {
+                Ok(())
+            }
+
+            fn close(&mut self) -> Result<(), crate::Error> {
+                Ok(())
+            }
+        }
+
+        struct SwitchFileEditor;
+
+        impl crate::delta::FileEditor for SwitchFileEditor {
+            fn apply_textdelta(
+                &mut self,
+                _base_checksum: Option<&str>,
+            ) -> Result<
+                Box<
+                    dyn for<'b> Fn(
+                        &'b mut crate::delta::TxDeltaWindowRef,
+                    ) -> Result<(), crate::Error>,
+                >,
+                crate::Error,
+            > {
+                Ok(Box::new(|_window| Ok(())))
+            }
+
+            fn change_prop(&mut self, _name: &str, _value: &[u8]) -> Result<(), crate::Error> {
+                Ok(())
+            }
+
+            fn close(&mut self, _text_checksum: Option<&str>) -> Result<(), crate::Error> {
+                Ok(())
+            }
+        }
+
+        let mut editor = SwitchEditor;
+
+        // Get the session URL to use as switch URL
+        let url = session.get_session_url().unwrap();
+
+        // Test do_switch - verify it can be called and returns a reporter
+        let result = session.do_switch(
+            crate::Revnum(0),
+            "",
+            crate::Depth::Infinity,
+            &url,
+            false,
+            false,
+            &mut editor,
+        );
+        assert!(result.is_ok(), "do_switch should succeed");
+
+        let mut reporter = result.unwrap();
+        reporter.abort_report().unwrap();
+    }
+
+    #[test]
+    fn test_do_status() {
+        let (_temp_dir, _repo, mut session, _callbacks) = create_test_repo_with_session();
+
+        // Create a minimal editor
+        struct StatusEditor;
+
+        impl crate::delta::Editor for StatusEditor {
+            fn set_target_revision(
+                &mut self,
+                _revision: Option<crate::Revnum>,
+            ) -> Result<(), crate::Error> {
+                Ok(())
+            }
+
+            fn open_root(
+                &mut self,
+                _base_revision: Option<crate::Revnum>,
+            ) -> Result<Box<dyn crate::delta::DirectoryEditor + 'static>, crate::Error>
+            {
+                Ok(Box::new(StatusDirEditor))
+            }
+
+            fn close(&mut self) -> Result<(), crate::Error> {
+                Ok(())
+            }
+
+            fn abort(&mut self) -> Result<(), crate::Error> {
+                Ok(())
+            }
+
+            fn as_raw_parts(
+                &self,
+            ) -> (
+                *const subversion_sys::svn_delta_editor_t,
+                *mut std::ffi::c_void,
+            ) {
+                (std::ptr::null(), std::ptr::null_mut())
+            }
+        }
+
+        struct StatusDirEditor;
+
+        impl crate::delta::DirectoryEditor for StatusDirEditor {
+            fn delete_entry(
+                &mut self,
+                _path: &str,
+                _revision: Option<crate::Revnum>,
+            ) -> Result<(), crate::Error> {
+                Ok(())
+            }
+
+            fn add_directory(
+                &mut self,
+                _path: &str,
+                _copyfrom: Option<(&str, crate::Revnum)>,
+            ) -> Result<Box<dyn crate::delta::DirectoryEditor + 'static>, crate::Error>
+            {
+                Ok(Box::new(StatusDirEditor))
+            }
+
+            fn open_directory(
+                &mut self,
+                _path: &str,
+                _base_revision: Option<crate::Revnum>,
+            ) -> Result<Box<dyn crate::delta::DirectoryEditor + 'static>, crate::Error>
+            {
+                Ok(Box::new(StatusDirEditor))
+            }
+
+            fn change_prop(&mut self, _name: &str, _value: &[u8]) -> Result<(), crate::Error> {
+                Ok(())
+            }
+
+            fn add_file(
+                &mut self,
+                _path: &str,
+                _copyfrom: Option<(&str, crate::Revnum)>,
+            ) -> Result<Box<dyn crate::delta::FileEditor + 'static>, crate::Error> {
+                Ok(Box::new(StatusFileEditor))
+            }
+
+            fn open_file(
+                &mut self,
+                _path: &str,
+                _base_revision: Option<crate::Revnum>,
+            ) -> Result<Box<dyn crate::delta::FileEditor + 'static>, crate::Error> {
+                Ok(Box::new(StatusFileEditor))
+            }
+
+            fn absent_file(&mut self, _path: &str) -> Result<(), crate::Error> {
+                Ok(())
+            }
+
+            fn absent_directory(&mut self, _path: &str) -> Result<(), crate::Error> {
+                Ok(())
+            }
+
+            fn close(&mut self) -> Result<(), crate::Error> {
+                Ok(())
+            }
+        }
+
+        struct StatusFileEditor;
+
+        impl crate::delta::FileEditor for StatusFileEditor {
+            fn apply_textdelta(
+                &mut self,
+                _base_checksum: Option<&str>,
+            ) -> Result<
+                Box<
+                    dyn for<'b> Fn(
+                        &'b mut crate::delta::TxDeltaWindowRef,
+                    ) -> Result<(), crate::Error>,
+                >,
+                crate::Error,
+            > {
+                Ok(Box::new(|_window| Ok(())))
+            }
+
+            fn change_prop(&mut self, _name: &str, _value: &[u8]) -> Result<(), crate::Error> {
+                Ok(())
+            }
+
+            fn close(&mut self, _text_checksum: Option<&str>) -> Result<(), crate::Error> {
+                Ok(())
+            }
+        }
+
+        let mut editor = StatusEditor;
+
+        // Test do_status - verify it can be called
+        let result = session.do_status("", crate::Revnum(0), crate::Depth::Infinity, &mut editor);
+        assert!(result.is_ok(), "do_status should succeed");
     }
 }
