@@ -8968,4 +8968,104 @@ mod tests {
             "subdir2 should NOT be imported with depth=Empty"
         );
     }
+
+    #[test]
+    fn test_lock_unlock() {
+        use tempfile::TempDir;
+
+        // Create a repository and working copy
+        let temp_dir = TempDir::new().unwrap();
+        let repos_path = temp_dir.path().join("repos");
+        let wc_path = temp_dir.path().join("wc");
+
+        // Create a repository
+        let _repos = crate::repos::Repos::create(&repos_path).unwrap();
+
+        // Create a working copy
+        let url_str = format!("file://{}", repos_path.display());
+        let url = crate::uri::Uri::new(&url_str).unwrap();
+
+        // Set up authentication with a username
+        // Set environment variable to provide username for the provider
+        std::env::set_var("USER", "testuser");
+
+        let username_provider = crate::auth::get_username_provider();
+        let mut auth_baton = crate::auth::AuthBaton::open(vec![username_provider]).unwrap();
+
+        let mut client_ctx = Context::new().unwrap();
+        client_ctx.set_auth(&mut auth_baton);
+
+        let checkout_opts = CheckoutOptions {
+            revision: crate::Revision::Head,
+            peg_revision: crate::Revision::Head,
+            depth: crate::Depth::Infinity,
+            ignore_externals: false,
+            allow_unver_obstructions: false,
+        };
+        client_ctx.checkout(url, &wc_path, &checkout_opts).unwrap();
+
+        // Create a file and commit it
+        let file1 = wc_path.join("file1.txt");
+        std::fs::write(&file1, "lockable content").unwrap();
+        client_ctx.add(&file1, &AddOptions::new()).unwrap();
+
+        let commit_opts = CommitOptions::default();
+        let revprops = std::collections::HashMap::new();
+        client_ctx
+            .commit(
+                &[wc_path.to_str().unwrap()],
+                &commit_opts,
+                revprops,
+                &|_info| Ok(()),
+            )
+            .unwrap();
+
+        // Test 1: Lock the file
+        let file1_path = file1.to_str().unwrap();
+        let result = client_ctx.lock(&[file1_path], "Locking for testing", false);
+        assert!(result.is_ok(), "Lock should succeed: {:?}", result);
+
+        // Test 2: Lock again with same context (SVN allows re-locking files you own)
+        let result = client_ctx.lock(&[file1_path], "Re-locking owned file", false);
+        assert!(
+            result.is_ok(),
+            "Re-locking owned file should succeed: {:?}",
+            result
+        );
+
+        // Test 3: Lock with steal_lock=true (should also succeed)
+        let result = client_ctx.lock(&[file1_path], "Locking with steal", true);
+        assert!(
+            result.is_ok(),
+            "Lock with steal should succeed: {:?}",
+            result
+        );
+
+        // Test 4: Unlock the file
+        let result = client_ctx.unlock(&[file1_path], false);
+        assert!(result.is_ok(), "Unlock should succeed: {:?}", result);
+
+        // Test 5: Try to unlock again (should fail - no lock to break)
+        let result = client_ctx.unlock(&[file1_path], false);
+        assert!(
+            result.is_err(),
+            "Unlocking already unlocked file should fail"
+        );
+
+        // Test 6: Lock again after unlocking
+        let result = client_ctx.lock(&[file1_path], "Locking after unlock", false);
+        assert!(
+            result.is_ok(),
+            "Lock after unlock should succeed: {:?}",
+            result
+        );
+
+        // Test 7: Unlock with break_lock
+        let result = client_ctx.unlock(&[file1_path], true);
+        assert!(
+            result.is_ok(),
+            "Unlock with break_lock should succeed: {:?}",
+            result
+        );
+    }
 }
