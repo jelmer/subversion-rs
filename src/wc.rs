@@ -3179,4 +3179,164 @@ mod tests {
         );
         assert!(!subdir2.exists(), "Second subdirectory should be excluded");
     }
+
+    #[test]
+    fn test_get_pristine_props() {
+        use tempfile::TempDir;
+
+        // Create a repository and working copy
+        let temp_dir = TempDir::new().unwrap();
+        let repos_path = temp_dir.path().join("repos");
+        let wc_path = temp_dir.path().join("wc");
+
+        // Create a repository
+        let _repos = crate::repos::Repos::create(&repos_path).unwrap();
+
+        // Create a working copy using client API
+        let url_str = format!("file://{}", repos_path.display());
+        let url = crate::uri::Uri::new(&url_str).unwrap();
+        let mut client_ctx = crate::client::Context::new().unwrap();
+
+        let checkout_opts = crate::client::CheckoutOptions {
+            revision: crate::Revision::Head,
+            peg_revision: crate::Revision::Head,
+            depth: crate::Depth::Infinity,
+            ignore_externals: false,
+            allow_unver_obstructions: false,
+        };
+        client_ctx.checkout(url, &wc_path, &checkout_opts).unwrap();
+
+        // Create a file with properties
+        let file_path = wc_path.join("test.txt");
+        std::fs::write(&file_path, "original content").unwrap();
+
+        client_ctx
+            .add(&file_path, &crate::client::AddOptions::new())
+            .unwrap();
+
+        // Set some properties
+        let propset_opts = crate::client::PropSetOptions::default();
+        client_ctx
+            .propset(
+                "svn:eol-style",
+                Some(b"native"),
+                file_path.to_str().unwrap(),
+                &propset_opts,
+            )
+            .unwrap();
+        client_ctx
+            .propset(
+                "custom:prop",
+                Some(b"custom value"),
+                file_path.to_str().unwrap(),
+                &propset_opts,
+            )
+            .unwrap();
+
+        // Commit the file with properties
+        let commit_opts = crate::client::CommitOptions::default();
+        let revprops = std::collections::HashMap::new();
+        client_ctx
+            .commit(
+                &[wc_path.to_str().unwrap()],
+                &commit_opts,
+                revprops,
+                &|_info| Ok(()),
+            )
+            .unwrap();
+
+        // Test 1: Get pristine props (should match what we set)
+        let mut wc_ctx = Context::new().unwrap();
+        let pristine_props = wc_ctx
+            .get_pristine_props(file_path.to_str().unwrap())
+            .unwrap();
+
+        assert!(
+            pristine_props.is_some(),
+            "Committed file should have pristine props"
+        );
+        let props = pristine_props.unwrap();
+        assert!(
+            props.contains_key("svn:eol-style"),
+            "Should have svn:eol-style property"
+        );
+        assert_eq!(
+            props.get("svn:eol-style").unwrap(),
+            b"native",
+            "svn:eol-style should be 'native'"
+        );
+        assert!(
+            props.contains_key("custom:prop"),
+            "Should have custom:prop property"
+        );
+        assert_eq!(
+            props.get("custom:prop").unwrap(),
+            b"custom value",
+            "custom:prop should be 'custom value'"
+        );
+
+        // Test 2: Modify a property locally (pristine should remain unchanged)
+        client_ctx
+            .propset(
+                "svn:eol-style",
+                Some(b"LF"),
+                file_path.to_str().unwrap(),
+                &propset_opts,
+            )
+            .unwrap();
+
+        // Pristine props should still be the original values
+        let pristine_props = wc_ctx
+            .get_pristine_props(file_path.to_str().unwrap())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            pristine_props.get("svn:eol-style").unwrap(),
+            b"native",
+            "Pristine svn:eol-style should still be 'native'"
+        );
+
+        // Test 3: Delete a property locally (pristine should still have it)
+        client_ctx
+            .propset(
+                "custom:prop",
+                None,
+                file_path.to_str().unwrap(),
+                &propset_opts,
+            )
+            .unwrap();
+
+        let pristine_props = wc_ctx
+            .get_pristine_props(file_path.to_str().unwrap())
+            .unwrap()
+            .unwrap();
+        assert!(
+            pristine_props.contains_key("custom:prop"),
+            "Pristine props should still contain deleted property"
+        );
+
+        // Test 4: Newly added file should have None pristine props (or empty hash)
+        let new_file = wc_path.join("new.txt");
+        std::fs::write(&new_file, "new content").unwrap();
+        client_ctx
+            .add(&new_file, &crate::client::AddOptions::new())
+            .unwrap();
+
+        let pristine = wc_ctx
+            .get_pristine_props(new_file.to_str().unwrap())
+            .unwrap();
+        // Newly added files return None according to API docs, but implementation may vary
+        if let Some(props) = pristine {
+            // If not None, should at least be empty (no committed properties yet)
+            assert!(
+                props.is_empty() || props.len() == 0,
+                "Newly added file pristine props should be empty if not None"
+            );
+        }
+
+        // Test 5: Non-existent file should error
+        let nonexistent = wc_path.join("nonexistent.txt");
+        let result = wc_ctx.get_pristine_props(nonexistent.to_str().unwrap());
+        assert!(result.is_err(), "Non-existent file should return an error");
+    }
 }
