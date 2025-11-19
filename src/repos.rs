@@ -1833,14 +1833,10 @@ impl Repos {
 
         Error::from_raw(ret)?;
 
-        // TODO: This is a memory leak! The pool is leaked and never freed.
-        // WrapEditor should be changed to own the pool instead of using PhantomData.
-        let _pool = Box::leak(pool);
-
         let editor = crate::delta::WrapEditor {
             editor: editor_ptr,
             baton: edit_baton,
-            _pool: std::marker::PhantomData,
+            _pool: apr::PoolHandle::owned(*pool),
         };
         Ok(Box::new(editor))
     }
@@ -2649,7 +2645,7 @@ admin = rw
 
         // Create a default editor for testing
         let pool = apr::Pool::new();
-        let editor = crate::delta::default_editor(&pool);
+        let editor = crate::delta::default_editor(pool);
 
         // Test dir_delta2 with a proper no-op editor
         let result = dir_delta2(

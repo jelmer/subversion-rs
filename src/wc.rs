@@ -704,7 +704,7 @@ impl crate::delta::Editor for UpdateEditor {
         Ok(Box::new(crate::delta::WrapDirectoryEditor {
             editor: self.editor,
             baton,
-            _pool: std::marker::PhantomData,
+            _pool: apr::PoolHandle::owned(pool),
         }))
     }
 
@@ -1521,7 +1521,7 @@ impl Context {
         let editor = Box::new(crate::delta::WrapEditor {
             editor: editor_ptr,
             baton: edit_baton,
-            _pool: std::marker::PhantomData,
+            _pool: apr::PoolHandle::owned(result_pool),
         });
 
         Ok((
@@ -1583,7 +1583,7 @@ impl Context {
         let editor = Box::new(crate::delta::WrapEditor {
             editor: editor_ptr,
             baton: edit_baton,
-            _pool: std::marker::PhantomData,
+            _pool: apr::PoolHandle::owned(result_pool),
         });
 
         Ok(editor)

@@ -554,7 +554,7 @@ impl<'a> Session<'a> {
         lock_tokens: HashMap<String, String>,
         keep_locks: bool,
     ) -> Result<Box<dyn Editor + Send>, Error> {
-        let pool = std::rc::Rc::new(Pool::new());
+        let pool = Pool::new();
         let commit_callback = Box::into_raw(Box::new(commit_callback));
         let mut editor = std::ptr::null();
         let mut edit_baton = std::ptr::null_mut();
@@ -606,7 +606,7 @@ impl<'a> Session<'a> {
         Ok(Box::new(crate::delta::WrapEditor {
             editor,
             baton: edit_baton,
-            _pool: std::marker::PhantomData,
+            _pool: apr::PoolHandle::owned(result_pool),
         }))
     }
 
@@ -1479,7 +1479,7 @@ impl<'a> Session<'a> {
             editor: *const subversion_sys::svn_delta_editor_t,
             edit_baton: *mut std::ffi::c_void,
             rev_props: *mut apr::hash::apr_hash_t,
-            _pool: *mut apr_sys::apr_pool_t,
+            pool: *mut apr_sys::apr_pool_t,
         ) -> *mut subversion_sys::svn_error_t {
             let baton = unsafe {
                 (replay_baton
@@ -1499,10 +1499,13 @@ impl<'a> Session<'a> {
                     .unwrap()
             };
 
+            // SVN owns the pool, we create a borrowed handle
+            let pool_handle = unsafe { apr::PoolHandle::from_borrowed_raw(pool) };
+
             let mut editor = crate::delta::WrapEditor {
                 editor: editor as *const _,
                 baton: edit_baton,
-                _pool: std::marker::PhantomData,
+                _pool: pool_handle,
             };
 
             let prop_hash = unsafe { crate::props::PropHash::from_ptr(rev_props) };
@@ -3283,6 +3286,77 @@ mod tests {
         assert!(
             result.is_err(),
             "change_revprop with wrong old value should fail"
+        );
+    }
+
+    #[test]
+    fn test_get_session_url() {
+        let (_temp_dir, _repo, mut session, _callbacks) = create_test_repo_with_session();
+
+        // Get the session URL
+        let url = session.get_session_url().unwrap();
+
+        // Should be a file:// URL
+        assert!(url.starts_with("file://"));
+        assert!(url.contains("test_repo"));
+    }
+
+    #[test]
+    fn test_get_commit_editor() {
+        use std::collections::HashMap;
+
+        let (_temp_dir, repo, mut session, _callbacks) = create_test_repo_with_session();
+
+        // Create an initial revision using FS transaction so we have something to commit against
+        let fs = repo.fs().unwrap();
+        let mut txn = fs.begin_txn(crate::Revnum(0), 0).unwrap();
+        let mut root = txn.root().unwrap();
+        root.make_file("/initial.txt").unwrap();
+        let base_rev = txn.commit().unwrap();
+
+        // Prepare commit parameters
+        let mut revprop_table = HashMap::new();
+        revprop_table.insert("svn:log".to_string(), b"Test commit via editor".to_vec());
+
+        let commit_rev = std::cell::RefCell::new(None);
+        let commit_callback = |info: &crate::CommitInfo| {
+            commit_rev.replace(Some(info.revision()));
+            Ok(())
+        };
+
+        let lock_tokens = HashMap::new();
+
+        // Get the commit editor
+        let result = session.get_commit_editor(revprop_table, &commit_callback, lock_tokens, false);
+        assert!(result.is_ok(), "get_commit_editor should succeed");
+
+        let mut editor = result.unwrap();
+
+        // Open the root directory based on the previous revision
+        let mut root = editor.open_root(Some(base_rev)).unwrap();
+
+        // Add a new file
+        let mut file = root.add_file("newfile.txt", None).unwrap();
+
+        // Apply text delta (empty file - just get the handler)
+        let _handler = file.apply_textdelta(None).unwrap();
+        // The handler is a closure that processes windows, we don't need to call it for empty content
+
+        // Close file (with no checksum)
+        file.close(None).unwrap();
+
+        // Close root
+        root.close().unwrap();
+
+        // Close editor
+        editor.close().unwrap();
+
+        // Verify commit happened
+        let rev = commit_rev.borrow();
+        assert!(rev.is_some(), "Commit callback should have been called");
+        assert!(
+            rev.unwrap().as_u64() > base_rev.as_u64(),
+            "Should have created a new revision"
         );
     }
 }

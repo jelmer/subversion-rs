@@ -20,14 +20,14 @@ pub fn version() -> crate::Version {
 /// Creates a default/no-op delta editor.
 ///
 /// This editor does nothing but can be used for testing or as a placeholder.
-pub fn default_editor<'a>(pool: &'a Pool<'static>) -> WrapEditor<'a> {
+pub fn default_editor(pool: Pool<'static>) -> WrapEditor<'static> {
     let editor = unsafe { subversion_sys::svn_delta_default_editor(pool.as_mut_ptr()) };
     // The default editor uses null baton
     let baton = std::ptr::null_mut();
     WrapEditor {
         editor,
         baton,
-        _pool: std::marker::PhantomData,
+        _pool: apr::PoolHandle::owned(pool),
     }
 }
 
@@ -35,7 +35,7 @@ pub fn default_editor<'a>(pool: &'a Pool<'static>) -> WrapEditor<'a> {
 pub struct WrapEditor<'pool> {
     pub(crate) editor: *const subversion_sys::svn_delta_editor_t,
     pub(crate) baton: *mut std::ffi::c_void,
-    pub(crate) _pool: std::marker::PhantomData<&'pool apr::Pool<'static>>,
+    pub(crate) _pool: apr::PoolHandle<'pool>,
 }
 unsafe impl Send for WrapEditor<'_> {}
 
@@ -71,7 +71,7 @@ impl<'pool> Editor for WrapEditor<'pool> {
         Ok(Box::new(WrapDirectoryEditor {
             editor: self.editor,
             baton,
-            _pool: std::marker::PhantomData,
+            _pool: apr::PoolHandle::owned(pool),
         }))
     }
 
@@ -105,7 +105,7 @@ impl<'pool> Editor for WrapEditor<'pool> {
 pub struct WrapDirectoryEditor<'pool> {
     pub(crate) editor: *const subversion_sys::svn_delta_editor_t,
     pub(crate) baton: *mut std::ffi::c_void,
-    pub(crate) _pool: std::marker::PhantomData<&'pool apr::Pool<'static>>,
+    pub(crate) _pool: apr::PoolHandle<'pool>,
 }
 
 impl<'pool> DirectoryEditor for WrapDirectoryEditor<'pool> {
@@ -150,7 +150,7 @@ impl<'pool> DirectoryEditor for WrapDirectoryEditor<'pool> {
         Ok(Box::new(WrapDirectoryEditor {
             editor: self.editor,
             baton,
-            _pool: std::marker::PhantomData,
+            _pool: apr::PoolHandle::owned(pool),
         }))
     }
 
@@ -174,7 +174,7 @@ impl<'pool> DirectoryEditor for WrapDirectoryEditor<'pool> {
         Ok(Box::new(WrapDirectoryEditor {
             editor: self.editor,
             baton,
-            _pool: std::marker::PhantomData,
+            _pool: apr::PoolHandle::owned(pool),
         }))
     }
 
@@ -221,15 +221,18 @@ impl<'pool> DirectoryEditor for WrapDirectoryEditor<'pool> {
         copyfrom: Option<(&str, Revnum)>,
     ) -> Result<Box<dyn FileEditor + 'static>, crate::Error> {
         let pool = apr::Pool::new();
-        let copyfrom_path = copyfrom.map(|(p, _)| p);
+        let path_cstr = std::ffi::CString::new(path)?;
+        let copyfrom_path = copyfrom
+            .map(|(p, _)| std::ffi::CString::new(p))
+            .transpose()?;
         let copyfrom_rev = copyfrom.map(|(_, r)| r.0).unwrap_or(-1);
         let mut baton = std::ptr::null_mut();
         unsafe {
             let err = ((*self.editor).add_file.unwrap())(
-                path.as_ptr() as *const i8,
+                path_cstr.as_ptr(),
                 self.baton,
-                if let Some(copyfrom_path) = copyfrom_path {
-                    copyfrom_path.as_ptr() as *const i8
+                if let Some(ref copyfrom_path) = copyfrom_path {
+                    copyfrom_path.as_ptr()
                 } else {
                     std::ptr::null()
                 },
@@ -242,7 +245,7 @@ impl<'pool> DirectoryEditor for WrapDirectoryEditor<'pool> {
         Ok(Box::new(WrapFileEditor {
             editor: self.editor,
             baton,
-            pool,
+            _pool: apr::PoolHandle::owned(pool),
         }))
     }
 
@@ -266,7 +269,7 @@ impl<'pool> DirectoryEditor for WrapDirectoryEditor<'pool> {
         Ok(Box::new(WrapFileEditor {
             editor: self.editor,
             baton,
-            pool,
+            _pool: apr::PoolHandle::owned(pool),
         }))
     }
 
@@ -285,23 +288,10 @@ impl<'pool> DirectoryEditor for WrapDirectoryEditor<'pool> {
 }
 
 /// Wrapper for a Subversion file editor.
-pub struct WrapFileEditor {
+pub struct WrapFileEditor<'pool> {
     editor: *const subversion_sys::svn_delta_editor_t,
     baton: *mut std::ffi::c_void,
-    pool: apr::Pool<'static>,
-}
-
-impl Drop for WrapFileEditor {
-    fn drop(&mut self) {
-        // Pool drop will clean up
-    }
-}
-
-impl WrapFileEditor {
-    /// Get a reference to the underlying pool
-    pub fn pool(&self) -> &apr::Pool<'_> {
-        &self.pool
-    }
+    _pool: apr::PoolHandle<'pool>,
 }
 
 #[allow(dead_code)]
@@ -319,7 +309,7 @@ impl Drop for WrapTxdeltaWindowHandler {
     }
 }
 
-impl FileEditor for WrapFileEditor {
+impl<'pool> FileEditor for WrapFileEditor<'pool> {
     fn apply_textdelta(
         &mut self,
         base_checksum: Option<&str>,
