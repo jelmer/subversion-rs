@@ -3016,4 +3016,38 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn test_reparent_and_session_url() {
+        let (_temp_dir, repo, mut session, _callbacks) = create_test_repo_with_session();
+
+        // Get the initial session URL
+        let initial_url = session.get_session_url().unwrap();
+        assert!(initial_url.starts_with("file://"));
+
+        // Create a subdirectory in the repository
+        let fs = repo.fs().unwrap();
+        let mut txn = fs.begin_txn(crate::Revnum(0), 0).unwrap();
+        let mut root = txn.root().unwrap();
+        root.make_dir("/subdir").unwrap();
+        let _rev = txn.commit().unwrap();
+
+        // Reparent to the subdirectory
+        let new_url = format!("{}/subdir", initial_url);
+        let result = session.reparent(&new_url);
+        assert!(result.is_ok(), "Reparent should succeed: {:?}", result);
+
+        // Verify the session URL changed
+        let current_url = session.get_session_url().unwrap();
+        assert_eq!(current_url, new_url);
+        assert!(current_url.ends_with("/subdir"));
+
+        // Reparent back to the root
+        let result = session.reparent(&initial_url);
+        assert!(result.is_ok(), "Reparent back should succeed: {:?}", result);
+
+        // Verify we're back at the initial URL
+        let final_url = session.get_session_url().unwrap();
+        assert_eq!(final_url, initial_url);
+    }
 }
