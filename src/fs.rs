@@ -21,7 +21,9 @@ unsafe fn free_pack_notify_baton(baton: *mut std::ffi::c_void) {
 }
 
 unsafe fn free_verify_notify_baton(baton: *mut std::ffi::c_void) {
-    drop(Box::from_raw(baton as *mut Box<dyn Fn(Revnum, &str) + Send>));
+    drop(Box::from_raw(
+        baton as *mut Box<dyn Fn(Revnum, &str) + Send>,
+    ));
 }
 
 unsafe fn free_cancel_baton(baton: *mut std::ffi::c_void) {

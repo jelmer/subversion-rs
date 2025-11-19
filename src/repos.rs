@@ -657,7 +657,8 @@ impl Repos {
                 },
                 cancel_func
                     .map(|cancel_func| {
-                        let boxed: Box<dyn Fn() -> Result<(), Error>> = Box::new(move || cancel_func());
+                        let boxed: Box<dyn Fn() -> Result<(), Error>> =
+                            Box::new(move || cancel_func());
                         Box::into_raw(Box::new(boxed)) as *mut std::ffi::c_void
                     })
                     .unwrap_or(std::ptr::null_mut()),
@@ -696,7 +697,8 @@ impl Repos {
                 },
                 cancel_func
                     .map(|cancel_func| {
-                        let boxed: Box<dyn Fn() -> Result<(), Error>> = Box::new(move || cancel_func());
+                        let boxed: Box<dyn Fn() -> Result<(), Error>> =
+                            Box::new(move || cancel_func());
                         Box::into_raw(Box::new(boxed)) as *mut std::ffi::c_void
                     })
                     .unwrap_or(std::ptr::null_mut()),
@@ -906,15 +908,15 @@ impl Repos {
         let pool = apr::Pool::new();
         let notify_baton = notify_func
             .map(|notify_func| {
-            let boxed: Box<dyn FnMut(&Notify)> = Box::new(move |n| notify_func(n));
-            Box::into_raw(Box::new(boxed)) as *mut std::ffi::c_void
-        })
+                let boxed: Box<dyn FnMut(&Notify)> = Box::new(move |n| notify_func(n));
+                Box::into_raw(Box::new(boxed)) as *mut std::ffi::c_void
+            })
             .unwrap_or(std::ptr::null_mut());
         let cancel_baton = cancel_func
             .map(|cancel_func| {
-            let boxed: Box<dyn Fn() -> Result<(), Error>> = Box::new(move || cancel_func());
-            Box::into_raw(Box::new(boxed)) as *mut std::ffi::c_void
-        })
+                let boxed: Box<dyn Fn() -> Result<(), Error>> = Box::new(move || cancel_func());
+                Box::into_raw(Box::new(boxed)) as *mut std::ffi::c_void
+            })
             .unwrap_or(std::ptr::null_mut());
 
         let ret = unsafe {
@@ -986,15 +988,15 @@ impl Repos {
 
         let notify_baton = notify_func
             .map(|notify_func| {
-            let boxed: Box<dyn FnMut(&Notify)> = Box::new(move |n| notify_func(n));
-            Box::into_raw(Box::new(boxed)) as *mut std::ffi::c_void
-        })
+                let boxed: Box<dyn FnMut(&Notify)> = Box::new(move |n| notify_func(n));
+                Box::into_raw(Box::new(boxed)) as *mut std::ffi::c_void
+            })
             .unwrap_or(std::ptr::null_mut());
         let cancel_baton = cancel_func
             .map(|cancel_func| {
-            let boxed: Box<dyn Fn() -> Result<(), Error>> = Box::new(move || cancel_func());
-            Box::into_raw(Box::new(boxed)) as *mut std::ffi::c_void
-        })
+                let boxed: Box<dyn Fn() -> Result<(), Error>> = Box::new(move || cancel_func());
+                Box::into_raw(Box::new(boxed)) as *mut std::ffi::c_void
+            })
             .unwrap_or(std::ptr::null_mut());
 
         let ret = unsafe {
@@ -1072,18 +1074,18 @@ impl Repos {
         let pool = apr::Pool::new();
         let notify_baton = notify_func
             .map(|notify_func| {
-            let boxed: Box<dyn FnMut(&Notify)> = Box::new(move |n| notify_func(n));
-            Box::into_raw(Box::new(boxed)) as *mut std::ffi::c_void
-        })
+                let boxed: Box<dyn FnMut(&Notify)> = Box::new(move |n| notify_func(n));
+                Box::into_raw(Box::new(boxed)) as *mut std::ffi::c_void
+            })
             .unwrap_or(std::ptr::null_mut());
         let verify_baton = verify_callback
             .map(|callback| Box::into_raw(Box::new(callback)) as *mut std::ffi::c_void)
             .unwrap_or(std::ptr::null_mut());
         let cancel_baton = cancel_func
             .map(|cancel_func| {
-            let boxed: Box<dyn Fn() -> Result<(), Error>> = Box::new(move || cancel_func());
-            Box::into_raw(Box::new(boxed)) as *mut std::ffi::c_void
-        })
+                let boxed: Box<dyn Fn() -> Result<(), Error>> = Box::new(move || cancel_func());
+                Box::into_raw(Box::new(boxed)) as *mut std::ffi::c_void
+            })
             .unwrap_or(std::ptr::null_mut());
 
         let ret = unsafe {
@@ -1150,15 +1152,15 @@ impl Repos {
         let pool = apr::Pool::new();
         let notify_baton = notify_func
             .map(|notify_func| {
-            let boxed: Box<dyn FnMut(&Notify)> = Box::new(move |n| notify_func(n));
-            Box::into_raw(Box::new(boxed)) as *mut std::ffi::c_void
-        })
+                let boxed: Box<dyn FnMut(&Notify)> = Box::new(move |n| notify_func(n));
+                Box::into_raw(Box::new(boxed)) as *mut std::ffi::c_void
+            })
             .unwrap_or(std::ptr::null_mut());
         let cancel_baton = cancel_func
             .map(|cancel_func| {
-            let boxed: Box<dyn Fn() -> Result<(), Error>> = Box::new(move || cancel_func());
-            Box::into_raw(Box::new(boxed)) as *mut std::ffi::c_void
-        })
+                let boxed: Box<dyn Fn() -> Result<(), Error>> = Box::new(move || cancel_func());
+                Box::into_raw(Box::new(boxed)) as *mut std::ffi::c_void
+            })
             .unwrap_or(std::ptr::null_mut());
 
         let ret = unsafe {
@@ -1218,9 +1220,9 @@ pub fn recover(
             },
             notify_func
                 .map(|notify_func| {
-            let boxed: Box<dyn FnMut(&Notify)> = Box::new(move |n| notify_func(n));
-            Box::into_raw(Box::new(boxed)) as *mut std::ffi::c_void
-        })
+                    let boxed: Box<dyn FnMut(&Notify)> = Box::new(move |n| notify_func(n));
+                    Box::into_raw(Box::new(boxed)) as *mut std::ffi::c_void
+                })
                 .unwrap_or(std::ptr::null_mut()),
             if cance_func.is_some() {
                 Some(crate::wrap_cancel_func)
@@ -1229,9 +1231,9 @@ pub fn recover(
             },
             cance_func
                 .map(|cancel_func| {
-            let boxed: Box<dyn Fn() -> Result<(), Error>> = Box::new(move || cancel_func());
-            Box::into_raw(Box::new(boxed)) as *mut std::ffi::c_void
-        })
+                    let boxed: Box<dyn Fn() -> Result<(), Error>> = Box::new(move || cancel_func());
+                    Box::into_raw(Box::new(boxed)) as *mut std::ffi::c_void
+                })
                 .unwrap_or(std::ptr::null_mut()),
             pool.as_mut_ptr(),
         )
@@ -1275,7 +1277,8 @@ pub fn freeze(
             },
             freeze_func
                 .map(|freeze_func| {
-                    let boxed: Box<dyn Fn() -> Result<(), Error>> = Box::new(move || freeze_func(""));
+                    let boxed: Box<dyn Fn() -> Result<(), Error>> =
+                        Box::new(move || freeze_func(""));
                     Box::into_raw(Box::new(boxed)) as *mut std::ffi::c_void
                 })
                 .unwrap_or(std::ptr::null_mut()),
@@ -1375,9 +1378,9 @@ pub fn hotcopy(
             },
             notify_func
                 .map(|notify_func| {
-            let boxed: Box<dyn FnMut(&Notify)> = Box::new(move |n| notify_func(n));
-            Box::into_raw(Box::new(boxed)) as *mut std::ffi::c_void
-        })
+                    let boxed: Box<dyn FnMut(&Notify)> = Box::new(move |n| notify_func(n));
+                    Box::into_raw(Box::new(boxed)) as *mut std::ffi::c_void
+                })
                 .unwrap_or(std::ptr::null_mut()),
             if cancel_func.is_some() {
                 Some(crate::wrap_cancel_func)
@@ -1386,9 +1389,9 @@ pub fn hotcopy(
             },
             cancel_func
                 .map(|cancel_func| {
-            let boxed: Box<dyn Fn() -> Result<(), Error>> = Box::new(move || cancel_func());
-            Box::into_raw(Box::new(boxed)) as *mut std::ffi::c_void
-        })
+                    let boxed: Box<dyn Fn() -> Result<(), Error>> = Box::new(move || cancel_func());
+                    Box::into_raw(Box::new(boxed)) as *mut std::ffi::c_void
+                })
                 .unwrap_or(std::ptr::null_mut()),
             pool.as_mut_ptr(),
         )
