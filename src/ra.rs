@@ -185,10 +185,11 @@ pub(crate) extern "C" fn wrap_dirent_receiver(
     _pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     let rel_path = unsafe { std::ffi::CStr::from_ptr(rel_path) };
-    let baton = unsafe {
+    // baton is a pointer to a reference to the trait object
+    let callback = unsafe {
         &*(baton as *const _ as *const &dyn Fn(&str, &Dirent) -> Result<(), crate::Error>)
     };
-    match baton(rel_path.to_str().unwrap(), &Dirent::from_raw(dirent)) {
+    match callback(rel_path.to_str().unwrap(), &Dirent::from_raw(dirent)) {
         Ok(()) => std::ptr::null_mut(),
         Err(mut e) => e.as_mut_ptr(),
     }
@@ -682,18 +683,27 @@ impl<'a> Session<'a> {
         patterns: Option<&[&str]>,
         depth: Depth,
         dirent_fields: crate::DirentField,
-        dirent_receiver: impl Fn(&str, &Dirent) -> Result<(), crate::Error>,
+        dirent_receiver: &dyn Fn(&str, &Dirent) -> Result<(), crate::Error>,
     ) -> Result<(), Error> {
         let path = std::ffi::CString::new(path).unwrap();
         let pool = Pool::new();
-        let patterns: Option<apr::tables::TypedArray<*const std::os::raw::c_char>> =
-            patterns.map(|patterns| {
+
+        // Convert patterns to CStrings and keep them alive
+        let pattern_cstrings: Option<Vec<std::ffi::CString>> = patterns.map(|patterns| {
+            patterns
+                .iter()
+                .map(|p| std::ffi::CString::new(*p).unwrap())
+                .collect()
+        });
+
+        let patterns_array: Option<apr::tables::TypedArray<*const std::os::raw::c_char>> =
+            pattern_cstrings.as_ref().map(|cstrings| {
                 let mut array = apr::tables::TypedArray::<*const std::os::raw::c_char>::new(
                     &pool,
-                    patterns.len() as i32,
+                    cstrings.len() as i32,
                 );
-                for pattern in patterns {
-                    array.push(pattern.as_ptr() as _);
+                for cstring in cstrings {
+                    array.push(cstring.as_ptr());
                 }
                 array
             });
@@ -703,8 +713,8 @@ impl<'a> Session<'a> {
                 self.ptr,
                 path.as_ptr(),
                 rev.into(),
-                if let Some(patterns) = patterns.as_ref() {
-                    patterns.as_ptr()
+                if let Some(array) = patterns_array.as_ref() {
+                    array.as_ptr()
                 } else {
                     std::ptr::null()
                 },
@@ -3049,5 +3059,95 @@ mod tests {
         // Verify we're back at the initial URL
         let final_url = session.get_session_url().unwrap();
         assert_eq!(final_url, initial_url);
+    }
+
+    #[test]
+    fn test_list() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let (_temp_dir, repo, mut session, _callbacks) = create_test_repo_with_session();
+
+        // Create some files and directories in the repository
+        let fs = repo.fs().unwrap();
+        let mut txn = fs.begin_txn(crate::Revnum(0), 0).unwrap();
+        let mut root = txn.root().unwrap();
+
+        // Create directory structure
+        root.make_dir("/dir1").unwrap();
+        root.make_dir("/dir2").unwrap();
+        root.make_file("/file1.txt").unwrap();
+        root.make_file("/dir1/file2.txt").unwrap();
+
+        let rev = txn.commit().unwrap();
+
+        // Test 1: List root directory
+        let count = AtomicUsize::new(0);
+        let callback = |_path: &str, _dirent: &Dirent| {
+            count.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        };
+        let result = session.list(
+            "",
+            rev,
+            None,
+            crate::Depth::Immediates,
+            crate::DirentField::all(),
+            &callback,
+        );
+        assert!(result.is_ok(), "List should succeed: {:?}", result);
+        // SVN list includes the directory itself (/) plus its immediate children
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            4,
+            "Should have 4 entries (root + 2 dirs + 1 file)"
+        );
+
+        // Test 2: List subdirectory with depth=Infinity
+        let subdir_count = AtomicUsize::new(0);
+        let callback2 = |_path: &str, _dirent: &Dirent| {
+            subdir_count.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        };
+        let result = session.list(
+            "dir1",
+            rev,
+            None,
+            crate::Depth::Infinity,
+            crate::DirentField::all(),
+            &callback2,
+        );
+        assert!(
+            result.is_ok(),
+            "List subdirectory should succeed: {:?}",
+            result
+        );
+        // Lists the directory itself plus its file
+        assert_eq!(
+            subdir_count.load(Ordering::SeqCst),
+            2,
+            "Should find dir1 and file2.txt"
+        );
+
+        // Test 3: List with depth=Empty (just the directory itself)
+        let empty_count = AtomicUsize::new(0);
+        let callback3 = |_path: &str, _dirent: &Dirent| {
+            empty_count.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        };
+        let result = session.list(
+            "",
+            rev,
+            None,
+            crate::Depth::Empty,
+            crate::DirentField::all(),
+            &callback3,
+        );
+        assert!(result.is_ok(), "List with depth=Empty should succeed");
+        // Depth::Empty lists only the directory itself, not its children
+        assert_eq!(
+            empty_count.load(Ordering::SeqCst),
+            1,
+            "Depth::Empty should list only the directory itself"
+        );
     }
 }
