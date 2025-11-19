@@ -110,10 +110,11 @@ pub struct WrapDirectoryEditor<'pool> {
 
 impl<'pool> DirectoryEditor for WrapDirectoryEditor<'pool> {
     fn delete_entry(&mut self, path: &str, revision: Option<Revnum>) -> Result<(), crate::Error> {
+        let path_cstr = std::ffi::CString::new(path)?;
         let scratch_pool = Pool::new();
         let err = unsafe {
             ((*self.editor).delete_entry.unwrap())(
-                path.as_ptr() as *const i8,
+                path_cstr.as_ptr(),
                 revision.map_or(-1, |r| r.into()),
                 self.baton,
                 scratch_pool.as_mut_ptr(),
@@ -129,15 +130,18 @@ impl<'pool> DirectoryEditor for WrapDirectoryEditor<'pool> {
         copyfrom: Option<(&str, Revnum)>,
     ) -> Result<Box<dyn DirectoryEditor + 'static>, crate::Error> {
         let pool = apr::Pool::new();
-        let copyfrom_path = copyfrom.map(|(p, _)| p);
+        let path_cstr = std::ffi::CString::new(path)?;
+        let copyfrom_path = copyfrom
+            .map(|(p, _)| std::ffi::CString::new(p))
+            .transpose()?;
         let copyfrom_rev = copyfrom.map(|(_, r)| r.0).unwrap_or(-1);
         let mut baton = std::ptr::null_mut();
         unsafe {
             let err = ((*self.editor).add_directory.unwrap())(
-                path.as_ptr() as *const i8,
+                path_cstr.as_ptr(),
                 self.baton,
-                if let Some(copyfrom_path) = copyfrom_path {
-                    copyfrom_path.as_ptr() as *const i8
+                if let Some(ref copyfrom_path) = copyfrom_path {
+                    copyfrom_path.as_ptr()
                 } else {
                     std::ptr::null()
                 },
@@ -160,10 +164,11 @@ impl<'pool> DirectoryEditor for WrapDirectoryEditor<'pool> {
         base_revision: Option<Revnum>,
     ) -> Result<Box<dyn DirectoryEditor + 'static>, crate::Error> {
         let pool = apr::Pool::new();
+        let path_cstr = std::ffi::CString::new(path)?;
         let mut baton = std::ptr::null_mut();
         unsafe {
             let err = ((*self.editor).open_directory.unwrap())(
-                path.as_ptr() as *const i8,
+                path_cstr.as_ptr(),
                 self.baton,
                 base_revision.map_or(-1, |r| r.0),
                 pool.as_mut_ptr(),
@@ -180,11 +185,12 @@ impl<'pool> DirectoryEditor for WrapDirectoryEditor<'pool> {
 
     fn change_prop(&mut self, name: &str, value: &[u8]) -> Result<(), crate::Error> {
         let scratch_pool = apr::pool::Pool::new();
+        let name_cstr = std::ffi::CString::new(name)?;
         let value: crate::string::String = value.into();
         let err = unsafe {
             ((*self.editor).change_dir_prop.unwrap())(
                 self.baton,
-                name.as_ptr() as *const i8,
+                name_cstr.as_ptr(),
                 value.as_ptr(),
                 scratch_pool.as_mut_ptr(),
             )
@@ -204,9 +210,10 @@ impl<'pool> DirectoryEditor for WrapDirectoryEditor<'pool> {
 
     fn absent_directory(&mut self, path: &str) -> Result<(), crate::Error> {
         let scratch_pool = apr::pool::Pool::new();
+        let path_cstr = std::ffi::CString::new(path)?;
         let err = unsafe {
             ((*self.editor).absent_directory.unwrap())(
-                path.as_ptr() as *const i8,
+                path_cstr.as_ptr(),
                 self.baton,
                 scratch_pool.as_mut_ptr(),
             )
@@ -255,10 +262,11 @@ impl<'pool> DirectoryEditor for WrapDirectoryEditor<'pool> {
         base_revision: Option<Revnum>,
     ) -> Result<Box<dyn FileEditor + 'static>, crate::Error> {
         let pool = apr::Pool::new();
+        let path_cstr = std::ffi::CString::new(path)?;
         let mut baton = std::ptr::null_mut();
         unsafe {
             let err = ((*self.editor).open_file.unwrap())(
-                path.as_ptr() as *const i8,
+                path_cstr.as_ptr(),
                 self.baton,
                 base_revision.map(|r| r.into()).unwrap_or(0),
                 pool.as_mut_ptr(),
@@ -275,9 +283,10 @@ impl<'pool> DirectoryEditor for WrapDirectoryEditor<'pool> {
 
     fn absent_file(&mut self, path: &str) -> Result<(), crate::Error> {
         let scratch_pool = apr::pool::Pool::new();
+        let path_cstr = std::ffi::CString::new(path)?;
         let err = unsafe {
             ((*self.editor).absent_file.unwrap())(
-                path.as_ptr() as *const i8,
+                path_cstr.as_ptr(),
                 self.baton,
                 scratch_pool.as_mut_ptr(),
             )
@@ -318,13 +327,14 @@ impl<'pool> FileEditor for WrapFileEditor<'pool> {
         crate::Error,
     > {
         let pool = apr::pool::Pool::new();
+        let base_checksum_cstr = base_checksum.map(std::ffi::CString::new).transpose()?;
         let mut handler = None;
         let mut baton = std::ptr::null_mut();
         let err = unsafe {
             ((*self.editor).apply_textdelta.unwrap())(
                 self.baton,
-                if let Some(base_checksum) = base_checksum {
-                    base_checksum.as_ptr() as *const i8
+                if let Some(ref base_checksum_cstr) = base_checksum_cstr {
+                    base_checksum_cstr.as_ptr()
                 } else {
                     std::ptr::null()
                 },
@@ -344,11 +354,12 @@ impl<'pool> FileEditor for WrapFileEditor<'pool> {
 
     fn change_prop(&mut self, name: &str, value: &[u8]) -> Result<(), crate::Error> {
         let scratch_pool = apr::pool::Pool::new();
+        let name_cstr = std::ffi::CString::new(name)?;
         let value: crate::string::String = value.into();
         let err = unsafe {
             ((*self.editor).change_file_prop.unwrap())(
                 self.baton,
-                name.as_ptr() as *const i8,
+                name_cstr.as_ptr(),
                 value.as_ptr(),
                 scratch_pool.as_mut_ptr(),
             )
@@ -359,11 +370,12 @@ impl<'pool> FileEditor for WrapFileEditor<'pool> {
 
     fn close(&mut self, text_checksum: Option<&str>) -> Result<(), crate::Error> {
         let pool = apr::pool::Pool::new();
+        let text_checksum_cstr = text_checksum.map(std::ffi::CString::new).transpose()?;
         let err = unsafe {
             ((*self.editor).close_file.unwrap())(
                 self.baton,
-                if let Some(text_checksum) = text_checksum {
-                    text_checksum.as_ptr() as *const i8
+                if let Some(ref text_checksum_cstr) = text_checksum_cstr {
+                    text_checksum_cstr.as_ptr()
                 } else {
                     std::ptr::null()
                 },

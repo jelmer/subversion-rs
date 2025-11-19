@@ -2635,6 +2635,7 @@ impl Context {
         ) -> Result<(), Error>,
     ) -> Result<(), Error> {
         with_tmp_pool(|pool| {
+            let target_cstr = std::ffi::CString::new(target)?;
             let changelists = options.changelists.map(|cl| {
                 cl.iter()
                     .map(|cl| std::ffi::CString::new(*cl).unwrap())
@@ -2651,7 +2652,7 @@ impl Context {
             unsafe {
                 let receiver = Box::into_raw(Box::new(receiver));
                 let err = svn_client_proplist4(
-                    target.as_ptr() as *const i8,
+                    target_cstr.as_ptr(),
                     &options.peg_revision.into(),
                     &options.revision.into(),
                     options.depth.into(),
@@ -2724,9 +2725,10 @@ impl Context {
                 };
 
                 let path_cstr = std::ffi::CString::new(path.as_str())?;
+                let url_cstr = std::ffi::CString::new(url)?;
                 let err = svn_client_import5(
                     path_cstr.as_ptr(),
-                    url.as_ptr() as *const i8,
+                    url_cstr.as_ptr(),
                     options.depth.into(),
                     options.no_ignore.into(),
                     options.no_autoprops.into(),
@@ -2767,9 +2769,10 @@ impl Context {
         let to_path = to_path.as_canonical_dirent()?;
         with_tmp_pool(|tmp_pool| unsafe {
             let path_cstr = std::ffi::CString::new(to_path.as_path().to_str().unwrap())?;
+            let from_cstr = std::ffi::CString::new(from_path_or_url)?;
             let err = svn_client_export5(
                 &mut revnum,
-                from_path_or_url.as_ptr() as *const i8,
+                from_cstr.as_ptr(),
                 path_cstr.as_ptr(),
                 &options.peg_revision.into(),
                 &options.revision.into(),
@@ -2864,6 +2867,7 @@ impl Context {
         status_func: &dyn FnMut(&'_ str, &'_ Status) -> Result<(), Error>,
     ) -> Result<Revnum, Error> {
         with_tmp_pool(|pool| {
+            let path_cstr = std::ffi::CString::new(path)?;
             let changelist_cstrings: Vec<std::ffi::CString> =
                 if let Some(changelists) = &options.changelists {
                     changelists
@@ -2884,7 +2888,7 @@ impl Context {
                 let err = svn_client_status6(
                     &mut revnum,
                     self.ptr,
-                    path.as_ptr() as *const i8,
+                    path_cstr.as_ptr(),
                     &options.revision.into(),
                     options.depth.into(),
                     options.get_all.into(),
