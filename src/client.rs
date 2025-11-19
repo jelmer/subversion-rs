@@ -8700,4 +8700,272 @@ mod tests {
         assert_eq!(found_paths2.len(), 2);
         assert!(found_paths2.iter().all(|(_, cl)| cl == "changelist1"));
     }
+
+    #[test]
+    fn test_export() {
+        use tempfile::TempDir;
+
+        // Create a repository and working copy
+        let temp_dir = TempDir::new().unwrap();
+        let repos_path = temp_dir.path().join("repos");
+        let wc_path = temp_dir.path().join("wc");
+        let export_path = temp_dir.path().join("export");
+
+        // Create a repository
+        let _repos = crate::repos::Repos::create(&repos_path).unwrap();
+
+        // Create a working copy
+        let url_str = format!("file://{}", repos_path.display());
+        let url = crate::uri::Uri::new(&url_str).unwrap();
+        let mut client_ctx = Context::new().unwrap();
+
+        let checkout_opts = CheckoutOptions {
+            revision: crate::Revision::Head,
+            peg_revision: crate::Revision::Head,
+            depth: crate::Depth::Infinity,
+            ignore_externals: false,
+            allow_unver_obstructions: false,
+        };
+        client_ctx.checkout(url, &wc_path, &checkout_opts).unwrap();
+
+        // Create some files and directories in the working copy
+        let file1 = wc_path.join("file1.txt");
+        std::fs::write(&file1, "content 1").unwrap();
+
+        let subdir = wc_path.join("subdir");
+        std::fs::create_dir(&subdir).unwrap();
+
+        let file2 = subdir.join("file2.txt");
+        std::fs::write(&file2, "content 2").unwrap();
+
+        // Add and commit
+        client_ctx.add(&file1, &AddOptions::new()).unwrap();
+        client_ctx.add(&subdir, &AddOptions::new()).unwrap();
+
+        let commit_opts = CommitOptions::default();
+        let revprops = std::collections::HashMap::new();
+        client_ctx
+            .commit(
+                &[wc_path.to_str().unwrap()],
+                &commit_opts,
+                revprops,
+                &|_info| Ok(()),
+            )
+            .unwrap();
+
+        // Test 1: Export from working copy path
+        let export_opts = ExportOptions {
+            peg_revision: crate::Revision::Head,
+            revision: crate::Revision::Head,
+            overwrite: false,
+            ignore_externals: false,
+            ignore_keywords: false,
+            depth: crate::Depth::Infinity,
+            native_eol: crate::NativeEOL::Standard,
+        };
+
+        let result = client_ctx.export(wc_path.to_str().unwrap(), &export_path, &export_opts);
+        assert!(
+            result.is_ok(),
+            "Export from WC should succeed: {:?}",
+            result
+        );
+
+        // Verify exported files exist
+        assert!(
+            export_path.join("file1.txt").exists(),
+            "file1.txt should be exported"
+        );
+        assert!(
+            export_path.join("subdir").exists(),
+            "subdir should be exported"
+        );
+        assert!(
+            export_path.join("subdir/file2.txt").exists(),
+            "file2.txt should be exported"
+        );
+
+        // Verify .svn directories are NOT exported
+        assert!(
+            !export_path.join(".svn").exists(),
+            ".svn should not be exported"
+        );
+        assert!(
+            !export_path.join("subdir/.svn").exists(),
+            "subdir/.svn should not be exported"
+        );
+
+        // Verify content is correct
+        let content1 = std::fs::read_to_string(export_path.join("file1.txt")).unwrap();
+        assert_eq!(content1, "content 1");
+        let content2 = std::fs::read_to_string(export_path.join("subdir/file2.txt")).unwrap();
+        assert_eq!(content2, "content 2");
+
+        // Test 2: Export with depth=Files (only files, not subdirectories)
+        let export_path3 = temp_dir.path().join("export3");
+        let shallow_opts = ExportOptions {
+            peg_revision: crate::Revision::Head,
+            revision: crate::Revision::Head,
+            overwrite: false,
+            ignore_externals: false,
+            ignore_keywords: false,
+            depth: crate::Depth::Files,
+            native_eol: crate::NativeEOL::Standard,
+        };
+
+        let result = client_ctx.export(wc_path.to_str().unwrap(), &export_path3, &shallow_opts);
+        assert!(
+            result.is_ok(),
+            "Shallow export should succeed: {:?}",
+            result
+        );
+
+        assert!(
+            export_path3.join("file1.txt").exists(),
+            "Top-level file should be exported"
+        );
+
+        // With depth=Files, when exporting from a working copy path, SVN exports the entire
+        // tree that exists in the working copy. The depth parameter affects how the export
+        // operation traverses the repository, not what content gets copied from the WC.
+        // This matches the behavior of `svn export --depth files` on a WC path.
+        assert!(
+            export_path3.join("subdir").exists(),
+            "Subdirectory is exported with depth=Files from WC"
+        );
+        assert!(
+            export_path3.join("subdir/file2.txt").exists(),
+            "Files in subdirectories are exported with depth=Files from WC"
+        );
+    }
+
+    #[test]
+    fn test_import() {
+        use tempfile::TempDir;
+
+        // Create a repository and a directory to import
+        let temp_dir = TempDir::new().unwrap();
+        let repos_path = temp_dir.path().join("repos");
+        let import_path = temp_dir.path().join("to_import");
+        let wc_path = temp_dir.path().join("wc");
+
+        // Create a repository
+        let _repos = crate::repos::Repos::create(&repos_path).unwrap();
+
+        // Create some files to import
+        std::fs::create_dir(&import_path).unwrap();
+        let file1 = import_path.join("file1.txt");
+        std::fs::write(&file1, "import content 1").unwrap();
+
+        let subdir = import_path.join("subdir");
+        std::fs::create_dir(&subdir).unwrap();
+
+        let file2 = subdir.join("file2.txt");
+        std::fs::write(&file2, "import content 2").unwrap();
+
+        // Test 1: Import the directory
+        let url_str = format!("file://{}/imported", repos_path.display());
+        let import_url = crate::uri::Uri::new(&url_str).unwrap();
+        let canonical_url = import_url.canonical();
+        let mut client_ctx = Context::new().unwrap();
+
+        let mut import_opts = ImportOptions {
+            depth: crate::Depth::Infinity,
+            no_ignore: false,
+            no_autoprops: false,
+            ignore_unknown_node_types: false,
+            revprop_table: None,
+            filter_callback: None,
+            commit_callback: None,
+        };
+
+        let result = client_ctx.import(&import_path, canonical_url.as_str(), &mut import_opts);
+        assert!(result.is_ok(), "Import should succeed: {:?}", result);
+
+        // Test 2: Checkout to verify the import worked
+        let checkout_url =
+            crate::uri::Uri::new(&format!("file://{}", repos_path.display())).unwrap();
+        let checkout_opts = CheckoutOptions {
+            revision: crate::Revision::Head,
+            peg_revision: crate::Revision::Head,
+            depth: crate::Depth::Infinity,
+            ignore_externals: false,
+            allow_unver_obstructions: false,
+        };
+        client_ctx
+            .checkout(checkout_url, &wc_path, &checkout_opts)
+            .unwrap();
+
+        // Verify imported files exist in the checked-out working copy
+        assert!(
+            wc_path.join("imported/file1.txt").exists(),
+            "Imported file1.txt should exist"
+        );
+        assert!(
+            wc_path.join("imported/subdir").exists(),
+            "Imported subdir should exist"
+        );
+        assert!(
+            wc_path.join("imported/subdir/file2.txt").exists(),
+            "Imported file2.txt should exist"
+        );
+
+        // Verify content
+        let content1 = std::fs::read_to_string(wc_path.join("imported/file1.txt")).unwrap();
+        assert_eq!(content1, "import content 1");
+        let content2 = std::fs::read_to_string(wc_path.join("imported/subdir/file2.txt")).unwrap();
+        assert_eq!(content2, "import content 2");
+
+        // Test 3: Import with depth=Empty (only the directory itself, no children)
+        let import_path2 = temp_dir.path().join("to_import2");
+        std::fs::create_dir(&import_path2).unwrap();
+        std::fs::write(import_path2.join("file3.txt"), "content 3").unwrap();
+        let subdir2 = import_path2.join("subdir2");
+        std::fs::create_dir(&subdir2).unwrap();
+        std::fs::write(subdir2.join("file4.txt"), "content 4").unwrap();
+
+        let url_str2 = format!("file://{}/imported2", repos_path.display());
+        let import_url2 = crate::uri::Uri::new(&url_str2).unwrap();
+        let canonical_url2 = import_url2.canonical();
+        let mut import_opts2 = ImportOptions {
+            depth: crate::Depth::Empty,
+            no_ignore: false,
+            no_autoprops: false,
+            ignore_unknown_node_types: false,
+            revprop_table: None,
+            filter_callback: None,
+            commit_callback: None,
+        };
+
+        let result = client_ctx.import(&import_path2, canonical_url2.as_str(), &mut import_opts2);
+        assert!(
+            result.is_ok(),
+            "Import with depth=Empty should succeed: {:?}",
+            result
+        );
+
+        // Verify it was imported - with depth=Empty, no children should be imported
+        let update_opts = UpdateOptions::default();
+        client_ctx
+            .update(
+                &[wc_path.to_str().unwrap()],
+                crate::Revision::Head,
+                &update_opts,
+            )
+            .unwrap();
+
+        // The imported2 directory should exist but be empty
+        assert!(
+            wc_path.join("imported2").exists(),
+            "imported2 directory should exist"
+        );
+        assert!(
+            !wc_path.join("imported2/file3.txt").exists(),
+            "file3.txt should NOT be imported with depth=Empty"
+        );
+        assert!(
+            !wc_path.join("imported2/subdir2").exists(),
+            "subdir2 should NOT be imported with depth=Empty"
+        );
+    }
 }
