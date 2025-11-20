@@ -1302,7 +1302,10 @@ impl Root {
     ///
     /// Given a root/path, find the closest ancestor of that path which is a copy
     /// (or the path itself, if it is a copy). Returns the root and path of the copy.
-    pub fn closest_copy(&self, path: impl TryInto<FsPath, Error = Error>) -> Result<Option<(Root, String)>, Error> {
+    pub fn closest_copy(
+        &self,
+        path: impl TryInto<FsPath, Error = Error>,
+    ) -> Result<Option<(Root, String)>, Error> {
         let fs_path = path.try_into()?;
         let pool = apr::Pool::new();
 
@@ -1322,10 +1325,14 @@ impl Root {
             if copy_root.is_null() {
                 Ok(None)
             } else {
-                let path_str = std::ffi::CStr::from_ptr(copy_path)
-                    .to_str()?
-                    .to_owned();
-                Ok(Some((Root { ptr: copy_root, pool }, path_str)))
+                let path_str = std::ffi::CStr::from_ptr(copy_path).to_str()?.to_owned();
+                Ok(Some((
+                    Root {
+                        ptr: copy_root,
+                        pool,
+                    },
+                    path_str,
+                )))
             }
         }
     }
@@ -1385,6 +1392,113 @@ impl Root {
             );
             svn_result(err)?;
             Ok(different != 0)
+        }
+    }
+
+    /// Apply a text delta to a file in the filesystem
+    ///
+    /// Returns a window handler that can receive delta windows.
+    /// The root must be a transaction root, not a revision root.
+    pub fn apply_textdelta(
+        &mut self,
+        path: impl TryInto<FsPath, Error = Error>,
+        base_checksum: Option<&str>,
+        result_checksum: Option<&str>,
+    ) -> Result<crate::delta::WrapTxdeltaWindowHandler, Error> {
+        let fs_path = path.try_into()?;
+        let base_checksum_cstr = base_checksum.map(std::ffi::CString::new).transpose()?;
+        let result_checksum_cstr = result_checksum.map(std::ffi::CString::new).transpose()?;
+
+        let pool = apr::Pool::new();
+
+        unsafe {
+            let mut handler: subversion_sys::svn_txdelta_window_handler_t = None;
+            let mut handler_baton: *mut std::ffi::c_void = std::ptr::null_mut();
+
+            let err = subversion_sys::svn_fs_apply_textdelta(
+                &mut handler,
+                &mut handler_baton,
+                self.ptr,
+                fs_path.as_ptr(),
+                base_checksum_cstr
+                    .as_ref()
+                    .map_or(std::ptr::null(), |c| c.as_ptr()),
+                result_checksum_cstr
+                    .as_ref()
+                    .map_or(std::ptr::null(), |c| c.as_ptr()),
+                pool.as_mut_ptr(),
+            );
+            svn_result(err)?;
+
+            Ok(crate::delta::WrapTxdeltaWindowHandler::from_raw(
+                &mut handler,
+                handler_baton,
+                pool,
+            ))
+        }
+    }
+
+    /// Write data directly to a file in the filesystem
+    ///
+    /// Returns a stream ready to receive full textual data.
+    /// The root must be a transaction root, not a revision root.
+    pub fn apply_text(
+        &mut self,
+        path: impl TryInto<FsPath, Error = Error>,
+        result_checksum: Option<&str>,
+    ) -> Result<crate::io::Stream, Error> {
+        let fs_path = path.try_into()?;
+        let result_checksum_cstr = result_checksum.map(std::ffi::CString::new).transpose()?;
+
+        let pool = apr::Pool::new();
+
+        unsafe {
+            let mut stream: *mut subversion_sys::svn_stream_t = std::ptr::null_mut();
+
+            let err = subversion_sys::svn_fs_apply_text(
+                &mut stream,
+                self.ptr,
+                fs_path.as_ptr(),
+                result_checksum_cstr
+                    .as_ref()
+                    .map_or(std::ptr::null(), |c| c.as_ptr()),
+                pool.as_mut_ptr(),
+            );
+            svn_result(err)?;
+
+            Ok(crate::io::Stream::from_ptr_and_pool(stream, pool))
+        }
+    }
+
+    /// Get a delta stream between two files
+    ///
+    /// Returns a stream that produces svndiff data representing the difference
+    /// between the source and target files.
+    pub fn get_file_delta_stream(
+        &self,
+        source_path: impl TryInto<FsPath, Error = Error>,
+        target_root: &Root,
+        target_path: impl TryInto<FsPath, Error = Error>,
+    ) -> Result<crate::delta::TxDeltaStream, Error> {
+        let source_fs_path = source_path.try_into()?;
+        let target_fs_path = target_path.try_into()?;
+
+        let pool = apr::Pool::new();
+
+        unsafe {
+            let mut stream: *mut subversion_sys::svn_txdelta_stream_t = std::ptr::null_mut();
+
+            let err = subversion_sys::svn_fs_get_file_delta_stream(
+                &mut stream,
+                self.ptr,
+                source_fs_path.as_ptr(),
+                target_root.ptr,
+                target_fs_path.as_ptr(),
+                pool.as_mut_ptr(),
+            );
+            svn_result(err)?;
+
+            Ok(crate::delta::TxDeltaStream::from_raw(stream, pool))
         }
     }
 }
@@ -1469,16 +1583,12 @@ impl NodeId {
     /// - -1 if they are different but related (share a common ancestor)
     /// - 1 if they are unrelated
     pub fn compare(&self, other: &NodeId) -> i32 {
-        unsafe {
-            subversion_sys::svn_fs_compare_ids(self.ptr, other.ptr)
-        }
+        unsafe { subversion_sys::svn_fs_compare_ids(self.ptr, other.ptr) }
     }
 
     /// Check if two node IDs are related (share a common ancestor)
     pub fn check_related(&self, other: &NodeId) -> bool {
-        unsafe {
-            subversion_sys::svn_fs_check_related(self.ptr, other.ptr) != 0
-        }
+        unsafe { subversion_sys::svn_fs_check_related(self.ptr, other.ptr) != 0 }
     }
 
     /// Convert the node ID to a string representation
@@ -2044,6 +2154,7 @@ impl<'pool> Fs<'pool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Read;
     use tempfile::tempdir;
 
     #[test]
@@ -3344,7 +3455,8 @@ mod tests {
         let mut root = txn.root().unwrap();
         root.make_dir("/trunk").unwrap();
         root.make_file("/trunk/file.txt").unwrap();
-        root.set_file_contents("/trunk/file.txt", b"initial content").unwrap();
+        root.set_file_contents("/trunk/file.txt", b"initial content")
+            .unwrap();
         txn.commit().unwrap();
 
         // Create second revision with a copy
@@ -3422,7 +3534,8 @@ mod tests {
         let mut root = txn.root().unwrap();
         root.make_file("/file.txt").unwrap();
         root.set_file_contents("/file.txt", b"content v1").unwrap();
-        root.change_node_prop("/file.txt", "custom:prop", b"value1").unwrap();
+        root.change_node_prop("/file.txt", "custom:prop", b"value1")
+            .unwrap();
         txn.commit().unwrap();
 
         // Create revision 2 with changed content
@@ -3436,7 +3549,8 @@ mod tests {
         let mut txn = fs.begin_txn(Revnum(2), 0).unwrap();
         txn.change_prop("svn:log", "Rev 3").unwrap();
         let mut root = txn.root().unwrap();
-        root.change_node_prop("/file.txt", "custom:prop", b"value2").unwrap();
+        root.change_node_prop("/file.txt", "custom:prop", b"value2")
+            .unwrap();
         txn.commit().unwrap();
 
         let root1 = fs.revision_root(Revnum(1)).unwrap();
@@ -3444,11 +3558,80 @@ mod tests {
         let root3 = fs.revision_root(Revnum(3)).unwrap();
 
         // Test contents_different
-        assert!(root1.contents_different("/file.txt", &root2, "/file.txt").unwrap());
-        assert!(!root2.contents_different("/file.txt", &root3, "/file.txt").unwrap());
+        assert!(root1
+            .contents_different("/file.txt", &root2, "/file.txt")
+            .unwrap());
+        assert!(!root2
+            .contents_different("/file.txt", &root3, "/file.txt")
+            .unwrap());
 
         // Test props_different
-        assert!(!root1.props_different("/file.txt", &root2, "/file.txt").unwrap());
-        assert!(root2.props_different("/file.txt", &root3, "/file.txt").unwrap());
+        assert!(!root1
+            .props_different("/file.txt", &root2, "/file.txt")
+            .unwrap());
+        assert!(root2
+            .props_different("/file.txt", &root3, "/file.txt")
+            .unwrap());
+    }
+
+    #[test]
+    fn test_apply_text() {
+        let dir = tempdir().unwrap();
+        let fs_path = dir.path().join("test-fs");
+        let fs = Fs::create(&fs_path).unwrap();
+
+        // Create a transaction
+        let mut txn = fs.begin_txn(Revnum(0), 0).unwrap();
+        let mut root = txn.root().unwrap();
+
+        // Create a file using make_file
+        root.make_file("/test.txt").unwrap();
+
+        // Apply text to the file
+        let mut stream = root.apply_text("/test.txt", None).unwrap();
+        stream.write(b"Hello, world!").unwrap();
+        stream.close().unwrap();
+
+        // Commit the transaction
+        txn.commit().unwrap();
+
+        // Verify the file contents
+        let root = fs.revision_root(Revnum(1)).unwrap();
+        let mut contents = Vec::new();
+        root.file_contents("/test.txt")
+            .unwrap()
+            .read_to_end(&mut contents)
+            .unwrap();
+        assert_eq!(contents, b"Hello, world!");
+    }
+
+    #[test]
+    fn test_get_file_delta_stream() {
+        let dir = tempdir().unwrap();
+        let fs_path = dir.path().join("test-fs");
+        let fs = Fs::create(&fs_path).unwrap();
+
+        // Create revision 1 with a file
+        let mut txn = fs.begin_txn(Revnum(0), 0).unwrap();
+        let mut root = txn.root().unwrap();
+        root.make_file("/file.txt").unwrap();
+        let mut stream = root.apply_text("/file.txt", None).unwrap();
+        stream.write(b"First version").unwrap();
+        stream.close().unwrap();
+        txn.commit().unwrap();
+
+        // Create revision 2 with modified file
+        let mut txn = fs.begin_txn(Revnum(1), 0).unwrap();
+        let mut root = txn.root().unwrap();
+        let mut stream = root.apply_text("/file.txt", None).unwrap();
+        stream.write(b"Second version with more text").unwrap();
+        stream.close().unwrap();
+        txn.commit().unwrap();
+
+        // Get delta stream between the two versions
+        let root1 = fs.revision_root(Revnum(1)).unwrap();
+        let root2 = fs.revision_root(Revnum(2)).unwrap();
+        let delta_stream = root1.get_file_delta_stream("/file.txt", &root2, "/file.txt");
+        assert!(delta_stream.is_ok());
     }
 }

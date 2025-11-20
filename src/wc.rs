@@ -4264,8 +4264,11 @@ mod tests {
         // This verifies the binding works and properly propagates errors.
         assert!(result.is_err());
         let err_str = format!("{:?}", result.err().unwrap());
-        assert!(err_str.to_lowercase().contains("lock"),
-                "Expected lock error, got: {}", err_str);
+        assert!(
+            err_str.to_lowercase().contains("lock"),
+            "Expected lock error, got: {}",
+            err_str
+        );
     }
 
     #[test]

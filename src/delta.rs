@@ -318,6 +318,22 @@ impl Drop for WrapTxdeltaWindowHandler {
     }
 }
 
+impl WrapTxdeltaWindowHandler {
+    /// Create from raw pointer and baton
+    pub(crate) fn from_raw(
+        handler: *mut subversion_sys::svn_txdelta_window_handler_t,
+        baton: *mut std::ffi::c_void,
+        pool: apr::Pool<'static>,
+    ) -> Self {
+        Self {
+            handler,
+            baton,
+            pool,
+            _phantom: PhantomData,
+        }
+    }
+}
+
 impl<'pool> FileEditor for WrapFileEditor<'pool> {
     fn apply_textdelta(
         &mut self,
@@ -1077,6 +1093,14 @@ impl TxDeltaStream {
             ptr: stream_ptr,
             _pool: pool,
         }
+    }
+
+    /// Create from raw pointer
+    pub(crate) fn from_raw(
+        ptr: *mut subversion_sys::svn_txdelta_stream_t,
+        pool: apr::Pool<'static>,
+    ) -> Self {
+        Self { ptr, _pool: pool }
     }
 
     /// Get the next window from the stream

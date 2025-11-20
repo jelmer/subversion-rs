@@ -6591,24 +6591,18 @@ impl Conflict {
     pub fn get_local_abspath(&self) -> &str {
         unsafe {
             let abspath = subversion_sys::svn_client_conflict_get_local_abspath(self.ptr);
-            std::ffi::CStr::from_ptr(abspath)
-                .to_str()
-                .unwrap()
+            std::ffi::CStr::from_ptr(abspath).to_str().unwrap()
         }
     }
 
     /// Get the incoming change type
     pub fn get_incoming_change(&self) -> crate::conflict::ConflictAction {
-        unsafe {
-            subversion_sys::svn_client_conflict_get_incoming_change(self.ptr).into()
-        }
+        unsafe { subversion_sys::svn_client_conflict_get_incoming_change(self.ptr).into() }
     }
 
     /// Get the local change type
     pub fn get_local_change(&self) -> crate::conflict::ConflictAction {
-        unsafe {
-            subversion_sys::svn_client_conflict_get_local_change(self.ptr).into()
-        }
+        unsafe { subversion_sys::svn_client_conflict_get_local_change(self.ptr).into() }
     }
 
     /// Get repository root URL and UUID
@@ -6630,19 +6624,23 @@ impl Conflict {
             let root_url = if repos_root_url.is_null() {
                 None
             } else {
-                Some(std::ffi::CStr::from_ptr(repos_root_url)
-                    .to_str()
-                    .unwrap()
-                    .to_owned())
+                Some(
+                    std::ffi::CStr::from_ptr(repos_root_url)
+                        .to_str()
+                        .unwrap()
+                        .to_owned(),
+                )
             };
 
             let uuid = if repos_uuid.is_null() {
                 None
             } else {
-                Some(std::ffi::CStr::from_ptr(repos_uuid)
-                    .to_str()
-                    .unwrap()
-                    .to_owned())
+                Some(
+                    std::ffi::CStr::from_ptr(repos_uuid)
+                        .to_str()
+                        .unwrap()
+                        .to_owned(),
+                )
             };
 
             Ok((root_url, uuid))
@@ -6651,13 +6649,14 @@ impl Conflict {
 
     /// Get the recommended option ID for resolving this conflict
     pub fn get_recommended_option_id(&self) -> crate::ClientConflictOptionId {
-        unsafe {
-            subversion_sys::svn_client_conflict_get_recommended_option_id(self.ptr).into()
-        }
+        unsafe { subversion_sys::svn_client_conflict_get_recommended_option_id(self.ptr).into() }
     }
 
     /// Get available resolution options for a text conflict
-    pub fn text_get_resolution_options(&self, ctx: &mut Context) -> Result<Vec<ConflictOption>, Error> {
+    pub fn text_get_resolution_options(
+        &self,
+        ctx: &mut Context,
+    ) -> Result<Vec<ConflictOption>, Error> {
         let pool = apr::pool::Pool::new();
         let mut options: *mut apr_sys::apr_array_header_t = std::ptr::null_mut();
 
@@ -6673,7 +6672,9 @@ impl Conflict {
 
             let mut result = Vec::new();
             if !options.is_null() {
-                let array = apr::tables::TypedArray::<*mut subversion_sys::svn_client_conflict_option_t>::from_ptr(options);
+                let array = apr::tables::TypedArray::<
+                    *mut subversion_sys::svn_client_conflict_option_t,
+                >::from_ptr(options);
                 for option_ptr in array.iter() {
                     result.push(ConflictOption { ptr: option_ptr });
                 }
@@ -6683,7 +6684,10 @@ impl Conflict {
     }
 
     /// Get available resolution options for a property conflict
-    pub fn prop_get_resolution_options(&self, ctx: &mut Context) -> Result<Vec<ConflictOption>, Error> {
+    pub fn prop_get_resolution_options(
+        &self,
+        ctx: &mut Context,
+    ) -> Result<Vec<ConflictOption>, Error> {
         let pool = apr::pool::Pool::new();
         let mut options: *mut apr_sys::apr_array_header_t = std::ptr::null_mut();
 
@@ -6699,7 +6703,9 @@ impl Conflict {
 
             let mut result = Vec::new();
             if !options.is_null() {
-                let array = apr::tables::TypedArray::<*mut subversion_sys::svn_client_conflict_option_t>::from_ptr(options);
+                let array = apr::tables::TypedArray::<
+                    *mut subversion_sys::svn_client_conflict_option_t,
+                >::from_ptr(options);
                 for option_ptr in array.iter() {
                     result.push(ConflictOption { ptr: option_ptr });
                 }
@@ -6709,7 +6715,10 @@ impl Conflict {
     }
 
     /// Get available resolution options for a tree conflict
-    pub fn tree_get_resolution_options(&self, ctx: &mut Context) -> Result<Vec<ConflictOption>, Error> {
+    pub fn tree_get_resolution_options(
+        &self,
+        ctx: &mut Context,
+    ) -> Result<Vec<ConflictOption>, Error> {
         let pool = apr::pool::Pool::new();
         let mut options: *mut apr_sys::apr_array_header_t = std::ptr::null_mut();
 
@@ -6725,7 +6734,9 @@ impl Conflict {
 
             let mut result = Vec::new();
             if !options.is_null() {
-                let array = apr::tables::TypedArray::<*mut subversion_sys::svn_client_conflict_option_t>::from_ptr(options);
+                let array = apr::tables::TypedArray::<
+                    *mut subversion_sys::svn_client_conflict_option_t,
+                >::from_ptr(options);
                 for option_ptr in array.iter() {
                     result.push(ConflictOption { ptr: option_ptr });
                 }
@@ -6775,23 +6786,16 @@ pub struct ConflictOption {
 impl ConflictOption {
     /// Get the option ID
     pub fn get_id(&self) -> crate::ClientConflictOptionId {
-        unsafe {
-            subversion_sys::svn_client_conflict_option_get_id(self.ptr).into()
-        }
+        unsafe { subversion_sys::svn_client_conflict_option_get_id(self.ptr).into() }
     }
 
     /// Get the human-readable label for this option
     pub fn get_label(&self) -> String {
         let pool = apr::pool::Pool::new();
         unsafe {
-            let label = subversion_sys::svn_client_conflict_option_get_label(
-                self.ptr,
-                pool.as_mut_ptr(),
-            );
-            std::ffi::CStr::from_ptr(label)
-                .to_str()
-                .unwrap()
-                .to_owned()
+            let label =
+                subversion_sys::svn_client_conflict_option_get_label(self.ptr, pool.as_mut_ptr());
+            std::ffi::CStr::from_ptr(label).to_str().unwrap().to_owned()
         }
     }
 
@@ -6803,10 +6807,7 @@ impl ConflictOption {
                 self.ptr,
                 pool.as_mut_ptr(),
             );
-            std::ffi::CStr::from_ptr(desc)
-                .to_str()
-                .unwrap()
-                .to_owned()
+            std::ffi::CStr::from_ptr(desc).to_str().unwrap().to_owned()
         }
     }
 }
