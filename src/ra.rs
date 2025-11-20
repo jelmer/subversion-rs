@@ -356,11 +356,11 @@ impl<'a> Session<'a> {
 
         // Create default callbacks if none provided - SVN requires valid callbacks
         let mut default_callbacks;
-        let callbacks_ptr = if let Some(callbacks) = callbacks.as_mut() {
-            callbacks.as_mut_ptr()
+        let (callbacks_ptr, callback_baton) = if let Some(callbacks) = callbacks.as_mut() {
+            (callbacks.as_mut_ptr(), callbacks.get_callback_baton())
         } else {
             default_callbacks = Callbacks::new()?;
-            default_callbacks.as_mut_ptr()
+            (default_callbacks.as_mut_ptr(), default_callbacks.get_callback_baton())
         };
 
         let err = unsafe {
@@ -375,7 +375,7 @@ impl<'a> Session<'a> {
                     std::ptr::null()
                 },
                 callbacks_ptr,
-                std::ptr::null_mut(),
+                callback_baton,
                 if let Some(config) = config.as_mut() {
                     config.as_mut_ptr()
                 } else {
@@ -2138,6 +2138,8 @@ pub struct Callbacks {
     _pool: apr::Pool<'static>,
     // Keep auth_baton alive for the lifetime of the callbacks, pinned to ensure stable address
     auth_baton: Option<std::pin::Pin<Box<crate::auth::AuthBaton>>>,
+    // Keep cancel_func alive for the lifetime of the callbacks
+    cancel_func: Option<Box<Box<dyn Fn() -> Result<(), Error>>>>,
     _phantom: PhantomData<*mut ()>,
 }
 
@@ -2166,6 +2168,7 @@ impl Callbacks {
             ptr: callbacks,
             _pool: pool,
             auth_baton: None,
+            cancel_func: None,
             _phantom: PhantomData,
         })
     }
@@ -2181,6 +2184,29 @@ impl Callbacks {
         }
         // Keep the pinned auth_baton alive
         self.auth_baton = Some(pinned_baton);
+    }
+
+    /// Sets the cancellation callback for the RA session.
+    ///
+    /// This callback will be invoked periodically during RA operations to check
+    /// if the operation should be cancelled. Return Ok(()) to continue or Err()
+    /// to cancel the operation.
+    pub fn set_cancel_func(&mut self, cancel_func: impl Fn() -> Result<(), Error> + 'static) {
+        let boxed: Box<Box<dyn Fn() -> Result<(), Error>>> = Box::new(Box::new(cancel_func));
+        unsafe {
+            (*self.ptr).cancel_func = Some(crate::wrap_cancel_func);
+        }
+        // Store the callback to keep it alive
+        self.cancel_func = Some(boxed);
+    }
+
+    /// Get the callback baton pointer for use with svn_ra_open.
+    /// This returns the cancel_func baton if set, otherwise null.
+    fn get_callback_baton(&self) -> *mut std::ffi::c_void {
+        self.cancel_func
+            .as_ref()
+            .map(|b| b.as_ref() as *const Box<dyn Fn() -> Result<(), Error>> as *mut std::ffi::c_void)
+            .unwrap_or(std::ptr::null_mut())
     }
 
     fn as_mut_ptr(&mut self) -> *mut subversion_sys::svn_ra_callbacks2_t {
