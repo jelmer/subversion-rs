@@ -7,31 +7,6 @@ use subversion_sys::{
 };
 
 // Helper functions for properly boxing callback batons
-// The callbacks expect *const Box<dyn Fn...>, not *const Box<&dyn Fn...>
-// We need double-boxing to avoid UB
-fn box_freeze_baton(f: &dyn Fn() -> Result<(), Error>) -> *mut std::ffi::c_void {
-    let boxed: Box<dyn Fn() -> Result<(), Error>> = Box::new(move || f());
-    Box::into_raw(Box::new(boxed)) as *mut std::ffi::c_void
-}
-
-fn box_notify_baton(f: &dyn Fn(crate::Revnum, &str, &std::ffi::CStr)) -> *mut std::ffi::c_void {
-    let boxed: Box<dyn Fn(crate::Revnum, &str, &std::ffi::CStr)> =
-        Box::new(move |r, s1, s2| f(r, s1, s2));
-    Box::into_raw(Box::new(boxed)) as *mut std::ffi::c_void
-}
-
-unsafe fn free_freeze_baton(baton: *mut std::ffi::c_void) {
-    drop(Box::from_raw(
-        baton as *mut Box<Box<dyn Fn() -> Result<(), Error>>>,
-    ));
-}
-
-unsafe fn free_notify_baton(baton: *mut std::ffi::c_void) {
-    drop(Box::from_raw(
-        baton as *mut Box<Box<dyn Fn(crate::Revnum, &str, &std::ffi::CStr)>>,
-    ));
-}
-
 /// Specifies how to handle UUID during repository load operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LoadUUID {

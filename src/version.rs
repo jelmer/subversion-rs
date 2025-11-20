@@ -50,7 +50,7 @@ impl Eq for Version {}
 /// Extended version information
 pub struct VersionExtended(
     *const subversion_sys::svn_version_extended_t,
-    apr::Pool<'static>,
+    #[allow(dead_code)] apr::Pool<'static>,
 );
 
 impl VersionExtended {

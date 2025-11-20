@@ -2152,6 +2152,24 @@ impl Callbacks {
     }
 }
 
+/// Get the Subversion API version
+///
+/// Returns a tuple of (major, minor, patch) version numbers.
+pub fn api_version() -> (i32, i32, i32) {
+    (
+        subversion_sys::SVN_VER_MAJOR as i32,
+        subversion_sys::SVN_VER_MINOR as i32,
+        subversion_sys::SVN_VER_PATCH as i32,
+    )
+}
+
+/// Get the RA ABI (Application Binary Interface) version number
+///
+/// This is the version number used for the RA plugin interface.
+pub fn abi_version() -> i32 {
+    subversion_sys::SVN_RA_ABI_VERSION as i32
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
