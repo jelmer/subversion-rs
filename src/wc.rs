@@ -3766,4 +3766,27 @@ mod tests {
         // Should have walked at least the root and the added file
         assert!(status_count >= 1, "Should have at least one status entry");
     }
+
+    #[test]
+    fn test_wc_version() {
+        let version = version();
+        assert!(version.major() > 0);
+    }
+
+    #[test]
+    fn test_set_and_get_adm_dir() {
+        // Test setting and getting admin dir
+        let result = set_adm_dir("_svn");
+        assert!(result.is_ok());
+
+        let dir = get_adm_dir();
+        assert_eq!(dir, "_svn");
+
+        // Reset to default
+        let result = set_adm_dir(".svn");
+        assert!(result.is_ok());
+
+        let dir = get_adm_dir();
+        assert_eq!(dir, ".svn");
+    }
 }
