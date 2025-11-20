@@ -126,6 +126,18 @@ impl From<subversion_sys::svn_wc_status_kind> for StatusKind {
     }
 }
 
+/// Represents a property change in the working copy
+///
+/// A property change consists of a property name and an optional value.
+/// If the value is None, it indicates the property has been deleted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PropChange {
+    /// The name of the property
+    pub name: String,
+    /// The new value of the property, or None if deleted
+    pub value: Option<Vec<u8>>,
+}
+
 /// Working copy status information
 pub struct Status {
     ptr: *const subversion_sys::svn_wc_status3_t,
@@ -1812,6 +1824,112 @@ impl Context {
         Ok(prop_hash.to_hashmap())
     }
 
+    /// Get property differences for a working copy path
+    ///
+    /// Returns the property changes (propchanges) and original properties
+    /// for a given path in the working copy. The propchanges represent
+    /// modifications made in the working copy but not yet committed.
+    ///
+    /// # Arguments
+    ///
+    /// * `local_abspath` - Absolute path to the working copy item
+    ///
+    /// # Returns
+    ///
+    /// Returns a tuple of:
+    /// * `Vec<PropChange>` - Array of property changes
+    /// * `Option<HashMap<String, Vec<u8>>>` - Hash of original (pristine) properties (None if no properties)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// * The path is not a valid working copy path
+    /// * There are issues accessing the working copy database
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use subversion::wc::Context;
+    /// # fn example() -> Result<(), subversion::Error> {
+    /// let mut ctx = Context::new()?;
+    /// let path = std::path::Path::new("/path/to/wc/file.txt");
+    /// let (changes, original_props) = ctx.get_prop_diffs(path)?;
+    /// for change in changes {
+    ///     println!("Property {} changed", change.name);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn get_prop_diffs(
+        &mut self,
+        local_abspath: &std::path::Path,
+    ) -> Result<
+        (
+            Vec<PropChange>,
+            Option<std::collections::HashMap<String, Vec<u8>>>,
+        ),
+        Error,
+    > {
+        let path = local_abspath.to_str().unwrap();
+        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let result_pool = apr::Pool::new();
+        let scratch_pool = apr::Pool::new();
+
+        let mut propchanges: *mut apr::tables::apr_array_header_t = std::ptr::null_mut();
+        let mut original_props: *mut apr::hash::apr_hash_t = std::ptr::null_mut();
+
+        let err = unsafe {
+            subversion_sys::svn_wc_get_prop_diffs2(
+                &mut propchanges,
+                &mut original_props,
+                self.ptr,
+                path_cstr.as_ptr(),
+                result_pool.as_mut_ptr(),
+                scratch_pool.as_mut_ptr(),
+            )
+        };
+
+        Error::from_raw(err)?;
+
+        // Convert propchanges array to Vec<PropChange>
+        // Note: The array contains svn_prop_t structs directly, not pointers
+        let changes = if propchanges.is_null() {
+            Vec::new()
+        } else {
+            let array = unsafe {
+                apr::tables::TypedArray::<subversion_sys::svn_prop_t>::from_ptr(propchanges)
+            };
+            array
+                .iter()
+                .map(|prop| unsafe {
+                    if prop.name.is_null() {
+                        panic!("Encountered null prop.name in propchanges array");
+                    }
+                    let name = std::ffi::CStr::from_ptr(prop.name)
+                        .to_str()
+                        .expect("Property name is not valid UTF-8")
+                        .to_owned();
+                    let value = if prop.value.is_null() {
+                        None
+                    } else {
+                        Some(crate::svn_string_helpers::to_vec(&*prop.value))
+                    };
+                    PropChange { name, value }
+                })
+                .collect()
+        };
+
+        // Convert original_props hash to HashMap, or None if null
+        let original = if original_props.is_null() {
+            None
+        } else {
+            let prop_hash = unsafe { crate::props::PropHash::from_ptr(original_props) };
+            Some(prop_hash.to_hashmap())
+        };
+
+        Ok((changes, original))
+    }
+
     /// Read the kind (type) of a node in the working copy
     ///
     /// Returns the kind of node at @a local_abspath, which can be a file,
@@ -1949,6 +2067,159 @@ impl Notify {
                 Some(std::ffi::CStr::from_ptr((*self.ptr).path).to_str().unwrap())
             }
         }
+    }
+
+    /// Get the node kind
+    pub fn kind(&self) -> crate::NodeKind {
+        unsafe { (*self.ptr).kind.into() }
+    }
+
+    /// Get the mime type
+    pub fn mime_type(&self) -> Option<&str> {
+        unsafe {
+            if (*self.ptr).mime_type.is_null() {
+                None
+            } else {
+                Some(
+                    std::ffi::CStr::from_ptr((*self.ptr).mime_type)
+                        .to_str()
+                        .unwrap(),
+                )
+            }
+        }
+    }
+
+    /// Get the lock information
+    pub fn lock(&self) -> Option<Lock> {
+        unsafe {
+            if (*self.ptr).lock.is_null() {
+                None
+            } else {
+                Some(Lock::from_ptr((*self.ptr).lock))
+            }
+        }
+    }
+
+    /// Get the error if notification indicates a failure
+    pub fn err(&self) -> Option<Error> {
+        unsafe {
+            if (*self.ptr).err.is_null() {
+                None
+            } else {
+                Some(Error::from_raw((*self.ptr).err).unwrap_err())
+            }
+        }
+    }
+
+    /// Get the content state
+    pub fn content_state(&self) -> u32 {
+        unsafe { (*self.ptr).content_state }
+    }
+
+    /// Get the property state
+    pub fn prop_state(&self) -> u32 {
+        unsafe { (*self.ptr).prop_state }
+    }
+
+    /// Get the lock state
+    pub fn lock_state(&self) -> u32 {
+        unsafe { (*self.ptr).lock_state }
+    }
+
+    /// Get the revision
+    pub fn revision(&self) -> Option<crate::Revnum> {
+        unsafe { crate::Revnum::from_raw((*self.ptr).revision) }
+    }
+
+    /// Get the changelist name
+    pub fn changelist_name(&self) -> Option<&str> {
+        unsafe {
+            if (*self.ptr).changelist_name.is_null() {
+                None
+            } else {
+                Some(
+                    std::ffi::CStr::from_ptr((*self.ptr).changelist_name)
+                        .to_str()
+                        .unwrap(),
+                )
+            }
+        }
+    }
+
+    /// Get the URL
+    pub fn url(&self) -> Option<&str> {
+        unsafe {
+            if (*self.ptr).url.is_null() {
+                None
+            } else {
+                Some(std::ffi::CStr::from_ptr((*self.ptr).url).to_str().unwrap())
+            }
+        }
+    }
+
+    /// Get the path prefix
+    pub fn path_prefix(&self) -> Option<&str> {
+        unsafe {
+            if (*self.ptr).path_prefix.is_null() {
+                None
+            } else {
+                Some(
+                    std::ffi::CStr::from_ptr((*self.ptr).path_prefix)
+                        .to_str()
+                        .unwrap(),
+                )
+            }
+        }
+    }
+
+    /// Get the property name
+    pub fn prop_name(&self) -> Option<&str> {
+        unsafe {
+            if (*self.ptr).prop_name.is_null() {
+                None
+            } else {
+                Some(
+                    std::ffi::CStr::from_ptr((*self.ptr).prop_name)
+                        .to_str()
+                        .unwrap(),
+                )
+            }
+        }
+    }
+
+    /// Get the old revision (for updates)
+    pub fn old_revision(&self) -> Option<crate::Revnum> {
+        unsafe { crate::Revnum::from_raw((*self.ptr).old_revision) }
+    }
+
+    /// Get the hunk original start line (for patch operations)
+    pub fn hunk_original_start(&self) -> u64 {
+        unsafe { (*self.ptr).hunk_original_start as u64 }
+    }
+
+    /// Get the hunk original length (for patch operations)
+    pub fn hunk_original_length(&self) -> u64 {
+        unsafe { (*self.ptr).hunk_original_length as u64 }
+    }
+
+    /// Get the hunk modified start line (for patch operations)
+    pub fn hunk_modified_start(&self) -> u64 {
+        unsafe { (*self.ptr).hunk_modified_start as u64 }
+    }
+
+    /// Get the hunk modified length (for patch operations)
+    pub fn hunk_modified_length(&self) -> u64 {
+        unsafe { (*self.ptr).hunk_modified_length as u64 }
+    }
+
+    /// Get the line at which a hunk was matched (for patch operations)
+    pub fn hunk_matched_line(&self) -> u64 {
+        unsafe { (*self.ptr).hunk_matched_line as u64 }
+    }
+
+    /// Get the fuzz factor the hunk was applied with (for patch operations)
+    pub fn hunk_fuzz(&self) -> u64 {
+        unsafe { (*self.ptr).hunk_fuzz as u64 }
     }
 }
 
@@ -2850,6 +3121,68 @@ mod tests {
         let props = wc_ctx.prop_list(&file_path).unwrap();
         assert!(props.contains_key("test:property"));
         assert_eq!(props.get("test:property").unwrap(), b"test value");
+    }
+
+    #[test]
+    fn test_get_prop_diffs() {
+        use tempfile::TempDir;
+
+        // Create a repository and working copy
+        let temp_dir = TempDir::new().unwrap();
+        let repos_path = temp_dir.path().join("repos");
+        let wc_path = temp_dir.path().join("wc");
+
+        // Create a repository
+        let _repos = crate::repos::Repos::create(&repos_path).unwrap();
+
+        // Create a working copy
+        let url_str = format!("file://{}", repos_path.display());
+        let url = crate::uri::Uri::new(&url_str).unwrap();
+        let mut client_ctx = crate::client::Context::new().unwrap();
+        client_ctx
+            .checkout(
+                url,
+                &wc_path,
+                &crate::client::CheckoutOptions {
+                    peg_revision: crate::Revision::Head,
+                    revision: crate::Revision::Head,
+                    depth: crate::Depth::Infinity,
+                    ignore_externals: false,
+                    allow_unver_obstructions: false,
+                },
+            )
+            .unwrap();
+
+        // Create and add a file
+        let file_path = wc_path.join("test.txt");
+        std::fs::write(&file_path, "test content").unwrap();
+        client_ctx
+            .add(&file_path, &crate::client::AddOptions::new())
+            .unwrap();
+
+        // Set a property without committing
+        client_ctx
+            .propset(
+                "test:prop1",
+                Some(b"value1"),
+                file_path.to_str().unwrap(),
+                &crate::client::PropSetOptions::default(),
+            )
+            .unwrap();
+
+        // Test get_prop_diffs - should show the new property as a change
+        let mut wc_ctx = Context::new().unwrap();
+        let (changes, original) = wc_ctx.get_prop_diffs(&file_path).unwrap();
+
+        // Should have 1 property change
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].name, "test:prop1");
+        assert_eq!(changes[0].value, Some(b"value1".to_vec()));
+
+        // Original props should not contain our property (it's only in working copy)
+        if let Some(orig) = original {
+            assert!(!orig.contains_key("test:prop1"));
+        }
     }
 
     #[test]
