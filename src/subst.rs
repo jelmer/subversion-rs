@@ -88,13 +88,11 @@ pub fn translation_required(
     force_eol_check: bool,
 ) -> bool {
     with_tmp_pool(|pool| {
-        let eol_ptr = match eol {
-            Some(s) => {
-                let cstr = std::ffi::CString::new(s).unwrap();
-                cstr.as_ptr()
-            }
-            None => std::ptr::null(),
-        };
+        let eol_cstr = eol.map(|s| std::ffi::CString::new(s).unwrap());
+        let eol_ptr = eol_cstr
+            .as_ref()
+            .map(|c| c.as_ptr())
+            .unwrap_or(std::ptr::null());
 
         let keywords_hash = match keywords {
             Some(kw) => {
@@ -111,7 +109,10 @@ pub fn translation_required(
                 let mut hash = apr::hash::Hash::new(pool);
                 for ((k, _), (_, v_cstr)) in kw.iter().zip(c_strings.iter()) {
                     unsafe {
-                        hash.insert(k.as_bytes(), v_cstr.as_ptr() as *mut std::ffi::c_void);
+                        // Create svn_string_t for the value (SVN expects svn_string_t*, not const char*)
+                        let svn_str =
+                            subversion_sys::svn_string_create(v_cstr.as_ptr(), pool.as_mut_ptr());
+                        hash.insert(k.as_bytes(), svn_str as *mut std::ffi::c_void);
                     }
                 }
                 unsafe { hash.as_mut_ptr() }
@@ -417,7 +418,10 @@ pub fn translate_stream(
                 let mut hash = apr::hash::Hash::new(pool);
                 for ((k, _), (_, v_cstr)) in kw.iter().zip(c_strings.iter()) {
                     unsafe {
-                        hash.insert(k.as_bytes(), v_cstr.as_ptr() as *mut std::ffi::c_void);
+                        // Create svn_string_t for the value (SVN expects svn_string_t*, not const char*)
+                        let svn_str =
+                            subversion_sys::svn_string_create(v_cstr.as_ptr(), pool.as_mut_ptr());
+                        hash.insert(k.as_bytes(), svn_str as *mut std::ffi::c_void);
                     }
                 }
                 unsafe { hash.as_mut_ptr() }
@@ -548,5 +552,140 @@ mod tests {
 
         // Both empty
         assert!(!keywords_differ(None, None, false).unwrap());
+    }
+
+    #[test]
+    fn test_eol_style_conversions() {
+        // Test From<svn_subst_eol_style_t> for EolStyle
+        let unknown: EolStyle =
+            subversion_sys::svn_subst_eol_style_svn_subst_eol_style_unknown.into();
+        assert_eq!(unknown, EolStyle::Unknown);
+
+        let none: EolStyle = subversion_sys::svn_subst_eol_style_svn_subst_eol_style_none.into();
+        assert_eq!(none, EolStyle::None);
+
+        let native: EolStyle =
+            subversion_sys::svn_subst_eol_style_svn_subst_eol_style_native.into();
+        assert_eq!(native, EolStyle::Native);
+
+        let fixed: EolStyle = subversion_sys::svn_subst_eol_style_svn_subst_eol_style_fixed.into();
+        assert_eq!(fixed, EolStyle::Fixed);
+
+        // Test From<EolStyle> for svn_subst_eol_style_t
+        let unknown_raw: subversion_sys::svn_subst_eol_style_t = EolStyle::Unknown.into();
+        assert_eq!(
+            unknown_raw,
+            subversion_sys::svn_subst_eol_style_svn_subst_eol_style_unknown
+        );
+
+        let none_raw: subversion_sys::svn_subst_eol_style_t = EolStyle::None.into();
+        assert_eq!(
+            none_raw,
+            subversion_sys::svn_subst_eol_style_svn_subst_eol_style_none
+        );
+
+        let native_raw: subversion_sys::svn_subst_eol_style_t = EolStyle::Native.into();
+        assert_eq!(
+            native_raw,
+            subversion_sys::svn_subst_eol_style_svn_subst_eol_style_native
+        );
+
+        let fixed_raw: subversion_sys::svn_subst_eol_style_t = EolStyle::Fixed.into();
+        assert_eq!(
+            fixed_raw,
+            subversion_sys::svn_subst_eol_style_svn_subst_eol_style_fixed
+        );
+    }
+
+    #[test]
+    fn test_build_keywords_with_nulls() {
+        // Test with all None values
+        let keywords = build_keywords("Id", None, None, None, None, None).unwrap();
+        assert!(keywords.contains_key("Id"));
+
+        // Test with some None values
+        let keywords = build_keywords("Rev", Some("100"), None, None, None, None).unwrap();
+        assert!(keywords.contains_key("Rev"));
+    }
+
+    #[test]
+    fn test_stream_translated() {
+        // Create a simple memory stream with test content
+        let content = b"Test content with $Id$ keyword\n";
+        let source = crate::io::Stream::from(&content[..]);
+
+        // Test basic stream translation without keywords
+        let result = stream_translated(source, Some("\n"), false, None, true);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_stream_translated_with_keywords() {
+        let content = b"Test content with $Id$ keyword\n";
+        let source = crate::io::Stream::from(&content[..]);
+
+        let mut keywords = HashMap::new();
+        keywords.insert("Id".to_string(), "test-id".to_string());
+
+        let result = stream_translated(source, Some("\n"), false, Some(&keywords), true);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_stream_translated_to_normal_form() {
+        let content = b"Test content\r\n";
+        let source = crate::io::Stream::from(&content[..]);
+
+        let result =
+            stream_translated_to_normal_form(source, EolStyle::Native, Some("\n"), false, None);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_stream_translated_to_normal_form_with_keywords() {
+        let content = b"Test $Rev$ content\n";
+        let source = crate::io::Stream::from(&content[..]);
+
+        let mut keywords = HashMap::new();
+        keywords.insert("Rev".to_string(), "123".to_string());
+
+        let result = stream_translated_to_normal_form(
+            source,
+            EolStyle::Fixed,
+            Some("\n"),
+            false,
+            Some(&keywords),
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_translate_stream() {
+        let content = b"Test content\n";
+        let mut source = crate::io::Stream::from(&content[..]);
+        let mut dest = crate::io::Stream::empty();
+
+        let result = translate_stream(&mut source, &mut dest, Some("\n"), false, None, false);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_translate_stream_with_keywords() {
+        let content = b"Test $Id$ content\n";
+        let mut source = crate::io::Stream::from(&content[..]);
+        let mut dest = crate::io::Stream::empty();
+
+        let mut keywords = HashMap::new();
+        keywords.insert("Id".to_string(), "test-id".to_string());
+
+        let result = translate_stream(
+            &mut source,
+            &mut dest,
+            Some("\n"),
+            false,
+            Some(&keywords),
+            true,
+        );
+        assert!(result.is_ok());
     }
 }
