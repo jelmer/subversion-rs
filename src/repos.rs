@@ -957,6 +957,7 @@ impl Repos {
         include_revprops: bool,
         include_changes: bool,
         notify_func: Option<&dyn Fn(&Notify)>,
+        mut filter_func: Option<&mut dyn FnMut(&crate::fs::Root, &str) -> Result<bool, Error>>,
         cancel_func: Option<&dyn Fn() -> Result<(), Error>>,
     ) -> Result<(), Error> {
         let pool = apr::Pool::new();
@@ -965,6 +966,10 @@ impl Repos {
                 let boxed: Box<dyn FnMut(&Notify)> = Box::new(move |n| notify_func(n));
                 Box::into_raw(Box::new(boxed)) as *mut std::ffi::c_void
             })
+            .unwrap_or(std::ptr::null_mut());
+        let filter_baton = filter_func
+            .as_mut()
+            .map(|f| Box::into_raw(Box::new(f)) as *mut std::ffi::c_void)
             .unwrap_or(std::ptr::null_mut());
         let cancel_baton = cancel_func
             .map(|cancel_func| {
@@ -989,8 +994,12 @@ impl Repos {
                     None
                 },
                 notify_baton,
-                None,                 // filter_func - not commonly used
-                std::ptr::null_mut(), // filter_baton
+                if filter_func.is_some() {
+                    Some(wrap_filter_func)
+                } else {
+                    None
+                },
+                filter_baton,
                 if cancel_func.is_some() {
                     Some(crate::wrap_cancel_func)
                 } else {
@@ -1004,6 +1013,13 @@ impl Repos {
         // Free callback batons
         if !notify_baton.is_null() {
             unsafe { drop(Box::from_raw(notify_baton as *mut Box<dyn Fn(&Notify)>)) };
+        }
+        if !filter_baton.is_null() {
+            unsafe {
+                drop(Box::from_raw(
+                    filter_baton as *mut &mut dyn FnMut(&crate::fs::Root, &str) -> Result<bool, Error>,
+                ));
+            }
         }
         if !cancel_baton.is_null() {
             unsafe {
@@ -1363,6 +1379,47 @@ impl<'a> Notify<'a> {
     }
 }
 
+/// Wrapper for dump filter callbacks
+extern "C" fn wrap_filter_func(
+    include: *mut i32,
+    root: *mut subversion_sys::svn_fs_root_t,
+    path: *const i8,
+    baton: *mut std::ffi::c_void,
+    pool: *mut apr_sys::apr_pool_t,
+) -> *mut subversion_sys::svn_error_t {
+    if baton.is_null() || include.is_null() || root.is_null() {
+        return std::ptr::null_mut();
+    }
+
+    let callback = unsafe {
+        &mut *(baton as *mut Box<dyn FnMut(&crate::fs::Root, &str) -> Result<bool, Error>>)
+    };
+
+    let path_str = if path.is_null() {
+        ""
+    } else {
+        unsafe {
+            std::ffi::CStr::from_ptr(path)
+                .to_str()
+                .unwrap_or("")
+        }
+    };
+
+    let fs_root = unsafe {
+        crate::fs::Root::from_raw(root, apr::PoolHandle::from_borrowed_raw(pool))
+    };
+
+    match callback(&fs_root, path_str) {
+        Ok(should_include) => {
+            unsafe {
+                *include = if should_include { 1 } else { 0 };
+            }
+            std::ptr::null_mut()
+        }
+        Err(mut e) => unsafe { e.detach() },
+    }
+}
+
 extern "C" fn wrap_notify_func(
     baton: *mut std::ffi::c_void,
     notify: *const subversion_sys::svn_repos_notify_t,
@@ -1566,6 +1623,7 @@ mod tests {
             true,                   // include_revprops
             true,                   // include_changes
             None,                   // notify_func
+            None,                   // filter_func
             None,                   // cancel_func
         );
 
@@ -1598,6 +1656,7 @@ mod tests {
             true,  // include_revprops
             true,  // include_changes
             None,  // notify_func
+            None,  // filter_func
             None,  // cancel_func
         );
 
