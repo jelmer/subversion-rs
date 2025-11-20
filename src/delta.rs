@@ -1,3 +1,47 @@
+//! Editor interface for efficient tree transformations.
+//!
+//! This module provides the [`Editor`](crate::delta::Editor) trait and related types for describing changes to
+//! directory trees using Subversion's delta editor interface. This is the core mechanism
+//! for transmitting changes between client and server.
+//!
+//! # Overview
+//!
+//! The delta/editor interface is Subversion's way of describing tree changes efficiently.
+//! Instead of transmitting entire trees, operations send a series of editor calls that
+//! describe what changed. This is used for updates, commits, diffs, and merges.
+//!
+//! ## Key Concepts
+//!
+//! - **[`Editor`](crate::delta::Editor)**: Main trait for receiving tree change events
+//! - **[`DirectoryEditor`](crate::delta::DirectoryEditor)**: Trait for handling directory-level changes
+//! - **[`FileEditor`](crate::delta::FileEditor)**: Trait for handling file-level changes
+//! - **Text deltas**: Efficient binary diffs for file contents
+//! - **Property deltas**: Changes to versioned properties
+//!
+//! # Example
+//!
+//! ```no_run
+//! use subversion::delta::Editor;
+//!
+//! struct MyEditor;
+//!
+//! impl Editor for MyEditor {
+//!     type Dir = ();
+//!     type File = ();
+//!
+//!     fn open_root(&mut self, base_revision: i64) -> Result<Self::Dir, subversion::Error> {
+//!         println!("Opening root at revision {}", base_revision);
+//!         Ok(())
+//!     }
+//!
+//!     // Implement other required methods...
+//! #   fn set_target_revision(&mut self, target_revision: i64) -> Result<(), subversion::Error> { Ok(()) }
+//! #   fn close_directory(&mut self, _dir: Self::Dir) -> Result<(), subversion::Error> { Ok(()) }
+//! #   fn close_edit(&mut self) -> Result<(), subversion::Error> { Ok(()) }
+//! #   fn abort_edit(&mut self) -> Result<(), subversion::Error> { Ok(()) }
+//! }
+//! ```
+
 use crate::Revnum;
 use apr::pool::Pool;
 use std::marker::PhantomData;

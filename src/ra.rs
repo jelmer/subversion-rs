@@ -1,3 +1,33 @@
+//! Repository Access (RA) layer for network operations.
+//!
+//! This module provides the [`Session`](crate::ra::Session) type for accessing Subversion repositories over
+//! various network protocols (http, https, svn, svn+ssh, file).
+//!
+//! # Overview
+//!
+//! The RA layer is the network abstraction in Subversion. It handles communication with
+//! remote repositories and provides operations for fetching repository data, querying
+//! metadata, and retrieving history.
+//!
+//! ## Key Operations
+//!
+//! - **Repository querying**: Get latest revision, check paths, read directories
+//! - **History access**: Retrieve log entries and file contents at specific revisions
+//! - **Property access**: Get revision properties and file properties
+//! - **Location tracking**: Find where paths existed across revisions
+//! - **Lock management**: Query and manipulate repository locks
+//! - **Mergeinfo**: Query merge tracking information
+//!
+//! # Example
+//!
+//! ```no_run
+//! use subversion::ra::Session;
+//!
+//! let mut session = Session::open("https://svn.example.com/repo").unwrap();
+//! let latest = session.get_latest_revnum().unwrap();
+//! println!("Latest revision: {}", latest);
+//! ```
+
 use crate::delta::Editor;
 use crate::{svn_result, with_tmp_pool, Depth, Error, Revnum};
 use apr::pool::Pool;

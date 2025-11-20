@@ -1,3 +1,36 @@
+//! Working copy management and status operations.
+//!
+//! This module provides low-level access to Subversion working copies through the [`Context`](crate::wc::Context) type.
+//! It handles working copy metadata, status tracking, and local modifications.
+//!
+//! # Overview
+//!
+//! The working copy (WC) layer manages the `.svn` administrative directory and tracks the state
+//! of files in a working copy. Most users should use the [`client`](crate::client) module instead,
+//! which provides higher-level operations. This module is useful for tools that need direct
+//! access to working copy internals.
+//!
+//! ## Key Operations
+//!
+//! - **Status tracking**: Walk working copy and report file status
+//! - **Property management**: Get, set, and list versioned properties
+//! - **Conflict resolution**: Handle and resolve merge conflicts
+//! - **Working copy maintenance**: Revert changes, cleanup locks
+//! - **Notification**: Receive callbacks about working copy operations
+//!
+//! # Example
+//!
+//! ```no_run
+//! use subversion::wc::Context;
+//!
+//! let ctx = Context::new().unwrap();
+//!
+//! // Check if a path is a working copy root
+//! if ctx.is_wc_root("/path/to/wc").unwrap() {
+//!     println!("This is a working copy root");
+//! }
+//! ```
+
 use crate::{svn_result, with_tmp_pool, Error};
 use std::marker::PhantomData;
 use subversion_sys::{svn_wc_context_t, svn_wc_version};

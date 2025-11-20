@@ -3,22 +3,53 @@
 //! This crate provides idiomatic Rust bindings for the Subversion C libraries,
 //! enabling Rust applications to interact with Subversion repositories and working copies.
 //!
+//! # Overview
+//!
+//! The `subversion` crate offers comprehensive access to Subversion's functionality through
+//! several modules, each corresponding to a major component of the Subversion API:
+//!
+//! - **`client`** - High-level client operations (checkout, commit, update, diff, merge, etc.)
+//! - **`wc`** - Working copy management and status operations
+//! - **`ra`** - Repository access layer for network operations
+//! - **`repos`** - Repository administration (create, load, dump, verify)
+//! - **`fs`** - Filesystem layer for direct repository access
+//! - **`delta`** - Editor interface for efficient tree transformations
+//!
 //! # Features
 //!
-//! - `client` - Client operations (checkout, commit, update, etc.)
-//! - `ra` - Repository access layer
-//! - `wc` - Working copy management
-//! - `delta` - Delta operations for efficient data transfer
-//! - `repos` - Repository administration
+//! Enable specific functionality via Cargo features:
 //!
-//! # Example
+//! - `client` - Client operations
+//! - `wc` - Working copy management
+//! - `ra` - Repository access layer
+//! - `delta` - Delta/editor operations
+//! - `repos` - Repository administration
+//! - `url` - URL parsing utilities
+//!
+//! Default features: `["ra", "wc", "client", "delta", "repos"]`
+//!
+//! # Error Handling
+//!
+//! All operations return a [`Result<T, Error>`](Error) where [`Error`] wraps Subversion's
+//! error chain. Errors can be inspected for detailed information:
 //!
 //! ```no_run
 //! use subversion::client::Context;
 //!
 //! let mut ctx = Context::new().unwrap();
-//! // Use the context for Subversion operations
+//! match ctx.checkout("https://svn.example.com/repo", "/tmp/wc", None, true) {
+//!     Ok(_) => println!("Checkout succeeded"),
+//!     Err(e) => {
+//!         eprintln!("Error: {}", e.full_message());
+//!         eprintln!("At: {:?}", e.location());
+//!     }
+//! }
 //! ```
+//!
+//! # Thread Safety
+//!
+//! The Subversion libraries are not thread-safe. Each thread should have its own
+//! [`client::Context`] or other Subversion objects.
 
 #![deny(missing_docs)]
 
@@ -1733,7 +1764,7 @@ mod svn_string_helpers {
         }
     }
 
-    /// Get the data from an svn_string_t as a Vec<u8>
+    /// Get the data from an svn_string_t as a `Vec<u8>`
     pub fn to_vec(s: &svn_string_t) -> Vec<u8> {
         as_bytes(s).to_vec()
     }

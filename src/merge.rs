@@ -288,7 +288,7 @@ impl<'a> MergeinfoHash<'a> {
         }
     }
 
-    /// Convert the mergeinfo to a HashMap<String, Vec<RevisionRange>>
+    /// Convert the mergeinfo to a `HashMap<String, Vec<RevisionRange>>`
     pub fn to_hashmap(&self) -> std::collections::HashMap<String, Vec<crate::RevisionRange>> {
         self.inner
             .iter()

@@ -1,3 +1,38 @@
+//! Repository administration and server-side operations.
+//!
+//! This module provides the [`Repos`](crate::repos::Repos) type for creating, managing, and administering
+//! Subversion repositories. It includes operations for repository creation, loading/dumping,
+//! verification, and authorization checking.
+//!
+//! # Overview
+//!
+//! The repos layer provides server-side repository operations and administration functions.
+//! This is distinct from the [`client`](crate::client) module which provides client-side
+//! operations, and the [`fs`](crate::fs) module which provides low-level filesystem access.
+//!
+//! ## Key Operations
+//!
+//! - **Repository lifecycle**: Create, open, and recover repositories
+//! - **Backup and restore**: Dump and load repository contents
+//! - **Verification**: Check repository integrity
+//! - **Authorization**: Path-based access control with authz
+//! - **Lock management**: Repository-level lock operations
+//! - **Hooks**: Execute repository hooks
+//!
+//! # Example
+//!
+//! ```no_run
+//! use subversion::repos::Repos;
+//!
+//! // Create a new repository
+//! let repo = Repos::create("/path/to/repo").unwrap();
+//!
+//! // Access the filesystem
+//! let fs = repo.fs().unwrap();
+//! let youngest = fs.youngest_rev().unwrap();
+//! println!("Repository is at revision {}", youngest);
+//! ```
+
 use crate::{svn_result, with_tmp_pool, Error, Revnum};
 use std::ffi::CString;
 use std::marker::PhantomData;

@@ -1,3 +1,46 @@
+//! High-level Subversion client operations.
+//!
+//! This module provides the [`Context`](crate::client::Context) type and related functionality for performing
+//! Subversion client operations such as checkout, update, commit, diff, merge, and more.
+//!
+//! # Overview
+//!
+//! The client module is the primary interface for applications that need to interact with
+//! Subversion repositories as a client. It provides high-level operations that handle
+//! authentication, conflict resolution, and other complex workflows automatically.
+//!
+//! ## Core Operations
+//!
+//! - **Repository operations**: checkout, update, switch, relocate
+//! - **Working copy modifications**: add, delete, copy, move, mkdir
+//! - **Committing changes**: commit with callbacks and revision properties
+//! - **Querying**: status, log, info, list, cat
+//! - **Comparison**: diff (between revisions, URLs, or working copy)
+//! - **Merging**: merge with conflict detection and resolution
+//! - **Properties**: get, set, list both versioned and revision properties
+//! - **Maintenance**: cleanup, vacuum, upgrade
+//!
+//! # Example
+//!
+//! ```no_run
+//! use subversion::client::Context;
+//!
+//! let mut ctx = Context::new().unwrap();
+//!
+//! // Checkout a repository
+//! ctx.checkout(
+//!     "https://svn.example.com/repo/trunk",
+//!     "/path/to/working/copy",
+//!     None, // HEAD revision
+//!     true, // recursive
+//! ).unwrap();
+//!
+//! // Get status of working copy
+//! ctx.status("/path/to/working/copy", None, true, false, false, false, false, false, |status| {
+//!     println!("{}: {:?}", status.path().display(), status.node_status());
+//! }).unwrap();
+//! ```
+
 use crate::dirent::AsCanonicalDirent;
 use crate::io::Dirent;
 use crate::uri::AsCanonicalUri;

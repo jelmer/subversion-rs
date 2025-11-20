@@ -1,3 +1,38 @@
+//! Filesystem layer for direct repository access.
+//!
+//! This module provides low-level access to Subversion's versioned filesystem through
+//! the [`Fs`](crate::fs::Fs) type. It allows direct manipulation of repository data without going
+//! through the client or RA layers.
+//!
+//! # Overview
+//!
+//! The filesystem (FS) layer is the storage backend for Subversion repositories. It provides
+//! transactional access to repository data, revision management, and direct file/directory
+//! operations. This is useful for server implementations and administrative tools.
+//!
+//! ## Key Operations
+//!
+//! - **Revision access**: Read and query any revision in the repository
+//! - **Transactions**: Create and commit atomic changes
+//! - **Path operations**: Read directories, file contents, and properties
+//! - **Lock management**: Create, query, and remove locks
+//! - **History**: Track node history and changes across revisions
+//! - **Maintenance**: Pack, verify, and optimize repository storage
+//!
+//! # Example
+//!
+//! ```no_run
+//! use subversion::fs::Fs;
+//! use subversion::Revnum;
+//!
+//! let fs = Fs::open("/path/to/repo/db").unwrap();
+//! let youngest = fs.youngest_rev().unwrap();
+//!
+//! // Access a specific revision
+//! let root = fs.revision_root(Revnum(youngest.0)).unwrap();
+//! let file_content = root.file_contents("/path/to/file").unwrap();
+//! ```
+
 use crate::{svn_result, with_tmp_pool, Error, Revnum};
 use std::ffi::{CStr, CString};
 

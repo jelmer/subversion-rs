@@ -50,7 +50,7 @@ impl<'pool> BStr<'pool> {
         unsafe { std::slice::from_raw_parts(ptr as *const u8, len) }
     }
 
-    /// Convert to owned Vec<u8>
+    /// Convert to owned `Vec<u8>`
     pub fn to_bytes(&self) -> Vec<u8> {
         self.as_bytes().to_vec()
     }

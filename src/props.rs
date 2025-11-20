@@ -96,7 +96,7 @@ impl<'a> PropHash<'a> {
         }
     }
 
-    /// Convert the properties to a HashMap<String, Vec<u8>>
+    /// Convert the properties to a `HashMap<String, Vec<u8>>`
     ///
     /// This is the most common conversion pattern in the codebase.
     pub fn to_hashmap(&self) -> std::collections::HashMap<String, Vec<u8>> {
