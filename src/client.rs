@@ -6373,6 +6373,11 @@ impl Status {
         }
     }
 
+    /// Returns the out-of-date changed date.
+    pub fn ood_changed_date(&self) -> apr::time::Time {
+        unsafe { apr::time::Time::from((*self.0).ood_changed_date) }
+    }
+
     /// Returns the absolute path the item was moved from.
     pub fn moved_from_abspath(&self) -> Option<&str> {
         unsafe {
