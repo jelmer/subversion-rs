@@ -1308,9 +1308,13 @@ extern "C" fn wrap_freeze_func(
 }
 
 /// Freezes a repository to allow safe backup or administrative operations.
+///
+/// This function takes an exclusive lock on each of the repositories in `paths`
+/// to prevent commits, and then while holding all locks invokes `freeze_func`.
+/// The callback is invoked once while all repositories are locked, not once per repository.
 pub fn freeze(
     paths: &[&str],
-    freeze_func: Option<&impl Fn(&str) -> Result<(), Error>>,
+    freeze_func: Option<&impl Fn() -> Result<(), Error>>,
 ) -> Result<(), Error> {
     let paths = paths
         .iter()
@@ -1332,7 +1336,7 @@ pub fn freeze(
             freeze_func
                 .map(|freeze_func| {
                     let boxed: Box<dyn Fn() -> Result<(), Error>> =
-                        Box::new(move || freeze_func(""));
+                        Box::new(move || freeze_func());
                     Box::into_raw(Box::new(boxed)) as *mut std::ffi::c_void
                 })
                 .unwrap_or(std::ptr::null_mut()),
