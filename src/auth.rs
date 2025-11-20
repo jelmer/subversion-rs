@@ -1079,9 +1079,11 @@ pub fn get_username_prompt_provider(
         let realm = unsafe { std::ffi::CStr::from_ptr(realmstring).to_str().unwrap() };
         f(realm, may_save != 0)
             .map(|username| {
-                let username = std::ffi::CString::new(username).unwrap();
+                let username_cstr = std::ffi::CString::new(username).unwrap();
+                // Copy string into APR pool so it lives as long as the credentials
+                let username_ptr = unsafe { apr_sys::apr_pstrdup(_pool, username_cstr.as_ptr()) };
                 let creds = subversion_sys::svn_auth_cred_username_t {
-                    username: username.as_ptr(),
+                    username: username_ptr,
                     may_save,
                 };
                 unsafe { *credentials = Box::into_raw(Box::new(creds)) };

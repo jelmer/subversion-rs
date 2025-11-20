@@ -554,41 +554,54 @@ impl<'a> Session<'a> {
         lock_tokens: HashMap<String, String>,
         keep_locks: bool,
     ) -> Result<Box<dyn Editor + Send>, Error> {
-        let pool = Pool::new();
+        // Create the result pool first - this will live as long as the editor
+        let result_pool = Pool::new();
         let commit_callback = Box::into_raw(Box::new(commit_callback));
         let mut editor = std::ptr::null();
         let mut edit_baton = std::ptr::null_mut();
-        // Create svn_string_t values that will live as long as pool
-        let svn_strings: Vec<_> = revprop_table
+        // Create svn_string_t values and copy keys into result_pool so they live as long as the editor
+        let svn_strings_and_keys: Vec<_> = revprop_table
             .iter()
             .map(|(k, v)| {
+                let key_cstr = std::ffi::CString::new(k.as_str()).unwrap();
+                // Copy key into result_pool so it lives as long as the editor
+                let key_in_pool = unsafe { apr_sys::apr_pstrdup(result_pool.as_mut_ptr(), key_cstr.as_ptr()) };
+                let key_slice = unsafe { std::ffi::CStr::from_ptr(key_in_pool).to_bytes() };
                 (
-                    k.as_str(),
-                    crate::string::BStr::from_bytes(v.as_slice(), &pool),
+                    key_slice,
+                    crate::string::BStr::from_bytes(v.as_slice(), &result_pool),
                 )
             })
             .collect();
 
-        let mut hash_revprop_table = apr::hash::Hash::new(&pool);
-        for (k, v) in svn_strings.iter() {
+        let mut hash_revprop_table = apr::hash::Hash::new(&result_pool);
+        for (key_slice, v) in svn_strings_and_keys.iter() {
             unsafe {
-                hash_revprop_table.insert(k.as_bytes(), v.as_ptr() as *mut std::ffi::c_void);
+                hash_revprop_table.insert(key_slice, v.as_ptr() as *mut std::ffi::c_void);
             }
         }
 
-        // Create C strings that will live as long as pool
+        // Create C strings for values and copy keys into result_pool
         let c_strings: Vec<_> = lock_tokens
             .iter()
-            .map(|(k, v)| (k.as_str(), std::ffi::CString::new(v.as_str()).unwrap()))
+            .map(|(k, v)| {
+                let key_cstr = std::ffi::CString::new(k.as_str()).unwrap();
+                let value_cstr = std::ffi::CString::new(v.as_str()).unwrap();
+                // Copy key into result_pool so it lives as long as the editor
+                let key_in_pool = unsafe { apr_sys::apr_pstrdup(result_pool.as_mut_ptr(), key_cstr.as_ptr()) };
+                let key_slice = unsafe { std::ffi::CStr::from_ptr(key_in_pool).to_bytes() };
+                // Copy value into result_pool too
+                let value_in_pool = unsafe { apr_sys::apr_pstrdup(result_pool.as_mut_ptr(), value_cstr.as_ptr()) };
+                (key_slice, value_in_pool)
+            })
             .collect();
 
-        let mut hash_lock_tokens = apr::hash::Hash::new(&pool);
+        let mut hash_lock_tokens = apr::hash::Hash::new(&result_pool);
         for (k, v) in c_strings.iter() {
             unsafe {
-                hash_lock_tokens.insert(k.as_bytes(), v.as_ptr() as *mut std::ffi::c_void);
+                hash_lock_tokens.insert(k, *v as *mut std::ffi::c_void);
             }
         }
-        let result_pool = Pool::new();
         let err = unsafe {
             subversion_sys::svn_ra_get_commit_editor3(
                 self.ptr,
