@@ -565,6 +565,66 @@ impl<'pool> Fs<'pool> {
         svn_result(ret)
     }
 
+    /// Add a lock token to the filesystem's access context for a specific path
+    ///
+    /// This allows operations to access locked paths when the corresponding lock token is provided.
+    /// The filesystem must have an access context set via `set_access()` before calling this method.
+    ///
+    /// # Arguments
+    /// * `path` - The repository path associated with the lock token
+    /// * `token` - The lock token to add
+    pub fn access_add_lock_token(&mut self, path: &str, token: &str) -> Result<(), Error> {
+        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let token_cstr = std::ffi::CString::new(token).unwrap();
+
+        // Get the current access context
+        let mut access_ctx: *mut subversion_sys::svn_fs_access_t = std::ptr::null_mut();
+        let ret = unsafe { subversion_sys::svn_fs_get_access(&mut access_ctx, self.fs_ptr) };
+        svn_result(ret)?;
+
+        if access_ctx.is_null() {
+            return Err(Error::new(
+                apr::Status::from(subversion_sys::svn_errno_t_SVN_ERR_FS_NO_USER as i32),
+                None,
+                "No access context set",
+            ));
+        }
+
+        let ret = unsafe {
+            subversion_sys::svn_fs_access_add_lock_token2(
+                access_ctx,
+                path_cstr.as_ptr(),
+                token_cstr.as_ptr(),
+            )
+        };
+
+        svn_result(ret)
+    }
+
+    /// Generate a unique lock token for this filesystem
+    ///
+    /// This can be used to create custom lock tokens before calling `lock()`.
+    /// Most users should just use the `lock()` method which generates tokens automatically.
+    pub fn generate_lock_token(&self) -> Result<String, Error> {
+        let pool = apr::Pool::new();
+        let mut token_ptr: *const std::os::raw::c_char = std::ptr::null();
+
+        let ret = unsafe {
+            subversion_sys::svn_fs_generate_lock_token(&mut token_ptr, self.fs_ptr, pool.as_mut_ptr())
+        };
+
+        svn_result(ret)?;
+
+        let token = unsafe {
+            std::ffi::CStr::from_ptr(token_ptr)
+                .to_str()
+                .unwrap()
+                .to_string()
+        };
+
+        Ok(token)
+    }
+
     /// Get locks under a path
     pub fn get_locks(
         &self,
@@ -3122,6 +3182,74 @@ mod tests {
         assert!(locks_files.is_ok());
         let locks_files = locks_files.unwrap();
         assert_eq!(locks_files.len(), 2, "Should find 2 locks with files depth");
+    }
+
+    #[test]
+    fn test_fs_generate_lock_token() {
+        let dir = tempdir().unwrap();
+        let fs_path = dir.path().join("test-fs");
+        let fs = Fs::create(&fs_path).unwrap();
+
+        // Generate a lock token
+        let token1 = fs.generate_lock_token();
+        assert!(token1.is_ok(), "Failed to generate lock token");
+        let token1 = token1.unwrap();
+        assert!(!token1.is_empty(), "Generated token should not be empty");
+
+        // Generate another token and verify it's different
+        let token2 = fs.generate_lock_token();
+        assert!(token2.is_ok());
+        let token2 = token2.unwrap();
+        assert_ne!(token1, token2, "Generated tokens should be unique");
+    }
+
+    #[test]
+    fn test_fs_access_add_lock_token() {
+        let dir = tempdir().unwrap();
+        let fs_path = dir.path().join("test-fs");
+        let mut fs = Fs::create(&fs_path).unwrap();
+
+        // Set up a file and lock it
+        fs.set_access("testuser").unwrap();
+        let mut txn = fs.begin_txn(crate::Revnum(0), 0).unwrap();
+        let mut root = txn.root().unwrap();
+        root.make_file("/locked.txt").unwrap();
+        let rev = txn.commit().unwrap();
+
+        // Lock the file
+        let lock = fs
+            .lock(
+                "/locked.txt",
+                None,
+                Some("Test lock"),
+                false,
+                None,
+                rev,
+                false,
+            )
+            .unwrap();
+
+        // Add the lock token to the access context
+        let result = fs.access_add_lock_token("/locked.txt", lock.token());
+        assert!(
+            result.is_ok(),
+            "Failed to add lock token: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn test_fs_access_add_lock_token_no_context() {
+        let dir = tempdir().unwrap();
+        let fs_path = dir.path().join("test-fs");
+        let mut fs = Fs::create(&fs_path).unwrap();
+
+        // Try to add lock token without setting access context first
+        let result = fs.access_add_lock_token("/some/path", "some-token");
+        assert!(
+            result.is_err(),
+            "Should fail when no access context is set"
+        );
     }
 
     #[test]
