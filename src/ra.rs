@@ -248,7 +248,7 @@ extern "C" fn wrap_lock_func(
     do_lock: i32,
     lock: *const subversion_sys::svn_lock_t,
     error: *mut subversion_sys::svn_error_t,
-    _pool: *mut apr_sys::apr_pool_t,
+    pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     let lock_baton = unsafe {
         // Unbox the reference like get_log does
@@ -257,15 +257,10 @@ extern "C" fn wrap_lock_func(
     };
     let path = unsafe { std::ffi::CStr::from_ptr(path) };
 
-    // Don't wrap the pool - it's owned by SVN and wrapping it causes infinite recursion
-    // let _pool = Pool::from_raw(pool);
-
     let error = Error::from_raw(error).err();
 
-    let lock = crate::Lock {
-        ptr: lock as *mut _,
-        _pool: std::marker::PhantomData,
-    };
+    let pool_handle = unsafe { apr::PoolHandle::from_borrowed_raw(pool) };
+    let lock = crate::Lock::from_raw(lock as *mut _, pool_handle);
 
     match lock_baton(path.to_str().unwrap(), do_lock != 0, &lock, error.as_ref()) {
         Ok(()) => std::ptr::null_mut(),
@@ -1411,22 +1406,28 @@ impl<'a> Session<'a> {
     }
 
     /// Gets lock information for a path.
+    ///
+    /// Returns `None` if the path is not locked.
+    /// The returned lock borrows from the session to ensure proper lifetime.
     pub fn get_lock(
-        &mut self,
+        &self,
         path: impl TryInto<RelPath, Error = Error>,
-    ) -> Result<crate::Lock<'_>, Error> {
+    ) -> Result<Option<crate::Lock<'_>>, Error> {
         let relpath = path.try_into()?;
         let path = std::ffi::CString::new(relpath.as_str()).unwrap();
         let mut lock = std::ptr::null_mut();
+        // Create a pool for the lock data
         let pool = Pool::new();
         let err = unsafe {
             subversion_sys::svn_ra_get_lock(self.ptr, &mut lock, path.as_ptr(), pool.as_mut_ptr())
         };
         Error::from_raw(err)?;
-        Ok(crate::Lock {
-            ptr: lock,
-            _pool: std::marker::PhantomData,
-        })
+        if lock.is_null() {
+            Ok(None)
+        } else {
+            let pool_handle = apr::PoolHandle::owned(pool);
+            Ok(Some(crate::Lock::from_raw(lock, pool_handle)))
+        }
     }
 
     /// Gets all locks under a path.
@@ -1449,17 +1450,22 @@ impl<'a> Session<'a> {
             )
         };
         Error::from_raw(err)?;
-        let _pool = std::rc::Rc::new(pool);
         let hash = unsafe { apr::hash::Hash::from_ptr(locks) };
         Ok(hash
             .iter()
             .map(|(k, v)| {
+                // Duplicate each lock into its own pool so it can be owned independently
+                let lock_pool = Pool::new();
+                let duplicated = unsafe {
+                    subversion_sys::svn_lock_dup(
+                        v as *const subversion_sys::svn_lock_t,
+                        lock_pool.as_mut_ptr(),
+                    )
+                };
+                let pool_handle = apr::PoolHandle::owned(lock_pool);
                 (
                     String::from_utf8_lossy(k).into_owned(),
-                    crate::Lock {
-                        ptr: v as *const subversion_sys::svn_lock_t,
-                        _pool: std::marker::PhantomData,
-                    },
+                    crate::Lock::from_raw(duplicated, pool_handle),
                 )
             })
             .collect())
@@ -2404,7 +2410,8 @@ mod tests {
             (*lock_raw).expiration_date = 0;
         }
 
-        let lock = Lock::from_raw(lock_raw);
+        let pool_handle = apr::PoolHandle::owned(pool);
+        let lock = Lock::from_raw(lock_raw, pool_handle);
         assert_eq!(lock.path(), "/test/path");
         assert_eq!(lock.token(), "lock-token");
         assert_eq!(lock.owner(), "test-owner");
@@ -2978,7 +2985,7 @@ mod tests {
         );
 
         // Test get_lock
-        let lock = session.get_lock("lockable.txt").unwrap();
+        let lock = session.get_lock("lockable.txt").unwrap().expect("Lock should exist");
         assert_eq!(lock.path(), "/lockable.txt"); // SVN returns absolute paths within repo
         assert!(!lock.token().is_empty());
 

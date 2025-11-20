@@ -93,12 +93,16 @@ extern "C" fn wrap_status_func(
     baton: *mut std::ffi::c_void,
     path: *const i8,
     status: *const subversion_sys::svn_client_status_t,
-    _pool: *mut apr_sys::apr_pool_t,
+    pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     unsafe {
         let callback = &mut *(baton as *mut &mut dyn FnMut(&str, &Status) -> Result<(), Error>);
         let path_str = std::ffi::CStr::from_ptr(path).to_str().unwrap();
-        let status_wrapper = Status(status);
+        let pool_handle = apr::PoolHandle::from_borrowed_raw(pool);
+        let status_wrapper = Status {
+            ptr: status,
+            _pool: pool_handle,
+        };
         let ret = callback(path_str, &status_wrapper);
         if let Err(mut err) = ret {
             err.as_mut_ptr()
@@ -4476,7 +4480,7 @@ impl Context {
                 _abs_path: *const i8,
                 _external_parent_url: *const i8,
                 _external_target: *const i8,
-                _scratch_pool: *mut apr_sys::apr_pool_t,
+                scratch_pool: *mut apr_sys::apr_pool_t,
             ) -> *mut subversion_sys::svn_error_t {
                 let list_func = unsafe {
                     &mut *(baton
@@ -4491,7 +4495,8 @@ impl Context {
                 let lock = if lock.is_null() {
                     None
                 } else {
-                    Some(crate::Lock::from_raw(lock as *mut _))
+                    let pool_handle = unsafe { apr::PoolHandle::from_borrowed_raw(scratch_pool) };
+                    Some(crate::Lock::from_raw(lock as *mut _, pool_handle))
                 };
 
                 match list_func(path_str, &dirent, lock.as_ref()) {
@@ -6218,18 +6223,21 @@ impl Context {
 }
 
 /// Status information for a working copy item.
-pub struct Status(pub(crate) *const subversion_sys::svn_client_status_t);
+pub struct Status {
+    ptr: *const subversion_sys::svn_client_status_t,
+    _pool: apr::PoolHandle<'static>,
+}
 
 impl Status {
     /// Returns the node kind (file, directory, etc.).
     pub fn kind(&self) -> crate::NodeKind {
-        unsafe { (*self.0).kind.into() }
+        unsafe { (*self.ptr).kind.into() }
     }
 
     /// Returns the local absolute path of the item.
     pub fn local_abspath(&self) -> &str {
         unsafe {
-            std::ffi::CStr::from_ptr((*self.0).local_abspath)
+            std::ffi::CStr::from_ptr((*self.ptr).local_abspath)
                 .to_str()
                 .unwrap()
         }
@@ -6237,48 +6245,48 @@ impl Status {
 
     /// Returns the file size.
     pub fn filesize(&self) -> i64 {
-        unsafe { (*self.0).filesize }
+        unsafe { (*self.ptr).filesize }
     }
 
     /// Returns whether the item is versioned.
     pub fn versioned(&self) -> bool {
-        unsafe { (*self.0).versioned != 0 }
+        unsafe { (*self.ptr).versioned != 0 }
     }
 
     /// Returns whether the item is conflicted.
     pub fn conflicted(&self) -> bool {
-        unsafe { (*self.0).conflicted != 0 }
+        unsafe { (*self.ptr).conflicted != 0 }
     }
 
     /// Returns the node status.
     pub fn node_status(&self) -> crate::StatusKind {
-        unsafe { (*self.0).node_status.into() }
+        unsafe { (*self.ptr).node_status.into() }
     }
 
     /// Returns the text status.
     pub fn text_status(&self) -> crate::StatusKind {
-        unsafe { (*self.0).text_status.into() }
+        unsafe { (*self.ptr).text_status.into() }
     }
 
     /// Returns the property status.
     pub fn prop_status(&self) -> crate::StatusKind {
-        unsafe { (*self.0).prop_status.into() }
+        unsafe { (*self.ptr).prop_status.into() }
     }
 
     /// Returns whether the working copy is locked.
     pub fn wc_is_locked(&self) -> bool {
-        unsafe { (*self.0).wc_is_locked != 0 }
+        unsafe { (*self.ptr).wc_is_locked != 0 }
     }
 
     /// Returns whether the item was copied.
     pub fn copied(&self) -> bool {
-        unsafe { (*self.0).copied != 0 }
+        unsafe { (*self.ptr).copied != 0 }
     }
 
     /// Returns the repository root URL.
     pub fn repos_root_url(&self) -> &str {
         unsafe {
-            std::ffi::CStr::from_ptr((*self.0).repos_root_url)
+            std::ffi::CStr::from_ptr((*self.ptr).repos_root_url)
                 .to_str()
                 .unwrap()
         }
@@ -6287,7 +6295,7 @@ impl Status {
     /// Returns the repository UUID.
     pub fn repos_uuid(&self) -> &str {
         unsafe {
-            std::ffi::CStr::from_ptr((*self.0).repos_uuid)
+            std::ffi::CStr::from_ptr((*self.ptr).repos_uuid)
                 .to_str()
                 .unwrap()
         }
@@ -6296,7 +6304,7 @@ impl Status {
     /// Returns the repository relative path.
     pub fn repos_relpath(&self) -> &str {
         unsafe {
-            std::ffi::CStr::from_ptr((*self.0).repos_relpath)
+            std::ffi::CStr::from_ptr((*self.ptr).repos_relpath)
                 .to_str()
                 .unwrap()
         }
@@ -6304,23 +6312,23 @@ impl Status {
 
     /// Returns the revision number.
     pub fn revision(&self) -> Revnum {
-        Revnum::from_raw(unsafe { (*self.0).revision }).unwrap()
+        Revnum::from_raw(unsafe { (*self.ptr).revision }).unwrap()
     }
 
     /// Returns the last changed revision.
     pub fn changed_rev(&self) -> Revnum {
-        Revnum::from_raw(unsafe { (*self.0).changed_rev }).unwrap()
+        Revnum::from_raw(unsafe { (*self.ptr).changed_rev }).unwrap()
     }
 
     /// Returns the last changed date.
     pub fn changed_date(&self) -> apr::time::Time {
-        unsafe { apr::time::Time::from((*self.0).changed_date) }
+        unsafe { apr::time::Time::from((*self.ptr).changed_date) }
     }
 
     /// Returns the last changed author.
     pub fn changed_author(&self) -> &str {
         unsafe {
-            std::ffi::CStr::from_ptr((*self.0).changed_author)
+            std::ffi::CStr::from_ptr((*self.ptr).changed_author)
                 .to_str()
                 .unwrap()
         }
@@ -6328,32 +6336,33 @@ impl Status {
 
     /// Returns whether the item is switched.
     pub fn switched(&self) -> bool {
-        unsafe { (*self.0).switched != 0 }
+        unsafe { (*self.ptr).switched != 0 }
     }
 
     /// Returns whether the item is a file external.
     pub fn file_external(&self) -> bool {
-        unsafe { (*self.0).file_external != 0 }
+        unsafe { (*self.ptr).file_external != 0 }
     }
 
     /// Returns the lock information if the item is locked.
     pub fn lock(&self) -> Option<crate::Lock<'_>> {
-        let lock_ptr = unsafe { (*self.0).lock };
+        let lock_ptr = unsafe { (*self.ptr).lock };
         if lock_ptr.is_null() {
             None
         } else {
-            Some(crate::Lock::from_raw(lock_ptr))
+            let pool_handle = unsafe { apr::PoolHandle::from_borrowed_raw(self._pool.as_mut_ptr()) };
+            Some(crate::Lock::from_raw(lock_ptr, pool_handle))
         }
     }
 
     /// Returns the changelist name if the item is in a changelist.
     pub fn changelist(&self) -> Option<&str> {
         unsafe {
-            if (*self.0).changelist.is_null() {
+            if (*self.ptr).changelist.is_null() {
                 None
             } else {
                 Some(
-                    std::ffi::CStr::from_ptr((*self.0).changelist)
+                    std::ffi::CStr::from_ptr((*self.ptr).changelist)
                         .to_str()
                         .unwrap(),
                 )
@@ -6363,52 +6372,53 @@ impl Status {
 
     /// Returns the depth of the item.
     pub fn depth(&self) -> crate::Depth {
-        unsafe { (*self.0).depth.into() }
+        unsafe { (*self.ptr).depth.into() }
     }
 
     /// Returns the out-of-date node kind.
     pub fn ood_kind(&self) -> crate::NodeKind {
-        unsafe { (*self.0).ood_kind.into() }
+        unsafe { (*self.ptr).ood_kind.into() }
     }
 
     /// Returns the repository node status.
     pub fn repos_node_status(&self) -> crate::StatusKind {
-        unsafe { (*self.0).repos_node_status.into() }
+        unsafe { (*self.ptr).repos_node_status.into() }
     }
 
     /// Returns the repository text status.
     pub fn repos_text_status(&self) -> crate::StatusKind {
-        unsafe { (*self.0).repos_text_status.into() }
+        unsafe { (*self.ptr).repos_text_status.into() }
     }
 
     /// Returns the repository property status.
     pub fn repos_prop_status(&self) -> crate::StatusKind {
-        unsafe { (*self.0).repos_prop_status.into() }
+        unsafe { (*self.ptr).repos_prop_status.into() }
     }
 
     /// Returns the repository lock information.
     pub fn repos_lock(&self) -> Option<crate::Lock<'_>> {
-        let lock_ptr = unsafe { (*self.0).repos_lock };
+        let lock_ptr = unsafe { (*self.ptr).repos_lock };
         if lock_ptr.is_null() {
             None
         } else {
-            Some(crate::Lock::from_raw(lock_ptr))
+            let pool_handle = unsafe { apr::PoolHandle::from_borrowed_raw(self._pool.as_mut_ptr()) };
+            Some(crate::Lock::from_raw(lock_ptr, pool_handle))
         }
     }
 
     /// Returns the out-of-date changed revision.
     pub fn ood_changed_rev(&self) -> Option<Revnum> {
-        Revnum::from_raw(unsafe { (*self.0).ood_changed_rev })
+        Revnum::from_raw(unsafe { (*self.ptr).ood_changed_rev })
     }
 
     /// Returns the out-of-date changed author.
     pub fn ood_changed_author(&self) -> Option<&str> {
         unsafe {
-            if (*self.0).ood_changed_author.is_null() {
+            if (*self.ptr).ood_changed_author.is_null() {
                 None
             } else {
                 Some(
-                    std::ffi::CStr::from_ptr((*self.0).ood_changed_author)
+                    std::ffi::CStr::from_ptr((*self.ptr).ood_changed_author)
                         .to_str()
                         .unwrap(),
                 )
@@ -6418,17 +6428,17 @@ impl Status {
 
     /// Returns the out-of-date changed date.
     pub fn ood_changed_date(&self) -> apr::time::Time {
-        unsafe { apr::time::Time::from((*self.0).ood_changed_date) }
+        unsafe { apr::time::Time::from((*self.ptr).ood_changed_date) }
     }
 
     /// Returns the absolute path the item was moved from.
     pub fn moved_from_abspath(&self) -> Option<&str> {
         unsafe {
-            if (*self.0).moved_from_abspath.is_null() {
+            if (*self.ptr).moved_from_abspath.is_null() {
                 None
             } else {
                 Some(
-                    std::ffi::CStr::from_ptr((*self.0).moved_from_abspath)
+                    std::ffi::CStr::from_ptr((*self.ptr).moved_from_abspath)
                         .to_str()
                         .unwrap(),
                 )
@@ -6439,11 +6449,11 @@ impl Status {
     /// Returns the absolute path the item was moved to.
     pub fn moved_to_abspath(&self) -> Option<&str> {
         unsafe {
-            if (*self.0).moved_to_abspath.is_null() {
+            if (*self.ptr).moved_to_abspath.is_null() {
                 None
             } else {
                 Some(
-                    std::ffi::CStr::from_ptr((*self.0).moved_to_abspath)
+                    std::ffi::CStr::from_ptr((*self.ptr).moved_to_abspath)
                         .to_str()
                         .unwrap(),
                 )

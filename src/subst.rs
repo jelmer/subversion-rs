@@ -96,23 +96,18 @@ pub fn translation_required(
 
         let keywords_hash = match keywords {
             Some(kw) => {
-                // Create C strings that will live for the duration of the call
-                let c_strings: Vec<_> = kw
-                    .iter()
-                    .map(|(k, v)| {
-                        (
-                            std::ffi::CString::new(k.as_str()).unwrap(),
-                            std::ffi::CString::new(v.as_str()).unwrap(),
-                        )
-                    })
-                    .collect();
                 let mut hash = apr::hash::Hash::new(pool);
-                for ((k, _), (_, v_cstr)) in kw.iter().zip(c_strings.iter()) {
+                for (k, v) in kw.iter() {
                     unsafe {
+                        // Copy key into pool to ensure it outlives the hash
+                        let k_pooled = apr::strings::pstrdup_raw(k, pool).unwrap();
                         // Create svn_string_t for the value (SVN expects svn_string_t*, not const char*)
+                        let v_cstr = std::ffi::CString::new(v.as_str()).unwrap();
                         let svn_str =
                             subversion_sys::svn_string_create(v_cstr.as_ptr(), pool.as_mut_ptr());
-                        hash.insert(k.as_bytes(), svn_str as *mut std::ffi::c_void);
+                        // Use the pooled key which is null-terminated
+                        let key_slice = std::slice::from_raw_parts(k_pooled as *const u8, k.len() + 1);
+                        hash.insert(key_slice, svn_str as *mut std::ffi::c_void);
                     }
                 }
                 unsafe { hash.as_mut_ptr() }
@@ -405,23 +400,18 @@ pub fn translate_stream(
 
         let keywords_hash = match keywords {
             Some(kw) => {
-                // Create C strings that will live for the duration of the call
-                let c_strings: Vec<_> = kw
-                    .iter()
-                    .map(|(k, v)| {
-                        (
-                            std::ffi::CString::new(k.as_str()).unwrap(),
-                            std::ffi::CString::new(v.as_str()).unwrap(),
-                        )
-                    })
-                    .collect();
                 let mut hash = apr::hash::Hash::new(pool);
-                for ((k, _), (_, v_cstr)) in kw.iter().zip(c_strings.iter()) {
+                for (k, v) in kw.iter() {
                     unsafe {
+                        // Copy key into pool to ensure it outlives the hash
+                        let k_pooled = apr::strings::pstrdup_raw(k, pool).unwrap();
                         // Create svn_string_t for the value (SVN expects svn_string_t*, not const char*)
+                        let v_cstr = std::ffi::CString::new(v.as_str()).unwrap();
                         let svn_str =
                             subversion_sys::svn_string_create(v_cstr.as_ptr(), pool.as_mut_ptr());
-                        hash.insert(k.as_bytes(), svn_str as *mut std::ffi::c_void);
+                        // Use the pooled key which is null-terminated
+                        let key_slice = std::slice::from_raw_parts(k_pooled as *const u8, k.len() + 1);
+                        hash.insert(key_slice, svn_str as *mut std::ffi::c_void);
                     }
                 }
                 unsafe { hash.as_mut_ptr() }

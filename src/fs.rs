@@ -516,6 +516,8 @@ impl<'pool> Fs<'pool> {
 
         let mut lock_ptr: *mut subversion_sys::svn_lock_t = std::ptr::null_mut();
 
+        let pool = apr::Pool::new();
+
         let ret = unsafe {
             subversion_sys::svn_fs_lock(
                 &mut lock_ptr,
@@ -527,14 +529,15 @@ impl<'pool> Fs<'pool> {
                 expiration_date.unwrap_or(0),
                 current_rev.0,
                 steal_lock as i32,
-                self.pool.as_mut_ptr(),
+                pool.as_mut_ptr(),
             )
         };
 
         svn_result(ret)?;
 
         // The lock is allocated in the fs pool, so it should be valid for the lifetime of the fs
-        Ok(crate::Lock::from_raw(lock_ptr))
+        let pool_handle = apr::PoolHandle::owned(pool);
+        Ok(crate::Lock::from_raw(lock_ptr, pool_handle))
     }
 
     /// Unlock a path in the filesystem
@@ -560,12 +563,14 @@ impl<'pool> Fs<'pool> {
         let path_cstr = std::ffi::CString::new(path).unwrap();
         let mut lock_ptr: *mut subversion_sys::svn_lock_t = std::ptr::null_mut();
 
+        let pool = apr::Pool::new();
+
         let ret = unsafe {
             subversion_sys::svn_fs_get_lock(
                 &mut lock_ptr,
                 self.fs_ptr,
                 path_cstr.as_ptr(),
-                self.pool.as_mut_ptr(),
+                pool.as_mut_ptr(),
             )
         };
 
@@ -575,7 +580,8 @@ impl<'pool> Fs<'pool> {
             Ok(None)
         } else {
             // The lock is allocated in the fs pool
-            Ok(Some(crate::Lock::from_raw(lock_ptr)))
+            let pool_handle = apr::PoolHandle::owned(pool);
+            Ok(Some(crate::Lock::from_raw(lock_ptr, pool_handle)))
         }
     }
 
@@ -645,7 +651,11 @@ impl<'pool> Fs<'pool> {
         let mut token_ptr: *const std::os::raw::c_char = std::ptr::null();
 
         let ret = unsafe {
-            subversion_sys::svn_fs_generate_lock_token(&mut token_ptr, self.fs_ptr, pool.as_mut_ptr())
+            subversion_sys::svn_fs_generate_lock_token(
+                &mut token_ptr,
+                self.fs_ptr,
+                pool.as_mut_ptr(),
+            )
         };
 
         svn_result(ret)?;
@@ -675,12 +685,13 @@ impl<'pool> Fs<'pool> {
         extern "C" fn lock_callback(
             baton: *mut std::ffi::c_void,
             lock: *mut subversion_sys::svn_lock_t,
-            _pool: *mut apr_sys::apr_pool_t,
+            pool: *mut apr_sys::apr_pool_t,
         ) -> *mut subversion_sys::svn_error_t {
             unsafe {
                 let locks = &mut *(baton as *mut Vec<crate::Lock<'static>>);
                 if !lock.is_null() {
-                    locks.push(crate::Lock::from_raw(lock));
+                    let pool_handle = apr::PoolHandle::from_borrowed_raw(pool);
+                    locks.push(crate::Lock::from_raw(lock, pool_handle));
                 }
             }
             std::ptr::null_mut()
@@ -3281,10 +3292,7 @@ mod tests {
 
         // Try to add lock token without setting access context first
         let result = fs.access_add_lock_token("/some/path", "some-token");
-        assert!(
-            result.is_err(),
-            "Should fail when no access context is set"
-        );
+        assert!(result.is_err(), "Should fail when no access context is set");
     }
 
     #[test]

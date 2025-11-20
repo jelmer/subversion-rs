@@ -1069,18 +1069,29 @@ impl From<StatusKind> for subversion_sys::svn_wc_status_kind {
 }
 
 /// A lock on a path in the repository.
-pub struct Lock<'pool> {
+///
+/// The lock data is allocated in a pool. The lifetime parameter ensures
+/// the lock doesn't outlive the object it was obtained from (e.g., Session or Fs).
+pub struct Lock<'a> {
     ptr: *const subversion_sys::svn_lock_t,
-    _pool: std::marker::PhantomData<&'pool apr::Pool<'static>>,
+    _pool: apr::PoolHandle<'static>,
+    _lifetime: std::marker::PhantomData<&'a ()>,
 }
+
 unsafe impl Send for Lock<'_> {}
 
-impl<'pool> Lock<'pool> {
-    /// Creates a Lock from a raw pointer.
-    pub fn from_raw(ptr: *const subversion_sys::svn_lock_t) -> Self {
+impl<'a> Lock<'a> {
+    /// Creates a Lock from a raw pointer with a pool.
+    ///
+    /// The lock data must be allocated in the provided pool.
+    pub fn from_raw(
+        ptr: *const subversion_sys::svn_lock_t,
+        pool: apr::PoolHandle<'static>,
+    ) -> Self {
         Self {
             ptr,
-            _pool: std::marker::PhantomData,
+            _pool: pool,
+            _lifetime: std::marker::PhantomData,
         }
     }
 
@@ -1092,11 +1103,13 @@ impl<'pool> Lock<'pool> {
         }
     }
 
-    /// Duplicates the lock in the given pool.
-    pub fn dup(&self, pool: &'pool apr::Pool<'pool>) -> Result<Lock<'pool>, Error> {
+    /// Duplicates the lock in a new pool.
+    pub fn dup(&self) -> Result<Lock<'static>, Error> {
+        let pool = apr::Pool::new();
         unsafe {
             let duplicated = subversion_sys::svn_lock_dup(self.ptr, pool.as_mut_ptr());
-            Ok(Lock::from_raw(duplicated))
+            let pool_handle = apr::PoolHandle::owned(pool);
+            Ok(Lock::from_raw(duplicated, pool_handle))
         }
     }
 
@@ -1139,11 +1152,13 @@ impl<'pool> Lock<'pool> {
         apr::time::Time::from(unsafe { (*self.ptr).expiration_date })
     }
 
-    /// Creates a new lock.
-    pub fn create(pool: &'pool apr::Pool<'pool>) -> Result<Lock<'pool>, Error> {
+    /// Creates a new lock in a new pool.
+    pub fn create() -> Result<Lock<'static>, Error> {
+        let pool = apr::Pool::new();
         unsafe {
             let lock_ptr = subversion_sys::svn_lock_create(pool.as_mut_ptr());
-            Ok(Lock::from_raw(lock_ptr))
+            let pool_handle = apr::PoolHandle::owned(pool);
+            Ok(Lock::from_raw(lock_ptr, pool_handle))
         }
     }
 }
