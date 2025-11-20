@@ -1685,6 +1685,10 @@ impl Context {
         depth_is_sticky: bool,
         allow_unver_obstructions: bool,
         diff3_cmd: Option<&str>,
+        conflict_func: Option<&dyn Fn(&crate::conflict::ConflictDescription) -> Result<crate::conflict::ConflictResult, Error>>,
+        external_func: Option<&dyn Fn(&str, Option<&str>, Option<&str>, crate::Depth) -> Result<(), Error>>,
+        cancel_func: Option<&dyn Fn() -> Result<(), Error>>,
+        notify_func: Option<&dyn Fn(&Notify)>,
     ) -> Result<(Box<dyn crate::delta::Editor>, crate::Revnum), crate::Error> {
         let anchor_abspath_cstr = std::ffi::CString::new(anchor_abspath)?;
         let target_basename_cstr = std::ffi::CString::new(target_basename)?;
@@ -1695,6 +1699,20 @@ impl Context {
         let mut target_revision: subversion_sys::svn_revnum_t = 0;
         let mut editor_ptr: *const subversion_sys::svn_delta_editor_t = std::ptr::null();
         let mut edit_baton: *mut std::ffi::c_void = std::ptr::null_mut();
+
+        // Create batons for callbacks
+        let conflict_baton = conflict_func
+            .map(|f| box_conflict_baton(f))
+            .unwrap_or(std::ptr::null_mut());
+        let external_baton = external_func
+            .map(|f| box_external_baton(f))
+            .unwrap_or(std::ptr::null_mut());
+        let cancel_baton = cancel_func
+            .map(|f| box_cancel_baton(f))
+            .unwrap_or(std::ptr::null_mut());
+        let notify_baton = notify_func
+            .map(|f| box_notify_baton(f))
+            .unwrap_or(std::ptr::null_mut());
 
         let err = with_tmp_pool(|scratch_pool| {
             unsafe {
@@ -1717,19 +1735,64 @@ impl Context {
                     std::ptr::null(),     // preserved_exts
                     None,                 // fetch_dirents_func
                     std::ptr::null_mut(), // fetch_baton
-                    None,                 // conflict_func
-                    std::ptr::null_mut(), // conflict_baton
-                    None,                 // external_func
-                    std::ptr::null_mut(), // external_baton
-                    None,                 // cancel_func
-                    std::ptr::null_mut(), // cancel_baton
-                    None,                 // notify_func
-                    std::ptr::null_mut(), // notify_baton
+                    if conflict_func.is_some() {
+                        Some(wrap_conflict_func)
+                    } else {
+                        None
+                    },
+                    conflict_baton,
+                    if external_func.is_some() {
+                        Some(wrap_external_func)
+                    } else {
+                        None
+                    },
+                    external_baton,
+                    if cancel_func.is_some() {
+                        Some(crate::wrap_cancel_func)
+                    } else {
+                        None
+                    },
+                    cancel_baton,
+                    if notify_func.is_some() {
+                        Some(wrap_notify_func)
+                    } else {
+                        None
+                    },
+                    notify_baton,
                     result_pool.as_mut_ptr(),
                     scratch_pool.as_mut_ptr(),
                 ))
             }
         });
+
+        // Clean up callback batons
+        if !conflict_baton.is_null() {
+            unsafe {
+                drop(Box::from_raw(
+                    conflict_baton
+                        as *mut Box<
+                            dyn Fn(&crate::conflict::ConflictDescription) -> Result<crate::conflict::ConflictResult, Error>,
+                        >,
+                ));
+            }
+        }
+        if !external_baton.is_null() {
+            unsafe {
+                drop(Box::from_raw(
+                    external_baton as *mut Box<dyn Fn(&str, Option<&str>, Option<&str>, crate::Depth) -> Result<(), Error>>,
+                ));
+            }
+        }
+        if !cancel_baton.is_null() {
+            unsafe {
+                free_cancel_baton(cancel_baton);
+            }
+        }
+        if !notify_baton.is_null() {
+            unsafe {
+                drop(Box::from_raw(notify_baton as *mut Box<dyn Fn(&Notify)>));
+            }
+        }
 
         err?;
 
@@ -3192,6 +3255,10 @@ mod tests {
             false,
             false,
             None,
+            None, // no conflict callback
+            None, // no external callback
+            None, // no cancel callback
+            None, // no notify callback
         );
 
         // Expected to fail without a valid working copy
@@ -3214,6 +3281,10 @@ mod tests {
             false, // depth_is_sticky
             false, // allow_unver_obstructions
             None,  // diff3_cmd
+            None,  // no conflict callback
+            None,  // no external callback
+            None,  // no cancel callback
+            None,  // no notify callback
         );
 
         // Expected to fail without a valid working copy
@@ -3235,6 +3306,10 @@ mod tests {
             true, // depth_is_sticky
             true, // allow_unver_obstructions
             None, // diff3_cmd
+            None, // no conflict callback
+            None, // no external callback
+            None, // no cancel callback
+            None, // no notify callback
         );
 
         assert!(result.is_err());
