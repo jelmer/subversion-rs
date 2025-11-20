@@ -90,6 +90,24 @@ pub enum AuthzAccess {
     ReadWrite,
 }
 
+impl AuthzAccess {
+    /// Convert from raw C enum value
+    pub fn from_raw(access: subversion_sys::svn_repos_authz_access_t) -> Self {
+        let read = subversion_sys::svn_repos_authz_access_t_svn_authz_read;
+        let write = subversion_sys::svn_repos_authz_access_t_svn_authz_write;
+
+        if access & (read | write) == (read | write) {
+            AuthzAccess::ReadWrite
+        } else if access & write != 0 {
+            AuthzAccess::Write
+        } else if access & read != 0 {
+            AuthzAccess::Read
+        } else {
+            AuthzAccess::None
+        }
+    }
+}
+
 impl From<AuthzAccess> for subversion_sys::svn_repos_authz_access_t {
     fn from(access: AuthzAccess) -> Self {
         match access {
@@ -1731,6 +1749,7 @@ impl Repos {
     /// * `author` - Optional author name
     /// * `revprops` - Optional additional revision properties (svn:log and svn:author are set automatically)
     /// * `commit_callback` - Optional callback to be called on successful commit
+    /// * `authz_callback` - Optional authorization callback to check write access for each path
     #[cfg(feature = "delta")]
     pub fn get_commit_editor(
         &self,
@@ -1740,6 +1759,7 @@ impl Repos {
         author: Option<&str>,
         revprops: Option<&std::collections::HashMap<String, Vec<u8>>>,
         commit_callback: Option<&dyn Fn(crate::Revnum, &str, &std::ffi::CStr)>,
+        mut authz_callback: Option<&mut dyn FnMut(AuthzAccess, &crate::fs::Root, &str) -> Result<bool, Error>>,
     ) -> Result<Box<dyn crate::delta::Editor>, Error> {
         let repos_url_cstr = std::ffi::CString::new(repos_url)?;
         let base_path_cstr = std::ffi::CString::new(base_path)?;
@@ -1809,8 +1829,56 @@ impl Repos {
             .map(|callback| Box::into_raw(Box::new(callback)) as *mut std::ffi::c_void)
             .unwrap_or(std::ptr::null_mut());
 
+        let authz_baton = authz_callback
+            .as_mut()
+            .map(|callback| Box::into_raw(Box::new(callback)) as *mut std::ffi::c_void)
+            .unwrap_or(std::ptr::null_mut());
+
         let mut editor_ptr = std::ptr::null();
         let mut edit_baton = std::ptr::null_mut();
+
+        // Authz callback wrapper
+        extern "C" fn wrap_authz_callback(
+            required: subversion_sys::svn_repos_authz_access_t,
+            allowed: *mut i32,
+            root: *mut subversion_sys::svn_fs_root_t,
+            path: *const i8,
+            baton: *mut std::ffi::c_void,
+            pool: *mut apr_sys::apr_pool_t,
+        ) -> *mut subversion_sys::svn_error_t {
+            if baton.is_null() || allowed.is_null() {
+                return std::ptr::null_mut();
+            }
+
+            let callback = unsafe {
+                &mut *(baton
+                    as *mut Box<dyn FnMut(AuthzAccess, &crate::fs::Root, &str) -> Result<bool, Error>>)
+            };
+
+            let path_str = unsafe {
+                if path.is_null() {
+                    ""
+                } else {
+                    std::ffi::CStr::from_ptr(path).to_str().unwrap_or("")
+                }
+            };
+
+            let fs_root = unsafe {
+                crate::fs::Root::from_raw(root, apr::PoolHandle::from_borrowed_raw(pool))
+            };
+
+            let access = AuthzAccess::from_raw(required);
+
+            match callback(access, &fs_root, path_str) {
+                Ok(is_allowed) => {
+                    unsafe {
+                        *allowed = if is_allowed { 1 } else { 0 };
+                    }
+                    std::ptr::null_mut()
+                }
+                Err(mut e) => unsafe { e.detach() },
+            }
+        }
 
         // Commit callback wrapper that matches expected signature
         extern "C" fn wrap_commit_callback(
@@ -1861,11 +1929,36 @@ impl Repos {
                     None
                 },
                 commit_baton,
-                None,                 // authz_callback (NULL = allow all)
-                std::ptr::null_mut(), // authz_baton
+                if authz_callback.is_some() {
+                    Some(wrap_authz_callback)
+                } else {
+                    None
+                },
+                authz_baton,
                 pool_ptr,
             )
         };
+
+        // Clean up batons if there was an error
+        if !ret.is_null() {
+            if !commit_baton.is_null() {
+                unsafe {
+                    let _ = Box::from_raw(
+                        commit_baton as *mut Box<dyn Fn(crate::Revnum, &str, &std::ffi::CStr)>,
+                    );
+                }
+            }
+            if !authz_baton.is_null() {
+                unsafe {
+                    let _ = Box::from_raw(
+                        authz_baton
+                            as *mut Box<
+                                dyn FnMut(AuthzAccess, &crate::fs::Root, &str) -> Result<bool, Error>,
+                            >,
+                    );
+                }
+            }
+        }
 
         Error::from_raw(ret)?;
 
@@ -2295,6 +2388,7 @@ mod additional_tests {
             Some("test_author"),
             None, // no revprops
             None, // no commit callback
+            None, // no authz callback
         );
 
         // Should succeed in getting a commit editor
@@ -2562,6 +2656,7 @@ admin = rw
             Some("test_author"),
             None,
             None,
+            None, // no authz callback
         );
 
         assert!(
@@ -2630,6 +2725,7 @@ admin = rw
                 Some("test_author"),
                 None,
                 None,
+                None, // no authz callback
             )
             .unwrap();
 

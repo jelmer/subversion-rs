@@ -456,10 +456,7 @@ impl<'pool> Fs<'pool> {
                 pool.as_mut_ptr(),
             );
             svn_result(err)?;
-            Ok(Root {
-                ptr: root_ptr,
-                pool,
-            })
+            Ok(unsafe { Root::from_raw(root_ptr, apr::PoolHandle::owned(pool)) })
         }
     }
 
@@ -1072,7 +1069,7 @@ pub struct FsInfo {
 #[allow(dead_code)]
 pub struct Root {
     ptr: *mut subversion_sys::svn_fs_root_t,
-    pool: apr::Pool<'static>, // Keep pool alive for root lifetime
+    pool: apr::PoolHandle<'static>, // Keep pool alive for root lifetime
 }
 
 unsafe impl Send for Root {}
@@ -1084,6 +1081,14 @@ impl Drop for Root {
 }
 
 impl Root {
+    /// Create a Root from a raw pointer and pool handle.
+    ///
+    /// # Safety
+    /// The pointer must be valid and the pool must outlive the Root.
+    pub unsafe fn from_raw(ptr: *mut subversion_sys::svn_fs_root_t, pool: apr::PoolHandle<'static>) -> Self {
+        Self { ptr, pool }
+    }
+
     /// Gets the raw pointer to the root.
     pub fn as_ptr(&self) -> *const subversion_sys::svn_fs_root_t {
         self.ptr
@@ -1433,10 +1438,7 @@ impl Root {
             } else {
                 let path_str = std::ffi::CStr::from_ptr(copy_path).to_str()?.to_owned();
                 Ok(Some((
-                    Root {
-                        ptr: copy_root,
-                        pool,
-                    },
+                    unsafe { Root::from_raw(copy_root, apr::PoolHandle::owned(pool)) },
                     path_str,
                 )))
             }
