@@ -1983,6 +1983,7 @@ impl Repos {
     /// * `send_copyfrom_args` - Whether to send copyfrom arguments
     /// * `editor` - The delta editor
     /// * `editor_baton` - The editor baton
+    /// * `authz_read_func` - Optional authorization callback to check read access for each path
     pub unsafe fn begin_report(
         &self,
         revnum: Revnum,
@@ -1995,6 +1996,7 @@ impl Repos {
         send_copyfrom_args: bool,
         editor: *const subversion_sys::svn_delta_editor_t,
         editor_baton: *mut std::ffi::c_void,
+        mut authz_read_func: Option<&mut dyn FnMut(&crate::fs::Root, &str) -> Result<bool, Error>>,
     ) -> Result<Report, Error> {
         let fs_base_cstr = std::ffi::CString::new(fs_base).unwrap();
         let target_cstr = std::ffi::CString::new(target).unwrap();
@@ -2002,6 +2004,51 @@ impl Repos {
 
         let pool = apr::Pool::new();
         let mut report_baton: *mut std::ffi::c_void = std::ptr::null_mut();
+
+        let authz_baton = authz_read_func
+            .as_mut()
+            .map(|callback| Box::into_raw(Box::new(callback)) as *mut std::ffi::c_void)
+            .unwrap_or(std::ptr::null_mut());
+
+        // Authz read callback wrapper
+        extern "C" fn wrap_authz_read_func(
+            allowed: *mut i32,
+            root: *mut subversion_sys::svn_fs_root_t,
+            path: *const i8,
+            baton: *mut std::ffi::c_void,
+            pool: *mut apr_sys::apr_pool_t,
+        ) -> *mut subversion_sys::svn_error_t {
+            if baton.is_null() || allowed.is_null() {
+                return std::ptr::null_mut();
+            }
+
+            let callback = unsafe {
+                &mut *(baton
+                    as *mut Box<dyn FnMut(&crate::fs::Root, &str) -> Result<bool, Error>>)
+            };
+
+            let path_str = unsafe {
+                if path.is_null() {
+                    ""
+                } else {
+                    std::ffi::CStr::from_ptr(path).to_str().unwrap_or("")
+                }
+            };
+
+            let fs_root = unsafe {
+                crate::fs::Root::from_raw(root, apr::PoolHandle::from_borrowed_raw(pool))
+            };
+
+            match callback(&fs_root, path_str) {
+                Ok(is_allowed) => {
+                    unsafe {
+                        *allowed = if is_allowed { 1 } else { 0 };
+                    }
+                    std::ptr::null_mut()
+                }
+                Err(mut e) => unsafe { e.detach() },
+            }
+        }
 
         let ret = unsafe {
             subversion_sys::svn_repos_begin_report3(
@@ -2020,14 +2067,33 @@ impl Repos {
                 send_copyfrom_args.into(),
                 editor,
                 editor_baton,
-                None,                 // authz_read_func - None for Option<fn>
-                std::ptr::null_mut(), // authz_read_baton
+                if authz_read_func.is_some() {
+                    Some(wrap_authz_read_func)
+                } else {
+                    None
+                },
+                authz_baton,
                 0,                    // zero_copy_limit
                 pool.as_mut_ptr(),
             )
         };
 
-        svn_result(ret)?;
+        if let Err(e) = svn_result(ret) {
+            // Clean up authz_baton before returning error
+            if !authz_baton.is_null() {
+                unsafe {
+                    let _ = Box::from_raw(authz_baton as *mut &mut dyn FnMut(&crate::fs::Root, &str) -> Result<bool, Error>);
+                }
+            }
+            return Err(e);
+        }
+
+        // Clean up authz_baton after successful call
+        if !authz_baton.is_null() {
+            unsafe {
+                let _ = Box::from_raw(authz_baton as *mut &mut dyn FnMut(&crate::fs::Root, &str) -> Result<bool, Error>);
+            }
+        }
 
         Ok(Report {
             baton: report_baton,
@@ -2682,6 +2748,7 @@ admin = rw
                     false,
                     editor_ptr,
                     baton_ptr,
+                    None, // no authz callback
                 )
             };
 
@@ -2743,6 +2810,7 @@ admin = rw
                 false,
                 editor_ptr,
                 baton_ptr,
+                None, // no authz callback
             )
         }
         .unwrap();
