@@ -2140,6 +2140,8 @@ pub struct Callbacks {
     auth_baton: Option<std::pin::Pin<Box<crate::auth::AuthBaton>>>,
     // Keep cancel_func alive for the lifetime of the callbacks
     cancel_func: Option<Box<Box<dyn Fn() -> Result<(), Error>>>>,
+    // Keep progress_func alive for the lifetime of the callbacks
+    progress_func: Option<Box<Box<dyn Fn(i64, i64)>>>,
     _phantom: PhantomData<*mut ()>,
 }
 
@@ -2169,6 +2171,7 @@ impl Callbacks {
             _pool: pool,
             auth_baton: None,
             cancel_func: None,
+            progress_func: None,
             _phantom: PhantomData,
         })
     }
@@ -2200,6 +2203,22 @@ impl Callbacks {
         self.cancel_func = Some(boxed);
     }
 
+    /// Sets the progress notification callback for the RA session.
+    ///
+    /// This callback will be invoked periodically during RA operations to report
+    /// progress. The first parameter is bytes processed, the second is total bytes
+    /// (or -1 if unknown).
+    pub fn set_progress_func(&mut self, progress_func: impl Fn(i64, i64) + 'static) {
+        let boxed: Box<Box<dyn Fn(i64, i64)>> = Box::new(Box::new(progress_func));
+        let baton_ptr = Box::into_raw(boxed) as *mut std::ffi::c_void;
+        unsafe {
+            (*self.ptr).progress_func = Some(wrap_progress_func);
+            (*self.ptr).progress_baton = baton_ptr;
+        }
+        // Store the callback to keep it alive
+        self.progress_func = Some(unsafe { Box::from_raw(baton_ptr as *mut Box<dyn Fn(i64, i64)>) });
+    }
+
     /// Get the callback baton pointer for use with svn_ra_open.
     /// This returns the cancel_func baton if set, otherwise null.
     fn get_callback_baton(&self) -> *mut std::ffi::c_void {
@@ -2212,6 +2231,21 @@ impl Callbacks {
     fn as_mut_ptr(&mut self) -> *mut subversion_sys::svn_ra_callbacks2_t {
         self.ptr
     }
+}
+
+/// Wrapper for progress notification callbacks
+extern "C" fn wrap_progress_func(
+    progress: i64,
+    total: i64,
+    baton: *mut std::ffi::c_void,
+    _pool: *mut apr_sys::apr_pool_t,
+) {
+    if baton.is_null() {
+        return;
+    }
+
+    let callback = unsafe { &*(baton as *const Box<dyn Fn(i64, i64)>) };
+    callback(progress, total);
 }
 
 /// Get the Subversion API version
