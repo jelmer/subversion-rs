@@ -565,7 +565,8 @@ impl<'a> Session<'a> {
             .map(|(k, v)| {
                 let key_cstr = std::ffi::CString::new(k.as_str()).unwrap();
                 // Copy key into result_pool so it lives as long as the editor
-                let key_in_pool = unsafe { apr_sys::apr_pstrdup(result_pool.as_mut_ptr(), key_cstr.as_ptr()) };
+                let key_in_pool =
+                    unsafe { apr_sys::apr_pstrdup(result_pool.as_mut_ptr(), key_cstr.as_ptr()) };
                 let key_slice = unsafe { std::ffi::CStr::from_ptr(key_in_pool).to_bytes() };
                 (
                     key_slice,
@@ -588,10 +589,12 @@ impl<'a> Session<'a> {
                 let key_cstr = std::ffi::CString::new(k.as_str()).unwrap();
                 let value_cstr = std::ffi::CString::new(v.as_str()).unwrap();
                 // Copy key into result_pool so it lives as long as the editor
-                let key_in_pool = unsafe { apr_sys::apr_pstrdup(result_pool.as_mut_ptr(), key_cstr.as_ptr()) };
+                let key_in_pool =
+                    unsafe { apr_sys::apr_pstrdup(result_pool.as_mut_ptr(), key_cstr.as_ptr()) };
                 let key_slice = unsafe { std::ffi::CStr::from_ptr(key_in_pool).to_bytes() };
                 // Copy value into result_pool too
-                let value_in_pool = unsafe { apr_sys::apr_pstrdup(result_pool.as_mut_ptr(), value_cstr.as_ptr()) };
+                let value_in_pool =
+                    unsafe { apr_sys::apr_pstrdup(result_pool.as_mut_ptr(), value_cstr.as_ptr()) };
                 (key_slice, value_in_pool)
             })
             .collect();

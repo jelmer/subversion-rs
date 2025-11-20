@@ -48,15 +48,17 @@ impl PartialEq for Version {
 impl Eq for Version {}
 
 /// Extended version information
-pub struct VersionExtended(*const subversion_sys::svn_version_extended_t, apr::Pool<'static>);
+pub struct VersionExtended(
+    *const subversion_sys::svn_version_extended_t,
+    apr::Pool<'static>,
+);
 
 impl VersionExtended {
     /// Get the extended version information for the current library
     pub fn get(verbose: bool) -> Self {
         unsafe {
             let pool = apr::Pool::new();
-            let ptr =
-                subversion_sys::svn_version_extended(verbose as i32, pool.as_mut_ptr());
+            let ptr = subversion_sys::svn_version_extended(verbose as i32, pool.as_mut_ptr());
             VersionExtended(ptr, pool)
         }
     }

@@ -105,3 +105,97 @@ impl AsCanonicalUri for &url::Url {
         self.as_str().as_canonical_uri()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_uri_new_valid() {
+        let result = Uri::new("http://example.com/path");
+        assert!(result.is_ok());
+        let uri = result.unwrap();
+        assert_eq!(uri.as_str(), "http://example.com/path");
+    }
+
+    #[test]
+    fn test_uri_canonicalization() {
+        let uri = Uri::new("http://example.com//double//slashes").unwrap();
+        assert_eq!(uri.as_str(), "http://example.com/double/slashes");
+    }
+
+    #[test]
+    fn test_uri_is_root_true() {
+        let uri = Uri::new("http://example.com/").unwrap();
+        assert_eq!(uri.is_root(), true);
+    }
+
+    #[test]
+    fn test_uri_is_root_false() {
+        let uri = Uri::new("http://example.com/path").unwrap();
+        assert_eq!(uri.is_root(), false);
+    }
+
+    #[test]
+    fn test_uri_display() {
+        let uri = Uri::new("http://example.com/path").unwrap();
+        let displayed = format!("{}", uri);
+        assert_eq!(displayed, "http://example.com/path");
+    }
+
+    #[test]
+    fn test_uri_from_str() {
+        let uri: Uri = "http://example.com/path".parse().unwrap();
+        assert_eq!(uri.as_str(), "http://example.com/path");
+    }
+
+    #[test]
+    fn test_uri_as_ref() {
+        let uri = Uri::new("http://example.com/path").unwrap();
+        let s: &str = uri.as_ref();
+        assert_eq!(s, "http://example.com/path");
+    }
+
+    #[test]
+    fn test_canonicalize_uri() {
+        let result = canonicalize_uri("http://example.com//path");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "http://example.com/path");
+    }
+
+    #[test]
+    fn test_canonical_uri_from_str() {
+        let result = "http://example.com/path".as_canonical_uri();
+        assert!(result.is_ok());
+        let canonical = result.unwrap();
+        assert_eq!(canonical.0.as_str(), "http://example.com/path");
+    }
+
+    #[test]
+    fn test_canonical_uri_from_string() {
+        let s = String::from("http://example.com/path");
+        let result = s.as_canonical_uri();
+        assert!(result.is_ok());
+        let canonical = result.unwrap();
+        assert_eq!(canonical.0.as_str(), "http://example.com/path");
+    }
+
+    #[test]
+    fn test_canonical_uri_from_uri() {
+        let uri = Uri::new("http://example.com/path").unwrap();
+        let result = uri.as_canonical_uri();
+        assert!(result.is_ok());
+        let canonical = result.unwrap();
+        assert_eq!(canonical.0.as_str(), "http://example.com/path");
+    }
+
+    #[test]
+    #[cfg(feature = "url")]
+    fn test_canonical_uri_from_url() {
+        let url = url::Url::parse("http://example.com/path").unwrap();
+        let result = url.as_canonical_uri();
+        assert!(result.is_ok());
+        let canonical = result.unwrap();
+        assert_eq!(canonical.0.as_str(), "http://example.com/path");
+    }
+}

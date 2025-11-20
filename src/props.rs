@@ -180,3 +180,122 @@ impl<'a> PropHash<'a> {
         self.inner.len()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_kind_enum() {
+        assert_eq!(Kind::Entry, Kind::Entry);
+        assert_eq!(Kind::Wc, Kind::Wc);
+        assert_eq!(Kind::Regular, Kind::Regular);
+        assert_ne!(Kind::Entry, Kind::Wc);
+    }
+
+    #[test]
+    fn test_kind_svn_mime_type() {
+        let k = kind("svn:mime-type");
+        assert_eq!(k, Kind::Regular);
+    }
+
+    #[test]
+    fn test_kind_svn_eol_style() {
+        let k = kind("svn:eol-style");
+        assert_eq!(k, Kind::Regular);
+    }
+
+    #[test]
+    fn test_kind_custom_property() {
+        let k = kind("custom:property");
+        assert_eq!(k, Kind::Regular);
+    }
+
+    #[test]
+    fn test_is_svn_prop_true() {
+        assert_eq!(is_svn_prop("svn:mime-type"), true);
+        assert_eq!(is_svn_prop("svn:eol-style"), true);
+    }
+
+    #[test]
+    fn test_is_svn_prop_false() {
+        assert_eq!(is_svn_prop("custom:property"), false);
+        assert_eq!(is_svn_prop("user-property"), false);
+    }
+
+    #[test]
+    fn test_is_boolean_true() {
+        assert_eq!(is_boolean("svn:executable"), true);
+        assert_eq!(is_boolean("svn:special"), true);
+    }
+
+    #[test]
+    fn test_is_boolean_false() {
+        assert_eq!(is_boolean("svn:mime-type"), false);
+        assert_eq!(is_boolean("custom:property"), false);
+    }
+
+    #[test]
+    fn test_is_known_svn_rev_prop_true() {
+        assert_eq!(is_known_svn_rev_prop("svn:log"), true);
+        assert_eq!(is_known_svn_rev_prop("svn:author"), true);
+        assert_eq!(is_known_svn_rev_prop("svn:date"), true);
+    }
+
+    #[test]
+    fn test_is_known_svn_rev_prop_false() {
+        assert_eq!(is_known_svn_rev_prop("svn:mime-type"), false);
+        assert_eq!(is_known_svn_rev_prop("custom:property"), false);
+    }
+
+    #[test]
+    fn test_is_known_svn_node_prop_true() {
+        assert_eq!(is_known_svn_node_prop("svn:mime-type"), true);
+        assert_eq!(is_known_svn_node_prop("svn:eol-style"), true);
+    }
+
+    #[test]
+    fn test_is_known_svn_node_prop_false() {
+        assert_eq!(is_known_svn_node_prop("svn:log"), false);
+        assert_eq!(is_known_svn_node_prop("custom:property"), false);
+    }
+
+    #[test]
+    fn test_is_known_svn_file_prop_true() {
+        assert_eq!(is_known_svn_file_prop("svn:mime-type"), true);
+        assert_eq!(is_known_svn_file_prop("svn:eol-style"), true);
+        assert_eq!(is_known_svn_file_prop("svn:executable"), true);
+    }
+
+    #[test]
+    fn test_is_known_svn_file_prop_false() {
+        assert_eq!(is_known_svn_file_prop("svn:ignore"), false);
+        assert_eq!(is_known_svn_file_prop("custom:property"), false);
+    }
+
+    #[test]
+    fn test_is_known_svn_dir_prop_true() {
+        assert_eq!(is_known_svn_dir_prop("svn:ignore"), true);
+        assert_eq!(is_known_svn_dir_prop("svn:externals"), true);
+    }
+
+    #[test]
+    fn test_is_known_svn_dir_prop_false() {
+        assert_eq!(is_known_svn_dir_prop("svn:executable"), false);
+        assert_eq!(is_known_svn_dir_prop("custom:property"), false);
+    }
+
+    #[test]
+    fn test_needs_translation_true() {
+        assert_eq!(needs_translation("svn:log"), true);
+        assert_eq!(needs_translation("svn:externals"), true);
+        assert_eq!(needs_translation("svn:executable"), true);
+    }
+
+    #[test]
+    fn test_name_is_valid_true() {
+        assert_eq!(name_is_valid("svn:mime-type"), true);
+        assert_eq!(name_is_valid("custom:property"), true);
+        assert_eq!(name_is_valid("user-property"), true);
+    }
+}
