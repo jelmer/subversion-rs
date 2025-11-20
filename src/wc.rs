@@ -437,6 +437,98 @@ impl Context {
         // For now, just indicate we don't have this information
         Ok(0) // 0 indicates unknown/unavailable
     }
+
+    /// Upgrade a working copy to the latest format
+    pub fn upgrade(&mut self, local_abspath: &str) -> Result<(), crate::Error> {
+        let local_abspath_cstr = std::ffi::CString::new(local_abspath)?;
+        let scratch_pool = apr::pool::Pool::new();
+
+        let err = unsafe {
+            subversion_sys::svn_wc_upgrade(
+                self.ptr,
+                local_abspath_cstr.as_ptr(),
+                None,                 // repos_info_func
+                std::ptr::null_mut(), // repos_info_baton
+                None,                 // cancel_func
+                std::ptr::null_mut(), // cancel_baton
+                None,                 // notify_func
+                std::ptr::null_mut(), // notify_baton
+                scratch_pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        Ok(())
+    }
+
+    /// Relocate the working copy to a new repository URL
+    pub fn relocate(
+        &mut self,
+        wcroot_abspath: &str,
+        from: &str,
+        to: &str,
+    ) -> Result<(), crate::Error> {
+        let wcroot_abspath_cstr = std::ffi::CString::new(wcroot_abspath)?;
+        let from_cstr = std::ffi::CString::new(from)?;
+        let to_cstr = std::ffi::CString::new(to)?;
+        let scratch_pool = apr::pool::Pool::new();
+
+        // Default validator that accepts all relocations
+        unsafe extern "C" fn default_validator(
+            _baton: *mut std::ffi::c_void,
+            _uuid: *const std::ffi::c_char,
+            _url: *const std::ffi::c_char,
+            _root_url: *const std::ffi::c_char,
+            _pool: *mut apr_sys::apr_pool_t,
+        ) -> *mut subversion_sys::svn_error_t {
+            std::ptr::null_mut() // No error = validation successful
+        }
+
+        let err = unsafe {
+            subversion_sys::svn_wc_relocate4(
+                self.ptr,
+                wcroot_abspath_cstr.as_ptr(),
+                from_cstr.as_ptr(),
+                to_cstr.as_ptr(),
+                Some(default_validator),
+                std::ptr::null_mut(), // validator_baton
+                scratch_pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        Ok(())
+    }
+
+    /// Add a file or directory to the working copy
+    pub fn add(
+        &mut self,
+        local_abspath: &str,
+        depth: crate::Depth,
+        copyfrom_url: Option<&str>,
+        copyfrom_rev: Option<crate::Revnum>,
+    ) -> Result<(), crate::Error> {
+        let local_abspath_cstr = std::ffi::CString::new(local_abspath)?;
+        let copyfrom_url_cstr = copyfrom_url.map(std::ffi::CString::new).transpose()?;
+        let scratch_pool = apr::pool::Pool::new();
+
+        let err = unsafe {
+            subversion_sys::svn_wc_add4(
+                self.ptr,
+                local_abspath_cstr.as_ptr(),
+                depth.into(),
+                copyfrom_url_cstr
+                    .as_ref()
+                    .map_or(std::ptr::null(), |c| c.as_ptr()),
+                copyfrom_rev.map_or(-1, |r| r.into()),
+                None,                 // cancel_func
+                std::ptr::null_mut(), // cancel_baton
+                None,                 // notify_func
+                std::ptr::null_mut(), // notify_baton
+                scratch_pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+        Ok(())
+    }
 }
 
 /// Sets the name of the administrative directory (typically ".svn").
@@ -4121,5 +4213,131 @@ mod tests {
 
         let dir = get_adm_dir();
         assert_eq!(dir, ".svn");
+    }
+
+    #[test]
+    fn test_context_add() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let repos_path = tmp_dir.path().join("repo");
+        let wc_path = tmp_dir.path().join("wc");
+
+        // Create a test repository
+        crate::repos::Repos::create(&repos_path).unwrap();
+        let url_str = format!("file://{}", repos_path.display());
+        let url = crate::uri::Uri::new(&url_str).unwrap();
+
+        // Checkout
+        let mut client_ctx = crate::client::Context::new().unwrap();
+        client_ctx
+            .checkout(
+                url,
+                &wc_path,
+                &crate::client::CheckoutOptions {
+                    peg_revision: crate::Revision::Head,
+                    revision: crate::Revision::Head,
+                    depth: crate::Depth::Infinity,
+                    ignore_externals: false,
+                    allow_unver_obstructions: false,
+                },
+            )
+            .unwrap();
+
+        // Create a new file to add
+        let new_file = wc_path.join("newfile.txt");
+        std::fs::write(&new_file, b"test content").unwrap();
+
+        // Test Context::add() - svn_wc_add4() is a low-level function
+        // that requires write locks to be acquired using private APIs.
+        // Verify the binding exists and can be called.
+        let mut wc_ctx = Context::new().unwrap();
+        let new_file_abs = new_file.canonicalize().unwrap();
+
+        let result = wc_ctx.add(
+            new_file_abs.to_str().unwrap(),
+            crate::Depth::Infinity,
+            None,
+            None,
+        );
+
+        // svn_wc_add4 requires write locks managed externally (via private APIs).
+        // The binding correctly calls the C function which will fail without locks.
+        // This verifies the binding works and properly propagates errors.
+        assert!(result.is_err());
+        let err_str = format!("{:?}", result.err().unwrap());
+        assert!(err_str.to_lowercase().contains("lock"),
+                "Expected lock error, got: {}", err_str);
+    }
+
+    #[test]
+    fn test_context_relocate() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let repos_path = tmp_dir.path().join("repo");
+        let wc_path = tmp_dir.path().join("wc");
+
+        // Create a test repository
+        crate::repos::Repos::create(&repos_path).unwrap();
+        let url_str = format!("file://{}", repos_path.display());
+        let url = crate::uri::Uri::new(&url_str).unwrap();
+
+        // Checkout
+        let mut client_ctx = crate::client::Context::new().unwrap();
+        client_ctx
+            .checkout(
+                url,
+                &wc_path,
+                &crate::client::CheckoutOptions {
+                    peg_revision: crate::Revision::Head,
+                    revision: crate::Revision::Head,
+                    depth: crate::Depth::Infinity,
+                    ignore_externals: false,
+                    allow_unver_obstructions: false,
+                },
+            )
+            .unwrap();
+
+        // Move the repository to a new location (simulating repository relocation)
+        let repos_path2 = tmp_dir.path().join("repo_moved");
+        std::fs::rename(&repos_path, &repos_path2).unwrap();
+        let repos_url2 = format!("file://{}", repos_path2.display());
+
+        // Test relocate - should work since it's the same repository, different URL
+        let mut wc_ctx = Context::new().unwrap();
+        let result = wc_ctx.relocate(wc_path.to_str().unwrap(), &url_str, &repos_url2);
+
+        // Relocate should succeed when repository is moved
+        assert!(result.is_ok(), "relocate() failed: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_context_upgrade() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let repos_path = tmp_dir.path().join("repo");
+        let wc_path = tmp_dir.path().join("wc");
+
+        // Create a test repository
+        crate::repos::Repos::create(&repos_path).unwrap();
+        let url_str = format!("file://{}", repos_path.display());
+        let url = crate::uri::Uri::new(&url_str).unwrap();
+
+        // Checkout
+        let mut client_ctx = crate::client::Context::new().unwrap();
+        client_ctx
+            .checkout(
+                url,
+                &wc_path,
+                &crate::client::CheckoutOptions {
+                    peg_revision: crate::Revision::Head,
+                    revision: crate::Revision::Head,
+                    depth: crate::Depth::Infinity,
+                    ignore_externals: false,
+                    allow_unver_obstructions: false,
+                },
+            )
+            .unwrap();
+
+        // Test upgrade - should succeed (working copy is already in latest format)
+        let mut wc_ctx = Context::new().unwrap();
+        let result = wc_ctx.upgrade(wc_path.to_str().unwrap());
+        assert!(result.is_ok(), "upgrade() failed: {:?}", result.err());
     }
 }
