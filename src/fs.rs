@@ -1297,6 +1297,96 @@ impl Root {
             Ok(NodeId { ptr: id, pool })
         }
     }
+
+    /// Find the closest copy of a path
+    ///
+    /// Given a root/path, find the closest ancestor of that path which is a copy
+    /// (or the path itself, if it is a copy). Returns the root and path of the copy.
+    pub fn closest_copy(&self, path: impl TryInto<FsPath, Error = Error>) -> Result<Option<(Root, String)>, Error> {
+        let fs_path = path.try_into()?;
+        let pool = apr::Pool::new();
+
+        unsafe {
+            let mut copy_root: *mut subversion_sys::svn_fs_root_t = std::ptr::null_mut();
+            let mut copy_path: *const i8 = std::ptr::null();
+
+            let err = subversion_sys::svn_fs_closest_copy(
+                &mut copy_root,
+                &mut copy_path,
+                self.ptr,
+                fs_path.as_ptr(),
+                pool.as_mut_ptr(),
+            );
+            svn_result(err)?;
+
+            if copy_root.is_null() {
+                Ok(None)
+            } else {
+                let path_str = std::ffi::CStr::from_ptr(copy_path)
+                    .to_str()?
+                    .to_owned();
+                Ok(Some((Root { ptr: copy_root, pool }, path_str)))
+            }
+        }
+    }
+
+    /// Check if the contents of two paths are different
+    ///
+    /// Compare the contents at this root/path with another root/path.
+    /// Returns true if they are different, false if they are the same.
+    pub fn contents_different(
+        &self,
+        path1: impl TryInto<FsPath, Error = Error>,
+        other_root: &Root,
+        path2: impl TryInto<FsPath, Error = Error>,
+    ) -> Result<bool, Error> {
+        let fs_path1 = path1.try_into()?;
+        let fs_path2 = path2.try_into()?;
+        let pool = apr::Pool::new();
+
+        unsafe {
+            let mut different: i32 = 0;
+            let err = subversion_sys::svn_fs_contents_different(
+                &mut different,
+                self.ptr,
+                fs_path1.as_ptr(),
+                other_root.ptr,
+                fs_path2.as_ptr(),
+                pool.as_mut_ptr(),
+            );
+            svn_result(err)?;
+            Ok(different != 0)
+        }
+    }
+
+    /// Check if the properties of two paths are different
+    ///
+    /// Compare the properties at this root/path with another root/path.
+    /// Returns true if they are different, false if they are the same.
+    pub fn props_different(
+        &self,
+        path1: impl TryInto<FsPath, Error = Error>,
+        other_root: &Root,
+        path2: impl TryInto<FsPath, Error = Error>,
+    ) -> Result<bool, Error> {
+        let fs_path1 = path1.try_into()?;
+        let fs_path2 = path2.try_into()?;
+        let pool = apr::Pool::new();
+
+        unsafe {
+            let mut different: i32 = 0;
+            let err = subversion_sys::svn_fs_props_different(
+                &mut different,
+                self.ptr,
+                fs_path1.as_ptr(),
+                other_root.ptr,
+                fs_path2.as_ptr(),
+                pool.as_mut_ptr(),
+            );
+            svn_result(err)?;
+            Ok(different != 0)
+        }
+    }
 }
 
 /// Represents the history of a node in the filesystem
@@ -1369,6 +1459,25 @@ impl NodeId {
             // svn_fs_compare_ids returns 0 if equal, -1 if different
             let result = subversion_sys::svn_fs_compare_ids(self.ptr, other.ptr);
             result == 0
+        }
+    }
+
+    /// Compare two node IDs
+    ///
+    /// Returns:
+    /// - 0 if they are equal
+    /// - -1 if they are different but related (share a common ancestor)
+    /// - 1 if they are unrelated
+    pub fn compare(&self, other: &NodeId) -> i32 {
+        unsafe {
+            subversion_sys::svn_fs_compare_ids(self.ptr, other.ptr)
+        }
+    }
+
+    /// Check if two node IDs are related (share a common ancestor)
+    pub fn check_related(&self, other: &NodeId) -> bool {
+        unsafe {
+            subversion_sys::svn_fs_check_related(self.ptr, other.ptr) != 0
         }
     }
 
@@ -3220,5 +3329,126 @@ mod tests {
         txn.change_prop_bytes("custom:binary", None).unwrap();
         let prop_value = txn.prop("custom:binary").unwrap();
         assert!(prop_value.is_none() || prop_value.as_deref() == Some(b"".as_ref()));
+    }
+
+    #[test]
+    fn test_node_id_compare_and_related() {
+        let dir = tempdir().unwrap();
+        let fs_path = dir.path().join("test-fs");
+
+        let mut fs = Fs::create(&fs_path).unwrap();
+
+        // Create initial revision
+        let mut txn = fs.begin_txn(Revnum(0), 0).unwrap();
+        txn.change_prop("svn:log", "Initial commit").unwrap();
+        let mut root = txn.root().unwrap();
+        root.make_dir("/trunk").unwrap();
+        root.make_file("/trunk/file.txt").unwrap();
+        root.set_file_contents("/trunk/file.txt", b"initial content").unwrap();
+        txn.commit().unwrap();
+
+        // Create second revision with a copy
+        let mut txn = fs.begin_txn(Revnum(1), 0).unwrap();
+        txn.change_prop("svn:log", "Branch").unwrap();
+        let mut root = txn.root().unwrap();
+        let rev1_root = fs.revision_root(Revnum(1)).unwrap();
+        root.copy(&rev1_root, "/trunk", "/branch").unwrap();
+        txn.commit().unwrap();
+
+        // Test node IDs
+        let root1 = fs.revision_root(Revnum(1)).unwrap();
+        let root2 = fs.revision_root(Revnum(2)).unwrap();
+
+        let trunk_id1 = root1.node_id("/trunk").unwrap();
+        let trunk_id2 = root2.node_id("/trunk").unwrap();
+        let branch_id = root2.node_id("/branch").unwrap();
+
+        // Test compare - same path, different revisions should be related
+        assert_eq!(trunk_id1.compare(&trunk_id2), 0);
+
+        // Test check_related - trunk and branch should be related (branch is a copy)
+        assert!(trunk_id2.check_related(&branch_id));
+
+        // Test eq
+        assert!(trunk_id1.eq(&trunk_id2));
+    }
+
+    #[test]
+    fn test_root_closest_copy() {
+        let dir = tempdir().unwrap();
+        let fs_path = dir.path().join("test-fs");
+
+        let mut fs = Fs::create(&fs_path).unwrap();
+
+        // Create initial revision
+        let mut txn = fs.begin_txn(Revnum(0), 0).unwrap();
+        txn.change_prop("svn:log", "Initial").unwrap();
+        let mut root = txn.root().unwrap();
+        root.make_dir("/trunk").unwrap();
+        root.make_file("/trunk/file.txt").unwrap();
+        txn.commit().unwrap();
+
+        // Create a branch (copy)
+        let mut txn = fs.begin_txn(Revnum(1), 0).unwrap();
+        txn.change_prop("svn:log", "Branch").unwrap();
+        let mut root = txn.root().unwrap();
+        let rev1_root = fs.revision_root(Revnum(1)).unwrap();
+        root.copy(&rev1_root, "/trunk", "/branch").unwrap();
+        txn.commit().unwrap();
+
+        let root = fs.revision_root(Revnum(2)).unwrap();
+
+        // Test closest_copy on a copied path
+        let result = root.closest_copy("/branch").unwrap();
+        assert!(result.is_some());
+        let (_copy_root, copy_path) = result.unwrap();
+        assert_eq!(copy_path, "/branch");
+
+        // Test on a non-copied path
+        let result = root.closest_copy("/trunk").unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_root_contents_and_props_different() {
+        let dir = tempdir().unwrap();
+        let fs_path = dir.path().join("test-fs");
+
+        let mut fs = Fs::create(&fs_path).unwrap();
+
+        // Create revision 1
+        let mut txn = fs.begin_txn(Revnum(0), 0).unwrap();
+        txn.change_prop("svn:log", "Rev 1").unwrap();
+        let mut root = txn.root().unwrap();
+        root.make_file("/file.txt").unwrap();
+        root.set_file_contents("/file.txt", b"content v1").unwrap();
+        root.change_node_prop("/file.txt", "custom:prop", b"value1").unwrap();
+        txn.commit().unwrap();
+
+        // Create revision 2 with changed content
+        let mut txn = fs.begin_txn(Revnum(1), 0).unwrap();
+        txn.change_prop("svn:log", "Rev 2").unwrap();
+        let mut root = txn.root().unwrap();
+        root.set_file_contents("/file.txt", b"content v2").unwrap();
+        txn.commit().unwrap();
+
+        // Create revision 3 with changed property
+        let mut txn = fs.begin_txn(Revnum(2), 0).unwrap();
+        txn.change_prop("svn:log", "Rev 3").unwrap();
+        let mut root = txn.root().unwrap();
+        root.change_node_prop("/file.txt", "custom:prop", b"value2").unwrap();
+        txn.commit().unwrap();
+
+        let root1 = fs.revision_root(Revnum(1)).unwrap();
+        let root2 = fs.revision_root(Revnum(2)).unwrap();
+        let root3 = fs.revision_root(Revnum(3)).unwrap();
+
+        // Test contents_different
+        assert!(root1.contents_different("/file.txt", &root2, "/file.txt").unwrap());
+        assert!(!root2.contents_different("/file.txt", &root3, "/file.txt").unwrap());
+
+        // Test props_different
+        assert!(!root1.props_different("/file.txt", &root2, "/file.txt").unwrap());
+        assert!(root2.props_different("/file.txt", &root3, "/file.txt").unwrap());
     }
 }

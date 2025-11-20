@@ -6586,6 +6586,229 @@ impl Conflict {
             }
         }
     }
+
+    /// Get the absolute path of the conflicted item
+    pub fn get_local_abspath(&self) -> &str {
+        unsafe {
+            let abspath = subversion_sys::svn_client_conflict_get_local_abspath(self.ptr);
+            std::ffi::CStr::from_ptr(abspath)
+                .to_str()
+                .unwrap()
+        }
+    }
+
+    /// Get the incoming change type
+    pub fn get_incoming_change(&self) -> crate::conflict::ConflictAction {
+        unsafe {
+            subversion_sys::svn_client_conflict_get_incoming_change(self.ptr).into()
+        }
+    }
+
+    /// Get the local change type
+    pub fn get_local_change(&self) -> crate::conflict::ConflictAction {
+        unsafe {
+            subversion_sys::svn_client_conflict_get_local_change(self.ptr).into()
+        }
+    }
+
+    /// Get repository root URL and UUID
+    pub fn get_repos_info(&self) -> Result<(Option<String>, Option<String>), Error> {
+        let pool = apr::pool::Pool::new();
+        let mut repos_root_url: *const i8 = std::ptr::null();
+        let mut repos_uuid: *const i8 = std::ptr::null();
+
+        unsafe {
+            let err = subversion_sys::svn_client_conflict_get_repos_info(
+                &mut repos_root_url,
+                &mut repos_uuid,
+                self.ptr,
+                pool.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            );
+            svn_result(err)?;
+
+            let root_url = if repos_root_url.is_null() {
+                None
+            } else {
+                Some(std::ffi::CStr::from_ptr(repos_root_url)
+                    .to_str()
+                    .unwrap()
+                    .to_owned())
+            };
+
+            let uuid = if repos_uuid.is_null() {
+                None
+            } else {
+                Some(std::ffi::CStr::from_ptr(repos_uuid)
+                    .to_str()
+                    .unwrap()
+                    .to_owned())
+            };
+
+            Ok((root_url, uuid))
+        }
+    }
+
+    /// Get the recommended option ID for resolving this conflict
+    pub fn get_recommended_option_id(&self) -> crate::ClientConflictOptionId {
+        unsafe {
+            subversion_sys::svn_client_conflict_get_recommended_option_id(self.ptr).into()
+        }
+    }
+
+    /// Get available resolution options for a text conflict
+    pub fn text_get_resolution_options(&self, ctx: &mut Context) -> Result<Vec<ConflictOption>, Error> {
+        let pool = apr::pool::Pool::new();
+        let mut options: *mut apr_sys::apr_array_header_t = std::ptr::null_mut();
+
+        unsafe {
+            let err = subversion_sys::svn_client_conflict_text_get_resolution_options(
+                &mut options,
+                self.ptr,
+                ctx.as_mut_ptr(),
+                self.pool.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            );
+            svn_result(err)?;
+
+            let mut result = Vec::new();
+            if !options.is_null() {
+                let array = apr::tables::TypedArray::<*mut subversion_sys::svn_client_conflict_option_t>::from_ptr(options);
+                for option_ptr in array.iter() {
+                    result.push(ConflictOption { ptr: option_ptr });
+                }
+            }
+            Ok(result)
+        }
+    }
+
+    /// Get available resolution options for a property conflict
+    pub fn prop_get_resolution_options(&self, ctx: &mut Context) -> Result<Vec<ConflictOption>, Error> {
+        let pool = apr::pool::Pool::new();
+        let mut options: *mut apr_sys::apr_array_header_t = std::ptr::null_mut();
+
+        unsafe {
+            let err = subversion_sys::svn_client_conflict_prop_get_resolution_options(
+                &mut options,
+                self.ptr,
+                ctx.as_mut_ptr(),
+                self.pool.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            );
+            svn_result(err)?;
+
+            let mut result = Vec::new();
+            if !options.is_null() {
+                let array = apr::tables::TypedArray::<*mut subversion_sys::svn_client_conflict_option_t>::from_ptr(options);
+                for option_ptr in array.iter() {
+                    result.push(ConflictOption { ptr: option_ptr });
+                }
+            }
+            Ok(result)
+        }
+    }
+
+    /// Get available resolution options for a tree conflict
+    pub fn tree_get_resolution_options(&self, ctx: &mut Context) -> Result<Vec<ConflictOption>, Error> {
+        let pool = apr::pool::Pool::new();
+        let mut options: *mut apr_sys::apr_array_header_t = std::ptr::null_mut();
+
+        unsafe {
+            let err = subversion_sys::svn_client_conflict_tree_get_resolution_options(
+                &mut options,
+                self.ptr,
+                ctx.as_mut_ptr(),
+                self.pool.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            );
+            svn_result(err)?;
+
+            let mut result = Vec::new();
+            if !options.is_null() {
+                let array = apr::tables::TypedArray::<*mut subversion_sys::svn_client_conflict_option_t>::from_ptr(options);
+                for option_ptr in array.iter() {
+                    result.push(ConflictOption { ptr: option_ptr });
+                }
+            }
+            Ok(result)
+        }
+    }
+
+    /// Get description of a tree conflict
+    ///
+    /// Returns a tuple of (incoming_change_description, local_change_description)
+    pub fn tree_get_description(&self, ctx: &mut Context) -> Result<(String, String), Error> {
+        let pool = apr::pool::Pool::new();
+        let mut incoming_desc: *const i8 = std::ptr::null();
+        let mut local_desc: *const i8 = std::ptr::null();
+
+        unsafe {
+            let err = subversion_sys::svn_client_conflict_tree_get_description(
+                &mut incoming_desc,
+                &mut local_desc,
+                self.ptr,
+                ctx.as_mut_ptr(),
+                self.pool.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            );
+            svn_result(err)?;
+
+            let incoming = std::ffi::CStr::from_ptr(incoming_desc)
+                .to_str()
+                .unwrap()
+                .to_owned();
+            let local = std::ffi::CStr::from_ptr(local_desc)
+                .to_str()
+                .unwrap()
+                .to_owned();
+
+            Ok((incoming, local))
+        }
+    }
+}
+
+/// Represents a conflict resolution option
+pub struct ConflictOption {
+    ptr: *mut subversion_sys::svn_client_conflict_option_t,
+}
+
+impl ConflictOption {
+    /// Get the option ID
+    pub fn get_id(&self) -> crate::ClientConflictOptionId {
+        unsafe {
+            subversion_sys::svn_client_conflict_option_get_id(self.ptr).into()
+        }
+    }
+
+    /// Get the human-readable label for this option
+    pub fn get_label(&self) -> String {
+        let pool = apr::pool::Pool::new();
+        unsafe {
+            let label = subversion_sys::svn_client_conflict_option_get_label(
+                self.ptr,
+                pool.as_mut_ptr(),
+            );
+            std::ffi::CStr::from_ptr(label)
+                .to_str()
+                .unwrap()
+                .to_owned()
+        }
+    }
+
+    /// Get the human-readable description for this option
+    pub fn get_description(&self) -> String {
+        let pool = apr::pool::Pool::new();
+        unsafe {
+            let desc = subversion_sys::svn_client_conflict_option_get_description(
+                self.ptr,
+                pool.as_mut_ptr(),
+            );
+            std::ffi::CStr::from_ptr(desc)
+                .to_str()
+                .unwrap()
+                .to_owned()
+        }
+    }
 }
 
 #[cfg(test)]
