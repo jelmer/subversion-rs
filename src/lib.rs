@@ -460,27 +460,6 @@ impl FromStr for Revision {
     }
 }
 
-#[cfg(feature = "pyo3")]
-impl pyo3::FromPyObject<'_> for Revision {
-    fn extract_bound(ob: &pyo3::Bound<pyo3::PyAny>) -> pyo3::PyResult<Self> {
-        use pyo3::prelude::*;
-        if ob.is_instance_of::<pyo3::types::PyString>() {
-            let rev = ob.extract::<String>()?;
-            return Revision::from_str(&rev).map_err(|e| {
-                pyo3::exceptions::PyValueError::new_err(format!("Invalid revision: {}", e))
-            });
-        } else if ob.is_instance_of::<pyo3::types::PyInt>() {
-            let rev = ob.extract::<i64>()?;
-            return Ok(Revision::Number(Revnum::from_raw(rev).unwrap()));
-        } else {
-            Err(pyo3::exceptions::PyTypeError::new_err(format!(
-                "Invalid revision: {:?}",
-                ob
-            )))
-        }
-    }
-}
-
 impl From<Revnum> for Revision {
     fn from(revnum: Revnum) -> Self {
         Revision::Number(revnum)
@@ -626,27 +605,6 @@ impl std::str::FromStr for Depth {
             "immediates" => Ok(Depth::Immediates),
             "infinity" => Ok(Depth::Infinity),
             _ => Err(format!("Invalid depth: {}", depth)),
-        }
-    }
-}
-
-#[cfg(feature = "pyo3")]
-impl pyo3::FromPyObject<'_> for Depth {
-    fn extract_bound(ob: &pyo3::Bound<pyo3::PyAny>) -> pyo3::PyResult<Self> {
-        use pyo3::prelude::*;
-        if ob.is_instance_of::<pyo3::types::PyString>() {
-            let depth = ob.extract::<String>()?;
-            return Depth::from_str(&depth).map_err(|e| {
-                pyo3::exceptions::PyValueError::new_err(format!("Invalid depth: {}", e))
-            });
-        } else if ob.is_instance_of::<pyo3::types::PyBool>() {
-            let depth = ob.extract::<bool>()?;
-            return Ok(if depth { Depth::Infinity } else { Depth::Empty });
-        } else {
-            Err(pyo3::exceptions::PyTypeError::new_err(format!(
-                "Invalid depth: {:?}",
-                ob
-            )))
         }
     }
 }
