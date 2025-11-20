@@ -94,6 +94,32 @@ impl From<AuthzAccess> for subversion_sys::svn_repos_authz_access_t {
     }
 }
 
+/// Revision access levels for determining what revision information is visible
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RevisionAccessLevel {
+    /// No access to revision properties and changed-paths information
+    None,
+    /// Access to some revision properties (svn:date, svn:author) and changed-paths for accessible paths
+    Partial,
+    /// Full access to all revision properties and changed-paths information
+    Full,
+}
+
+impl From<subversion_sys::svn_repos_revision_access_level_t> for RevisionAccessLevel {
+    fn from(level: subversion_sys::svn_repos_revision_access_level_t) -> Self {
+        if level == subversion_sys::svn_repos_revision_access_level_t_svn_repos_revision_access_none
+        {
+            RevisionAccessLevel::None
+        } else if level
+            == subversion_sys::svn_repos_revision_access_level_t_svn_repos_revision_access_partial
+        {
+            RevisionAccessLevel::Partial
+        } else {
+            RevisionAccessLevel::Full
+        }
+    }
+}
+
 /// Authorization data structure
 pub struct Authz {
     ptr: *mut subversion_sys::svn_authz_t,
@@ -2158,6 +2184,68 @@ impl Repos {
 
         Ok(unsafe { crate::fs::Transaction::from_ptr_and_pool(txn_ptr, pool) })
     }
+
+    /// Check the access level for a revision based on authorization rules
+    ///
+    /// This determines what revision metadata and changed-paths information
+    /// should be visible to a user based on their access to paths in the revision.
+    ///
+    /// - Full access: User can read all paths changed in the revision
+    /// - Partial access: User can read some but not all paths
+    /// - No access: User cannot read any paths changed in the revision
+    ///
+    /// If `authz` is None, returns Full access (no authorization checks).
+    pub fn check_revision_access(
+        &self,
+        revision: Revnum,
+        authz: Option<&Authz>,
+        _user: Option<&str>,
+    ) -> Result<RevisionAccessLevel, Error> {
+        let pool = apr::Pool::new();
+
+        // If no authz provided, grant full access
+        if authz.is_none() {
+            return Ok(RevisionAccessLevel::Full);
+        }
+
+        let authz = authz.unwrap();
+
+        // Create authz callback function
+        extern "C" fn authz_read_func(
+            allowed: *mut subversion_sys::svn_boolean_t,
+            _root: *mut subversion_sys::svn_fs_root_t,
+            path: *const std::os::raw::c_char,
+            baton: *mut std::ffi::c_void,
+            _pool: *mut apr_sys::apr_pool_t,
+        ) -> *mut subversion_sys::svn_error_t {
+            let authz = unsafe { &*(baton as *const Authz) };
+            let path_str = unsafe { std::ffi::CStr::from_ptr(path) }.to_str().unwrap();
+
+            match authz.check_access(None, path_str, None, AuthzAccess::Read) {
+                Ok(access) => {
+                    unsafe { *allowed = if access { 1 } else { 0 } };
+                    std::ptr::null_mut()
+                }
+                Err(e) => unsafe { e.into_raw() },
+            }
+        }
+
+        let mut access_level: subversion_sys::svn_repos_revision_access_level_t = 0;
+
+        let ret = unsafe {
+            subversion_sys::svn_repos_check_revision_access(
+                &mut access_level,
+                self.ptr,
+                revision.0,
+                Some(authz_read_func),
+                authz as *const Authz as *mut std::ffi::c_void,
+                pool.as_mut_ptr(),
+            )
+        };
+
+        svn_result(ret)?;
+        Ok(RevisionAccessLevel::from(access_level))
+    }
 }
 
 #[cfg(test)]
@@ -2386,6 +2474,62 @@ admin = rw
 
         let result = Authz::parse(invalid_authz, None);
         assert!(result.is_err(), "Should fail to parse invalid authz");
+    }
+
+    #[test]
+    fn test_check_revision_access() {
+        // Create a temporary repository
+        let temp_dir = tempfile::tempdir().unwrap();
+        let repo_path = temp_dir.path().join("test_repo");
+        let repo = Repos::create(&repo_path).unwrap();
+
+        // Create authz rules: allow read to /trunk, deny /secret
+        let authz_content = "[/trunk]\n* = r\n\n[/secret]\n* =\n";
+        let authz = Authz::parse(authz_content, None).unwrap();
+
+        // Create a revision with changes to both /trunk and /secret
+        let fs = repo.fs().unwrap();
+        let mut txn = fs.begin_txn(Revnum(0), 0).unwrap();
+        let mut root = txn.root().unwrap();
+        root.make_dir("/trunk").unwrap();
+        root.make_dir("/secret").unwrap();
+        root.make_file("/trunk/file.txt").unwrap();
+        root.make_file("/secret/password.txt").unwrap();
+        txn.commit().unwrap();
+
+        // Check access with no authz (should be full)
+        let access = repo.check_revision_access(Revnum(1), None, None).unwrap();
+        assert_eq!(access, RevisionAccessLevel::Full);
+
+        // Check access with authz that allows some paths (should be partial)
+        let access = repo
+            .check_revision_access(Revnum(1), Some(&authz), Some("user"))
+            .unwrap();
+        assert_eq!(access, RevisionAccessLevel::Partial);
+
+        // Create a revision with only allowed paths
+        let mut txn = fs.begin_txn(Revnum(1), 0).unwrap();
+        let mut root = txn.root().unwrap();
+        root.make_file("/trunk/another.txt").unwrap();
+        txn.commit().unwrap();
+
+        // Should have full access since all paths are readable
+        let access = repo
+            .check_revision_access(Revnum(2), Some(&authz), Some("user"))
+            .unwrap();
+        assert_eq!(access, RevisionAccessLevel::Full);
+
+        // Create a revision with only denied paths
+        let mut txn = fs.begin_txn(Revnum(2), 0).unwrap();
+        let mut root = txn.root().unwrap();
+        root.make_file("/secret/key.txt").unwrap();
+        txn.commit().unwrap();
+
+        // Should have no access since all paths are denied
+        let access = repo
+            .check_revision_access(Revnum(3), Some(&authz), Some("user"))
+            .unwrap();
+        assert_eq!(access, RevisionAccessLevel::None);
     }
 
     #[test]
