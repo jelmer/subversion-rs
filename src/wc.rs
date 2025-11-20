@@ -48,6 +48,22 @@ fn box_notify_baton(f: &dyn Fn(&Notify)) -> *mut std::ffi::c_void {
     Box::into_raw(Box::new(boxed)) as *mut std::ffi::c_void
 }
 
+fn box_conflict_baton(
+    f: &dyn Fn(&crate::conflict::ConflictDescription) -> Result<crate::conflict::ConflictResult, Error>,
+) -> *mut std::ffi::c_void {
+    let boxed: Box<dyn Fn(&crate::conflict::ConflictDescription) -> Result<crate::conflict::ConflictResult, Error>> =
+        Box::new(move |d| f(d));
+    Box::into_raw(Box::new(boxed)) as *mut std::ffi::c_void
+}
+
+fn box_external_baton(
+    f: &dyn Fn(&str, Option<&str>, Option<&str>, crate::Depth) -> Result<(), Error>,
+) -> *mut std::ffi::c_void {
+    let boxed: Box<dyn Fn(&str, Option<&str>, Option<&str>, crate::Depth) -> Result<(), Error>> =
+        Box::new(move |p, o, n, d| f(p, o, n, d));
+    Box::into_raw(Box::new(boxed)) as *mut std::ffi::c_void
+}
+
 unsafe fn free_cancel_baton(baton: *mut std::ffi::c_void) {
     drop(Box::from_raw(
         baton as *mut Box<Box<dyn Fn() -> Result<(), Error>>>,
@@ -712,6 +728,10 @@ pub fn get_update_editor4(
     adds_as_modification: bool,
     diff3_cmd: Option<&str>,
     preserved_exts: &[&str],
+    conflict_func: Option<&dyn Fn(&crate::conflict::ConflictDescription) -> Result<crate::conflict::ConflictResult, Error>>,
+    external_func: Option<&dyn Fn(&str, Option<&str>, Option<&str>, crate::Depth) -> Result<(), Error>>,
+    cancel_func: Option<&dyn Fn() -> Result<(), Error>>,
+    notify_func: Option<&dyn Fn(&Notify)>,
 ) -> Result<(UpdateEditor, crate::Revnum), crate::Error> {
     let anchor_abspath_cstr = std::ffi::CString::new(anchor_abspath)?;
     let target_basename_cstr = std::ffi::CString::new(target_basename)?;
@@ -732,6 +752,20 @@ pub fn get_update_editor4(
     let mut target_revision: subversion_sys::svn_revnum_t = 0;
     let mut editor_ptr: *const subversion_sys::svn_delta_editor_t = std::ptr::null();
     let mut edit_baton: *mut std::ffi::c_void = std::ptr::null_mut();
+
+    // Create batons for callbacks
+    let conflict_baton = conflict_func
+        .map(|f| box_conflict_baton(f))
+        .unwrap_or(std::ptr::null_mut());
+    let external_baton = external_func
+        .map(|f| box_external_baton(f))
+        .unwrap_or(std::ptr::null_mut());
+    let cancel_baton = cancel_func
+        .map(|f| box_cancel_baton(f))
+        .unwrap_or(std::ptr::null_mut());
+    let notify_baton = notify_func
+        .map(|f| box_notify_baton(f))
+        .unwrap_or(std::ptr::null_mut());
 
     let err = with_tmp_pool(|scratch_pool| {
         unsafe {
@@ -755,19 +789,64 @@ pub fn get_update_editor4(
                 std::ptr::null(), // preserved_exts - TODO: create proper apr_array_header_t
                 None,             // fetch_dirents_func
                 std::ptr::null_mut(), // fetch_baton
-                None,             // conflict_func
-                std::ptr::null_mut(), // conflict_baton
-                None,             // external_func
-                std::ptr::null_mut(), // external_baton
-                None,             // cancel_func
-                std::ptr::null_mut(), // cancel_baton
-                None,             // notify_func
-                std::ptr::null_mut(), // notify_baton
+                if conflict_func.is_some() {
+                    Some(wrap_conflict_func)
+                } else {
+                    None
+                },
+                conflict_baton,
+                if external_func.is_some() {
+                    Some(wrap_external_func)
+                } else {
+                    None
+                },
+                external_baton,
+                if cancel_func.is_some() {
+                    Some(crate::wrap_cancel_func)
+                } else {
+                    None
+                },
+                cancel_baton,
+                if notify_func.is_some() {
+                    Some(wrap_notify_func)
+                } else {
+                    None
+                },
+                notify_baton,
                 result_pool.as_mut_ptr(),
                 scratch_pool.as_mut_ptr(),
             ))
         }
     });
+
+    // Clean up callback batons
+    if !conflict_baton.is_null() {
+        unsafe {
+            drop(Box::from_raw(
+                conflict_baton
+                    as *mut Box<
+                        dyn Fn(&crate::conflict::ConflictDescription) -> Result<crate::conflict::ConflictResult, Error>,
+                    >,
+            ));
+        }
+    }
+    if !external_baton.is_null() {
+        unsafe {
+            drop(Box::from_raw(
+                external_baton as *mut Box<dyn Fn(&str, Option<&str>, Option<&str>, crate::Depth) -> Result<(), Error>>,
+            ));
+        }
+    }
+    if !cancel_baton.is_null() {
+        unsafe {
+            free_cancel_baton(cancel_baton);
+        }
+    }
+    if !notify_baton.is_null() {
+        unsafe {
+            drop(Box::from_raw(notify_baton as *mut Box<dyn Fn(&Notify)>));
+        }
+    }
 
     err?;
 
@@ -2345,6 +2424,91 @@ impl Notify {
     /// Get the fuzz factor the hunk was applied with (for patch operations)
     pub fn hunk_fuzz(&self) -> u64 {
         unsafe { (*self.ptr).hunk_fuzz as u64 }
+    }
+}
+
+/// Wrapper for conflict resolver callbacks
+extern "C" fn wrap_conflict_func(
+    result: *mut *mut subversion_sys::svn_wc_conflict_result_t,
+    description: *const subversion_sys::svn_wc_conflict_description2_t,
+    baton: *mut std::ffi::c_void,
+    result_pool: *mut apr_sys::apr_pool_t,
+    _scratch_pool: *mut apr_sys::apr_pool_t,
+) -> *mut subversion_sys::svn_error_t {
+    if baton.is_null() || description.is_null() || result.is_null() {
+        return std::ptr::null_mut();
+    }
+
+    let callback = unsafe {
+        &*(baton as *const Box<dyn Fn(&crate::conflict::ConflictDescription) -> Result<crate::conflict::ConflictResult, Error>>)
+    };
+
+    // Convert C description to Rust type
+    let desc = match unsafe { crate::conflict::ConflictDescription::from_raw(description) } {
+        Ok(d) => d,
+        Err(mut e) => return unsafe { e.detach() },
+    };
+
+    match callback(&desc) {
+        Ok(conflict_result) => {
+            // Convert Rust result to C result
+            unsafe {
+                *result = conflict_result.to_raw(result_pool);
+            }
+            std::ptr::null_mut()
+        }
+        Err(mut e) => unsafe { e.detach() },
+    }
+}
+
+/// Wrapper for external update callbacks
+extern "C" fn wrap_external_func(
+    baton: *mut std::ffi::c_void,
+    local_abspath: *const i8,
+    old_val: *const subversion_sys::svn_string_t,
+    new_val: *const subversion_sys::svn_string_t,
+    depth: subversion_sys::svn_depth_t,
+    _scratch_pool: *mut apr_sys::apr_pool_t,
+) -> *mut subversion_sys::svn_error_t {
+    if baton.is_null() || local_abspath.is_null() {
+        return std::ptr::null_mut();
+    }
+
+    let callback = unsafe {
+        &*(baton as *const Box<dyn Fn(&str, Option<&str>, Option<&str>, crate::Depth) -> Result<(), Error>>)
+    };
+
+    let path_str = unsafe {
+        std::ffi::CStr::from_ptr(local_abspath)
+            .to_str()
+            .unwrap_or("")
+    };
+
+    let old_str = if old_val.is_null() {
+        None
+    } else {
+        unsafe {
+            let data = (*old_val).data as *const u8;
+            let len = (*old_val).len;
+            std::str::from_utf8(std::slice::from_raw_parts(data, len)).ok()
+        }
+    };
+
+    let new_str = if new_val.is_null() {
+        None
+    } else {
+        unsafe {
+            let data = (*new_val).data as *const u8;
+            let len = (*new_val).len;
+            std::str::from_utf8(std::slice::from_raw_parts(data, len)).ok()
+        }
+    };
+
+    let depth_enum = crate::Depth::from(depth);
+
+    match callback(path_str, old_str, new_str, depth_enum) {
+        Ok(()) => std::ptr::null_mut(),
+        Err(mut e) => unsafe { e.detach() },
     }
 }
 

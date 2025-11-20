@@ -157,10 +157,14 @@ pub struct ConflictDescription {
 
 impl ConflictDescription {
     /// Create from raw SVN conflict description
-    pub unsafe fn from_raw(desc: *const subversion_sys::svn_wc_conflict_description2_t) -> Self {
+    pub(crate) unsafe fn from_raw(desc: *const subversion_sys::svn_wc_conflict_description2_t) -> Result<Self, Error> {
+        if desc.is_null() {
+            return Err(Error::from_str("Null conflict description"));
+        }
+
         let d = &*desc;
 
-        Self {
+        Ok(Self {
             local_abspath: CStr::from_ptr(d.local_abspath)
                 .to_string_lossy()
                 .into_owned(),
@@ -213,7 +217,7 @@ impl ConflictDescription {
             },
             src_left_version: ConflictVersion::from_raw(d.src_left_version),
             src_right_version: ConflictVersion::from_raw(d.src_right_version),
-        }
+        })
     }
 }
 
@@ -298,6 +302,29 @@ impl Default for ConflictResult {
             merged_file: None,
             save_merged: false,
         }
+    }
+}
+
+impl ConflictResult {
+    /// Convert to raw SVN conflict result
+    pub(crate) unsafe fn to_raw(&self, pool: *mut apr_sys::apr_pool_t) -> *mut subversion_sys::svn_wc_conflict_result_t {
+        let merged_file_cstr;
+        let merged_file_ptr = if let Some(ref merged_file) = self.merged_file {
+            merged_file_cstr = std::ffi::CString::new(merged_file.as_str()).unwrap();
+            merged_file_cstr.as_ptr()
+        } else {
+            std::ptr::null()
+        };
+
+        let result = subversion_sys::svn_wc_create_conflict_result(
+            self.choice.to_raw(),
+            merged_file_ptr,
+            pool,
+        );
+
+        (*result).save_merged = if self.save_merged { 1 } else { 0 };
+
+        result
     }
 }
 
@@ -421,7 +448,13 @@ pub(crate) unsafe extern "C" fn conflict_resolver_callback(
     }
 
     let resolver_baton = &mut *(baton as *mut ConflictResolverBaton);
-    let conflict_desc = ConflictDescription::from_raw(description);
+    let conflict_desc = match ConflictDescription::from_raw(description) {
+        Ok(desc) => desc,
+        Err(mut e) => {
+            *result = std::ptr::null_mut();
+            return e.detach();
+        }
+    };
 
     match resolver_baton.resolver.resolve(&conflict_desc) {
         Ok(resolution) => {
