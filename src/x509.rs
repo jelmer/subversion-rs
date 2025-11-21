@@ -295,20 +295,105 @@ pub fn parse_certificate_der(der_data: &[u8]) -> Result<CertificateInfo, Error> 
         return Err(Error::from_str("Empty DER data"));
     }
 
-    // TODO: When available, implement DER parsing
-    // This would involve parsing ASN.1 structure
+    let pool = apr::Pool::new();
+    let mut certinfo: *const subversion_sys::svn_x509_certinfo_t = std::ptr::null();
 
-    // For now, return a placeholder certificate
+    let err = unsafe {
+        subversion_sys::svn_x509_parse_cert(
+            &mut certinfo,
+            der_data.as_ptr() as *const i8,
+            der_data.len(),
+            pool.as_mut_ptr(),
+            pool.as_mut_ptr(),
+        )
+    };
+    Error::from_raw(err)?;
+
+    if certinfo.is_null() {
+        return Err(Error::from_str("Failed to parse certificate"));
+    }
+
+    // Extract certificate information
+    let subject = unsafe {
+        let subject_ptr =
+            subversion_sys::svn_x509_certinfo_get_subject(certinfo, pool.as_mut_ptr());
+        if subject_ptr.is_null() {
+            "".to_string()
+        } else {
+            std::ffi::CStr::from_ptr(subject_ptr)
+                .to_str()
+                .unwrap_or("")
+                .to_string()
+        }
+    };
+
+    let issuer = unsafe {
+        let issuer_ptr = subversion_sys::svn_x509_certinfo_get_issuer(certinfo, pool.as_mut_ptr());
+        if issuer_ptr.is_null() {
+            "".to_string()
+        } else {
+            std::ffi::CStr::from_ptr(issuer_ptr)
+                .to_str()
+                .unwrap_or("")
+                .to_string()
+        }
+    };
+
+    let valid_from = unsafe {
+        let time = subversion_sys::svn_x509_certinfo_get_valid_from(certinfo);
+        // APR time is in microseconds since epoch
+        UNIX_EPOCH + Duration::from_micros(time as u64)
+    };
+
+    let valid_until = unsafe {
+        let time = subversion_sys::svn_x509_certinfo_get_valid_to(certinfo);
+        UNIX_EPOCH + Duration::from_micros(time as u64)
+    };
+
+    let fingerprint = unsafe {
+        let digest = subversion_sys::svn_x509_certinfo_get_digest(certinfo);
+        if digest.is_null() || (*digest).data.is_null() {
+            "".to_string()
+        } else {
+            let slice = std::slice::from_raw_parts((*digest).data as *const u8, (*digest).len);
+            slice
+                .iter()
+                .map(|b| format!("{:02x}", b))
+                .collect::<Vec<_>>()
+                .join(":")
+        }
+    };
+
+    let subject_alt_names = unsafe {
+        let hostnames = subversion_sys::svn_x509_certinfo_get_hostnames(certinfo);
+        if hostnames.is_null() {
+            Vec::new()
+        } else {
+            let arr = apr::tables::ArrayHeader::from_raw_parts(hostnames, &pool);
+            let mut names = Vec::new();
+            for i in 0..arr.len() {
+                if let Some(ptr) = arr.get::<*const i8>(i as usize) {
+                    if !ptr.is_null() {
+                        if let Ok(s) = std::ffi::CStr::from_ptr(ptr).to_str() {
+                            names.push(s.to_string());
+                        }
+                    }
+                }
+            }
+            names
+        }
+    };
+
     Ok(CertificateInfo {
-        subject: "CN=placeholder-der".to_string(),
-        issuer: "CN=placeholder-der-ca".to_string(),
-        serial_number: "01".to_string(),
-        valid_from: UNIX_EPOCH,
-        valid_until: UNIX_EPOCH + Duration::from_secs(365 * 24 * 3600), // 1 year
-        fingerprint: "01:01:01:01:01:01:01:01:01:01:01:01:01:01:01:01:01:01:01:01".to_string(),
-        signature_algorithm: "sha256WithRSAEncryption".to_string(),
+        subject,
+        issuer,
+        serial_number: "".to_string(), // Not directly available from SVN API
+        valid_from,
+        valid_until,
+        fingerprint,
+        signature_algorithm: "".to_string(), // Not directly available from SVN API
         version: 3,
-        subject_alt_names: Vec::new(),
+        subject_alt_names,
         key_usage: Vec::new(),
         extended_key_usage: Vec::new(),
     })
