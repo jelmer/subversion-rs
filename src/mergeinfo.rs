@@ -1,20 +1,17 @@
+use crate::{svn_result, Error, Revision, Revnum};
+use std::collections::HashMap;
 use std::marker::PhantomData;
 use subversion_sys::svn_mergeinfo_t;
 
 /// Mergeinfo handle with RAII cleanup
-#[allow(dead_code)]
 pub struct Mergeinfo {
-    ptr: *mut svn_mergeinfo_t,
+    ptr: svn_mergeinfo_t,
     pool: apr::Pool<'static>,
     _phantom: PhantomData<*mut ()>, // !Send + !Sync
 }
 
 impl Mergeinfo {
-    #[allow(dead_code)]
-    pub(crate) unsafe fn from_ptr_and_pool(
-        ptr: *mut svn_mergeinfo_t,
-        pool: apr::Pool<'static>,
-    ) -> Self {
+    pub(crate) unsafe fn from_ptr_and_pool(ptr: svn_mergeinfo_t, pool: apr::Pool<'static>) -> Self {
         Self {
             ptr,
             pool,
@@ -22,14 +19,177 @@ impl Mergeinfo {
         }
     }
 
-    /// Gets the raw pointer to the mergeinfo.
-    pub fn as_ptr(&self) -> *const svn_mergeinfo_t {
-        self.ptr
+    /// Parse a mergeinfo string into a Mergeinfo struct.
+    ///
+    /// The input string should be in the standard mergeinfo format:
+    /// `/path:rev1,rev2-rev3\n/other/path:rev4`
+    pub fn parse(input: &str) -> Result<Self, Error> {
+        let pool = apr::Pool::new();
+        let input_cstr = std::ffi::CString::new(input)
+            .map_err(|_| Error::from_str("Invalid mergeinfo string"))?;
+
+        unsafe {
+            let mut mergeinfo: svn_mergeinfo_t = std::ptr::null_mut();
+            let err = subversion_sys::svn_mergeinfo_parse(
+                &mut mergeinfo,
+                input_cstr.as_ptr(),
+                pool.as_mut_ptr(),
+            );
+            svn_result(err)?;
+            Ok(Self::from_ptr_and_pool(mergeinfo, pool))
+        }
     }
 
-    /// Gets the mutable raw pointer to the mergeinfo.
-    pub fn as_mut_ptr(&mut self) -> *mut svn_mergeinfo_t {
-        self.ptr
+    /// Convert this mergeinfo to a string representation.
+    pub fn to_string(&self) -> Result<String, Error> {
+        unsafe {
+            let mut output: *mut subversion_sys::svn_string_t = std::ptr::null_mut();
+            let err = subversion_sys::svn_mergeinfo_to_string(
+                &mut output,
+                self.ptr,
+                self.pool.as_mut_ptr(),
+            );
+            svn_result(err)?;
+
+            if output.is_null() || (*output).data.is_null() {
+                return Ok(String::new());
+            }
+
+            let data_slice = std::slice::from_raw_parts((*output).data as *const u8, (*output).len);
+            Ok(std::str::from_utf8(data_slice)
+                .map_err(|_| Error::from_str("Mergeinfo string is not valid UTF-8"))?
+                .to_string())
+        }
+    }
+
+    /// Merge another mergeinfo into this one.
+    pub fn merge(&mut self, other: &Mergeinfo) -> Result<(), Error> {
+        unsafe {
+            let err = subversion_sys::svn_mergeinfo_merge2(
+                self.ptr,
+                other.ptr,
+                self.pool.as_mut_ptr(),
+                self.pool.as_mut_ptr(),
+            );
+            svn_result(err)
+        }
+    }
+
+    /// Remove revisions in `eraser` from this mergeinfo.
+    pub fn remove(&self, eraser: &Mergeinfo) -> Result<Mergeinfo, Error> {
+        let pool = apr::Pool::new();
+        unsafe {
+            let mut result: svn_mergeinfo_t = std::ptr::null_mut();
+            let err = subversion_sys::svn_mergeinfo_remove2(
+                &mut result,
+                eraser.ptr,
+                self.ptr,
+                1, // consider_inheritance
+                pool.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            );
+            svn_result(err)?;
+            Ok(Mergeinfo::from_ptr_and_pool(result, pool))
+        }
+    }
+
+    /// Compute the intersection of this mergeinfo with another.
+    pub fn intersect(&self, other: &Mergeinfo) -> Result<Mergeinfo, Error> {
+        let pool = apr::Pool::new();
+        unsafe {
+            let mut result: svn_mergeinfo_t = std::ptr::null_mut();
+            let err = subversion_sys::svn_mergeinfo_intersect2(
+                &mut result,
+                self.ptr,
+                other.ptr,
+                1, // consider_inheritance
+                pool.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            );
+            svn_result(err)?;
+            Ok(Mergeinfo::from_ptr_and_pool(result, pool))
+        }
+    }
+
+    /// Compute the difference between this mergeinfo and another.
+    ///
+    /// Returns (deleted, added) where:
+    /// - deleted: mergeinfo in `self` but not in `other`
+    /// - added: mergeinfo in `other` but not in `self`
+    pub fn diff(&self, other: &Mergeinfo) -> Result<(Mergeinfo, Mergeinfo), Error> {
+        let pool1 = apr::Pool::new();
+        let pool2 = apr::Pool::new();
+        unsafe {
+            let mut deleted: svn_mergeinfo_t = std::ptr::null_mut();
+            let mut added: svn_mergeinfo_t = std::ptr::null_mut();
+            let err = subversion_sys::svn_mergeinfo_diff2(
+                &mut deleted,
+                &mut added,
+                self.ptr,
+                other.ptr,
+                1, // consider_inheritance
+                pool1.as_mut_ptr(),
+                pool1.as_mut_ptr(),
+            );
+            svn_result(err)?;
+            Ok((
+                Mergeinfo::from_ptr_and_pool(deleted, pool1),
+                Mergeinfo::from_ptr_and_pool(added, pool2),
+            ))
+        }
+    }
+
+    /// Duplicate this mergeinfo.
+    pub fn dup(&self) -> Mergeinfo {
+        let pool = apr::Pool::new();
+        unsafe {
+            let result = subversion_sys::svn_mergeinfo_dup(self.ptr, pool.as_mut_ptr());
+            Mergeinfo::from_ptr_and_pool(result, pool)
+        }
+    }
+
+    /// Sort the mergeinfo.
+    pub fn sort(&mut self) -> Result<(), Error> {
+        unsafe {
+            let err = subversion_sys::svn_mergeinfo_sort(self.ptr, self.pool.as_mut_ptr());
+            svn_result(err)
+        }
+    }
+
+    /// Get the paths in this mergeinfo as a HashMap of path -> revision ranges.
+    pub fn paths(&self) -> HashMap<String, Vec<crate::RevisionRange>> {
+        let mut result = HashMap::new();
+
+        if self.ptr.is_null() {
+            return result;
+        }
+
+        unsafe {
+            let hash =
+                apr::hash::TypedHash::<subversion_sys::svn_rangelist_t>::from_ptr(self.ptr as _);
+
+            for (key, rangelist) in hash.iter() {
+                let path = std::str::from_utf8(key)
+                    .expect("mergeinfo path is not valid UTF-8")
+                    .to_string();
+
+                let mut ranges = Vec::new();
+                let array = apr::tables::TypedArray::<subversion_sys::svn_merge_range_t>::from_ptr(
+                    rangelist as *const _ as *mut _,
+                );
+
+                for range in array.iter() {
+                    ranges.push(crate::RevisionRange {
+                        start: Revision::Number(Revnum(range.start)),
+                        end: Revision::Number(Revnum(range.end)),
+                    });
+                }
+
+                result.insert(path, ranges);
+            }
+        }
+
+        result
     }
 }
 
@@ -88,14 +248,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_mergeinfo_creation() {
-        // Test creating Mergeinfo from raw pointer and pool
-        let pool = apr::Pool::new();
-        let ptr = pool.calloc::<svn_mergeinfo_t>();
-
-        let mergeinfo = unsafe { Mergeinfo::from_ptr_and_pool(ptr, pool) };
-        assert_eq!(mergeinfo.as_ptr(), ptr);
-        assert!(!mergeinfo.as_ptr().is_null());
+    fn test_mergeinfo_parse() {
+        let mergeinfo = Mergeinfo::parse("/trunk:1-10").unwrap();
+        let s = mergeinfo.to_string().unwrap();
+        assert_eq!(s, "/trunk:1-10");
     }
 
     #[test]
@@ -159,46 +315,17 @@ mod tests {
     #[test]
     fn test_mergeinfo_drop() {
         // Test that Mergeinfo can be dropped without panic
-        let pool = apr::Pool::new();
-        let ptr = pool.calloc::<svn_mergeinfo_t>();
-
         {
-            let _mergeinfo = unsafe { Mergeinfo::from_ptr_and_pool(ptr, apr::Pool::new()) };
+            let _mergeinfo = Mergeinfo::parse("/trunk:1-5").unwrap();
             // mergeinfo is dropped here
         }
-
         // No panic should occur
     }
 
     #[test]
-    fn test_mergeinfo_not_send_not_sync() {
-        // Verify that Mergeinfo is !Send and !Sync due to PhantomData<*mut ()>
-        fn assert_not_send<T>()
-        where
-            T: ?Sized,
-        {
-            // This function body is empty - the check happens at compile time
-        }
-
-        fn assert_not_sync<T>()
-        where
-            T: ?Sized,
-        {
-            // This function body is empty - the check happens at compile time
-        }
-
-        // These will compile only if Mergeinfo is !Send and !Sync
-        assert_not_send::<Mergeinfo>();
-        assert_not_sync::<Mergeinfo>();
-    }
-
-    #[test]
-    fn test_mergeinfo_as_mut_ptr() {
-        let pool = apr::Pool::new();
-        let ptr = pool.calloc::<svn_mergeinfo_t>();
-
-        let mut mergeinfo = unsafe { Mergeinfo::from_ptr_and_pool(ptr, pool) };
-        let mut_ptr = mergeinfo.as_mut_ptr();
-        assert_eq!(mut_ptr, ptr);
+    fn test_mergeinfo_dup() {
+        let mergeinfo = Mergeinfo::parse("/trunk:1-10").unwrap();
+        let dup = mergeinfo.dup();
+        assert_eq!(dup.to_string().unwrap(), "/trunk:1-10");
     }
 }

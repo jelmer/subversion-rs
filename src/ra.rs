@@ -878,7 +878,7 @@ impl<'a> Session<'a> {
                 // The value is already apr_hash_t* (svn_mergeinfo_t)
                 (String::from_utf8_lossy(k).into_owned(), unsafe {
                     crate::mergeinfo::Mergeinfo::from_ptr_and_pool(
-                        v as *mut *mut apr_sys::apr_hash_t,
+                        v as *mut apr_sys::apr_hash_t,
                         apr::Pool::new(),
                     )
                 })

@@ -817,6 +817,18 @@ impl<'pool> LogEntry<'pool> {
         unsafe { (*self.ptr).has_children != 0 }
     }
 
+    /// Whether this revision should be interpreted as non-inheritable
+    ///
+    /// Only set when this log entry is returned by the mergeinfo APIs.
+    pub fn non_inheritable(&self) -> bool {
+        unsafe { (*self.ptr).non_inheritable != 0 }
+    }
+
+    /// Whether this revision is a merged revision resulting from a reverse merge
+    pub fn subtractive_merge(&self) -> bool {
+        unsafe { (*self.ptr).subtractive_merge != 0 }
+    }
+
     /// Get all revision properties as a HashMap
     pub fn revprops(&self) -> std::collections::HashMap<String, Vec<u8>> {
         unsafe {
