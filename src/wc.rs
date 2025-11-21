@@ -781,45 +781,17 @@ pub fn get_update_editor4<'a>(
     wc_ctx: &'a mut Context,
     anchor_abspath: &str,
     target_basename: &str,
-    use_commit_times: bool,
-    depth: crate::Depth,
-    depth_is_sticky: bool,
-    allow_unver_obstructions: bool,
-    adds_as_modification: bool,
-    server_performs_filtering: bool,
-    clean_checkout: bool,
-    diff3_cmd: Option<&str>,
-    preserved_exts: &[&str],
-    fetch_dirents_func: Option<
-        Box<
-            dyn Fn(
-                &str,
-                &str,
-            )
-                -> Result<std::collections::HashMap<String, crate::ra::Dirent>, Error>,
-        >,
-    >,
-    conflict_func: Option<
-        Box<
-            dyn Fn(
-                &crate::conflict::ConflictDescription,
-            ) -> Result<crate::conflict::ConflictResult, Error>,
-        >,
-    >,
-    external_func: Option<
-        Box<dyn Fn(&str, Option<&str>, Option<&str>, crate::Depth) -> Result<(), Error>>,
-    >,
-    cancel_func: Option<Box<dyn Fn() -> Result<(), Error>>>,
-    notify_func: Option<Box<dyn Fn(&Notify)>>,
+    options: UpdateEditorOptions,
 ) -> Result<(UpdateEditor<'a>, crate::Revnum), crate::Error> {
     let anchor_abspath_cstr = std::ffi::CString::new(anchor_abspath)?;
     let target_basename_cstr = std::ffi::CString::new(target_basename)?;
-    let diff3_cmd_cstr = diff3_cmd.map(std::ffi::CString::new).transpose()?;
+    let diff3_cmd_cstr = options.diff3_cmd.map(std::ffi::CString::new).transpose()?;
 
     let result_pool = apr::Pool::new();
 
     // Create preserved extensions array
-    let preserved_exts_cstrs: Vec<std::ffi::CString> = preserved_exts
+    let preserved_exts_cstrs: Vec<std::ffi::CString> = options
+        .preserved_exts
         .iter()
         .map(|&s| std::ffi::CString::new(s))
         .collect::<Result<Vec<_>, _>>()?;
@@ -840,81 +812,92 @@ pub fn get_update_editor4<'a>(
     let mut edit_baton: *mut std::ffi::c_void = std::ptr::null_mut();
 
     // Create batons for callbacks
-    let has_fetch_dirents = fetch_dirents_func.is_some();
-    let fetch_dirents_baton = fetch_dirents_func
+    let has_fetch_dirents = options.fetch_dirents_func.is_some();
+    let fetch_dirents_baton = options
+        .fetch_dirents_func
         .map(|f| box_fetch_dirents_baton(f))
         .unwrap_or(std::ptr::null_mut());
-    let has_conflict = conflict_func.is_some();
-    let conflict_baton = conflict_func
+    let has_conflict = options.conflict_func.is_some();
+    let conflict_baton = options
+        .conflict_func
         .map(|f| box_conflict_baton(f))
         .unwrap_or(std::ptr::null_mut());
-    let has_external = external_func.is_some();
-    let external_baton = external_func
+    let has_external = options.external_func.is_some();
+    let external_baton = options
+        .external_func
         .map(|f| box_external_baton(f))
         .unwrap_or(std::ptr::null_mut());
-    let has_cancel = cancel_func.is_some();
-    let cancel_baton = cancel_func
+    let has_cancel = options.cancel_func.is_some();
+    let cancel_baton = options
+        .cancel_func
         .map(|f| box_cancel_baton(f))
         .unwrap_or(std::ptr::null_mut());
-    let has_notify = notify_func.is_some();
-    let notify_baton = notify_func
+    let has_notify = options.notify_func.is_some();
+    let notify_baton = options
+        .notify_func
         .map(|f| box_notify_baton(f))
         .unwrap_or(std::ptr::null_mut());
 
-    let err = with_tmp_pool(|scratch_pool| {
-        unsafe {
-            svn_result(subversion_sys::svn_wc_get_update_editor4(
-                &mut editor_ptr,
-                &mut edit_baton,
-                &mut target_revision,
-                wc_ctx.as_mut_ptr(),
-                anchor_abspath_cstr.as_ptr(),
-                target_basename_cstr.as_ptr(),
-                if use_commit_times { 1 } else { 0 }, // use_commit_times
-                depth.into(),
-                if depth_is_sticky { 1 } else { 0 },
-                if allow_unver_obstructions { 1 } else { 0 },
-                if adds_as_modification { 1 } else { 0 },
-                if server_performs_filtering { 1 } else { 0 },
-                if clean_checkout { 1 } else { 0 },
-                diff3_cmd_cstr
-                    .as_ref()
-                    .map_or(std::ptr::null(), |c| c.as_ptr()),
-                preserved_exts_apr,
-                if has_fetch_dirents {
-                    Some(wrap_fetch_dirents_func)
-                } else {
-                    None
-                },
-                fetch_dirents_baton,
-                if has_conflict {
-                    Some(wrap_conflict_func)
-                } else {
-                    None
-                },
-                conflict_baton,
-                if has_external {
-                    Some(wrap_external_func)
-                } else {
-                    None
-                },
-                external_baton,
-                if has_cancel {
-                    Some(crate::wrap_cancel_func)
-                } else {
-                    None
-                },
-                cancel_baton,
-                if has_notify {
-                    Some(wrap_notify_func)
-                } else {
-                    None
-                },
-                notify_baton,
-                result_pool.as_mut_ptr(),
-                scratch_pool.as_mut_ptr(),
-            ))
-        }
+    let err = with_tmp_pool(|scratch_pool| unsafe {
+        svn_result(subversion_sys::svn_wc_get_update_editor4(
+            &mut editor_ptr,
+            &mut edit_baton,
+            &mut target_revision,
+            wc_ctx.as_mut_ptr(),
+            anchor_abspath_cstr.as_ptr(),
+            target_basename_cstr.as_ptr(),
+            if options.use_commit_times { 1 } else { 0 },
+            options.depth.into(),
+            if options.depth_is_sticky { 1 } else { 0 },
+            if options.allow_unver_obstructions {
+                1
+            } else {
+                0
+            },
+            if options.adds_as_modification { 1 } else { 0 },
+            if options.server_performs_filtering {
+                1
+            } else {
+                0
+            },
+            if options.clean_checkout { 1 } else { 0 },
+            diff3_cmd_cstr
+                .as_ref()
+                .map_or(std::ptr::null(), |c| c.as_ptr()),
+            preserved_exts_apr,
+            if has_fetch_dirents {
+                Some(wrap_fetch_dirents_func)
+            } else {
+                None
+            },
+            fetch_dirents_baton,
+            if has_conflict {
+                Some(wrap_conflict_func)
+            } else {
+                None
+            },
+            conflict_baton,
+            if has_external {
+                Some(wrap_external_func)
+            } else {
+                None
+            },
+            external_baton,
+            if has_cancel {
+                Some(crate::wrap_cancel_func)
+            } else {
+                None
+            },
+            cancel_baton,
+            if has_notify {
+                Some(wrap_notify_func)
+            } else {
+                None
+            },
+            notify_baton,
+            result_pool.as_mut_ptr(),
+            scratch_pool.as_mut_ptr(),
+        ))
     });
 
     err?;
@@ -955,6 +938,190 @@ pub fn get_update_editor4<'a>(
 
 // Type-erased dropper function for callback batons
 type DropperFn = unsafe fn(*mut std::ffi::c_void);
+
+/// Options for get_update_editor4 function.
+#[derive(Default)]
+pub struct UpdateEditorOptions<'a> {
+    /// If true, use commit times for file timestamps.
+    pub use_commit_times: bool,
+    /// Depth of the update operation.
+    pub depth: crate::Depth,
+    /// If true, depth changes are sticky.
+    pub depth_is_sticky: bool,
+    /// If true, allow unversioned obstructions.
+    pub allow_unver_obstructions: bool,
+    /// If true, treat adds as modifications.
+    pub adds_as_modification: bool,
+    /// If true, server performs filtering.
+    pub server_performs_filtering: bool,
+    /// If true, this is a clean checkout.
+    pub clean_checkout: bool,
+    /// Path to diff3 command for merging.
+    pub diff3_cmd: Option<&'a str>,
+    /// File extensions to preserve during merge.
+    pub preserved_exts: Vec<&'a str>,
+    /// Callback to fetch directory entries.
+    pub fetch_dirents_func: Option<
+        Box<
+            dyn Fn(
+                &str,
+                &str,
+            )
+                -> Result<std::collections::HashMap<String, crate::ra::Dirent>, Error>,
+        >,
+    >,
+    /// Callback for conflict resolution.
+    pub conflict_func: Option<
+        Box<
+            dyn Fn(
+                &crate::conflict::ConflictDescription,
+            ) -> Result<crate::conflict::ConflictResult, Error>,
+        >,
+    >,
+    /// Callback for external definitions.
+    pub external_func:
+        Option<Box<dyn Fn(&str, Option<&str>, Option<&str>, crate::Depth) -> Result<(), Error>>>,
+    /// Callback for cancellation.
+    pub cancel_func: Option<Box<dyn Fn() -> Result<(), Error>>>,
+    /// Callback for notifications.
+    pub notify_func: Option<Box<dyn Fn(&Notify)>>,
+}
+
+impl<'a> UpdateEditorOptions<'a> {
+    /// Creates new UpdateEditorOptions with default values.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets whether to use commit times.
+    pub fn with_use_commit_times(mut self, use_commit_times: bool) -> Self {
+        self.use_commit_times = use_commit_times;
+        self
+    }
+
+    /// Sets the depth for the operation.
+    pub fn with_depth(mut self, depth: crate::Depth) -> Self {
+        self.depth = depth;
+        self
+    }
+
+    /// Sets whether depth is sticky.
+    pub fn with_depth_is_sticky(mut self, sticky: bool) -> Self {
+        self.depth_is_sticky = sticky;
+        self
+    }
+
+    /// Sets whether to allow unversioned obstructions.
+    pub fn with_allow_unver_obstructions(mut self, allow: bool) -> Self {
+        self.allow_unver_obstructions = allow;
+        self
+    }
+
+    /// Sets whether adds are treated as modifications.
+    pub fn with_adds_as_modification(mut self, adds_as_mod: bool) -> Self {
+        self.adds_as_modification = adds_as_mod;
+        self
+    }
+
+    /// Sets the diff3 command path.
+    pub fn with_diff3_cmd(mut self, cmd: &'a str) -> Self {
+        self.diff3_cmd = Some(cmd);
+        self
+    }
+
+    /// Sets the preserved extensions.
+    pub fn with_preserved_exts(mut self, exts: Vec<&'a str>) -> Self {
+        self.preserved_exts = exts;
+        self
+    }
+}
+
+/// Options for get_switch_editor function.
+#[derive(Default)]
+pub struct SwitchEditorOptions<'a> {
+    /// If true, use commit times for file timestamps.
+    pub use_commit_times: bool,
+    /// Depth of the switch operation.
+    pub depth: crate::Depth,
+    /// If true, depth changes are sticky.
+    pub depth_is_sticky: bool,
+    /// If true, allow unversioned obstructions.
+    pub allow_unver_obstructions: bool,
+    /// If true, server performs filtering.
+    pub server_performs_filtering: bool,
+    /// Path to diff3 command for merging.
+    pub diff3_cmd: Option<&'a str>,
+    /// File extensions to preserve during merge.
+    pub preserved_exts: Vec<&'a str>,
+    /// Callback to fetch directory entries.
+    pub fetch_dirents_func: Option<
+        Box<
+            dyn Fn(
+                &str,
+                &str,
+            )
+                -> Result<std::collections::HashMap<String, crate::ra::Dirent>, Error>,
+        >,
+    >,
+    /// Callback for conflict resolution.
+    pub conflict_func: Option<
+        Box<
+            dyn Fn(
+                &crate::conflict::ConflictDescription,
+            ) -> Result<crate::conflict::ConflictResult, Error>,
+        >,
+    >,
+    /// Callback for external definitions.
+    pub external_func:
+        Option<Box<dyn Fn(&str, Option<&str>, Option<&str>, crate::Depth) -> Result<(), Error>>>,
+    /// Callback for cancellation.
+    pub cancel_func: Option<Box<dyn Fn() -> Result<(), Error>>>,
+    /// Callback for notifications.
+    pub notify_func: Option<Box<dyn Fn(&Notify)>>,
+}
+
+impl<'a> SwitchEditorOptions<'a> {
+    /// Creates new SwitchEditorOptions with default values.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets whether to use commit times.
+    pub fn with_use_commit_times(mut self, use_commit_times: bool) -> Self {
+        self.use_commit_times = use_commit_times;
+        self
+    }
+
+    /// Sets the depth for the operation.
+    pub fn with_depth(mut self, depth: crate::Depth) -> Self {
+        self.depth = depth;
+        self
+    }
+
+    /// Sets whether depth is sticky.
+    pub fn with_depth_is_sticky(mut self, sticky: bool) -> Self {
+        self.depth_is_sticky = sticky;
+        self
+    }
+
+    /// Sets whether to allow unversioned obstructions.
+    pub fn with_allow_unver_obstructions(mut self, allow: bool) -> Self {
+        self.allow_unver_obstructions = allow;
+        self
+    }
+
+    /// Sets the diff3 command path.
+    pub fn with_diff3_cmd(mut self, cmd: &'a str) -> Self {
+        self.diff3_cmd = Some(cmd);
+        self
+    }
+
+    /// Sets the preserved extensions.
+    pub fn with_preserved_exts(mut self, exts: Vec<&'a str>) -> Self {
+        self.preserved_exts = exts;
+        self
+    }
+}
 
 /// Update editor for working copy operations
 ///
@@ -1793,44 +1960,18 @@ impl Context {
         anchor_abspath: &str,
         target_basename: &str,
         switch_url: &str,
-        use_commit_times: bool,
-        depth: crate::Depth,
-        depth_is_sticky: bool,
-        allow_unver_obstructions: bool,
-        server_performs_filtering: bool,
-        diff3_cmd: Option<&str>,
-        preserved_exts: &[&str],
-        fetch_dirents_func: Option<
-            Box<
-                dyn Fn(
-                    &str,
-                    &str,
-                )
-                    -> Result<std::collections::HashMap<String, crate::ra::Dirent>, Error>,
-            >,
-        >,
-        conflict_func: Option<
-            Box<
-                dyn Fn(
-                    &crate::conflict::ConflictDescription,
-                ) -> Result<crate::conflict::ConflictResult, Error>,
-            >,
-        >,
-        external_func: Option<
-            Box<dyn Fn(&str, Option<&str>, Option<&str>, crate::Depth) -> Result<(), Error>>,
-        >,
-        cancel_func: Option<Box<dyn Fn() -> Result<(), Error>>>,
-        notify_func: Option<Box<dyn Fn(&Notify)>>,
+        options: SwitchEditorOptions,
     ) -> Result<(Box<dyn crate::delta::Editor + 's>, crate::Revnum), crate::Error> {
         let anchor_abspath_cstr = std::ffi::CString::new(anchor_abspath)?;
         let target_basename_cstr = std::ffi::CString::new(target_basename)?;
         let switch_url_cstr = std::ffi::CString::new(switch_url)?;
-        let diff3_cmd_cstr = diff3_cmd.map(std::ffi::CString::new).transpose()?;
+        let diff3_cmd_cstr = options.diff3_cmd.map(std::ffi::CString::new).transpose()?;
 
         let result_pool = apr::Pool::new();
 
         // Create preserved extensions array
-        let preserved_exts_cstrs: Vec<std::ffi::CString> = preserved_exts
+        let preserved_exts_cstrs: Vec<std::ffi::CString> = options
+            .preserved_exts
             .iter()
             .map(|&s| std::ffi::CString::new(s))
             .collect::<Result<Vec<_>, _>>()?;
@@ -1851,24 +1992,29 @@ impl Context {
         let mut edit_baton: *mut std::ffi::c_void = std::ptr::null_mut();
 
         // Create batons for callbacks
-        let has_fetch_dirents = fetch_dirents_func.is_some();
-        let fetch_dirents_baton = fetch_dirents_func
+        let has_fetch_dirents = options.fetch_dirents_func.is_some();
+        let fetch_dirents_baton = options
+            .fetch_dirents_func
             .map(|f| box_fetch_dirents_baton(f))
             .unwrap_or(std::ptr::null_mut());
-        let has_conflict = conflict_func.is_some();
-        let conflict_baton = conflict_func
+        let has_conflict = options.conflict_func.is_some();
+        let conflict_baton = options
+            .conflict_func
             .map(|f| box_conflict_baton(f))
             .unwrap_or(std::ptr::null_mut());
-        let has_external = external_func.is_some();
-        let external_baton = external_func
+        let has_external = options.external_func.is_some();
+        let external_baton = options
+            .external_func
             .map(|f| box_external_baton(f))
             .unwrap_or(std::ptr::null_mut());
-        let has_cancel = cancel_func.is_some();
-        let cancel_baton = cancel_func
+        let has_cancel = options.cancel_func.is_some();
+        let cancel_baton = options
+            .cancel_func
             .map(|f| box_cancel_baton(f))
             .unwrap_or(std::ptr::null_mut());
-        let has_notify = notify_func.is_some();
-        let notify_baton = notify_func
+        let has_notify = options.notify_func.is_some();
+        let notify_baton = options
+            .notify_func
             .map(|f| box_notify_baton(f))
             .unwrap_or(std::ptr::null_mut());
 
@@ -1881,11 +2027,19 @@ impl Context {
                 anchor_abspath_cstr.as_ptr(),
                 target_basename_cstr.as_ptr(),
                 switch_url_cstr.as_ptr(),
-                if use_commit_times { 1 } else { 0 },
-                depth.into(),
-                if depth_is_sticky { 1 } else { 0 },
-                if allow_unver_obstructions { 1 } else { 0 },
-                if server_performs_filtering { 1 } else { 0 },
+                if options.use_commit_times { 1 } else { 0 },
+                options.depth.into(),
+                if options.depth_is_sticky { 1 } else { 0 },
+                if options.allow_unver_obstructions {
+                    1
+                } else {
+                    0
+                },
+                if options.server_performs_filtering {
+                    1
+                } else {
+                    0
+                },
                 diff3_cmd_cstr
                     .as_ref()
                     .map_or(std::ptr::null(), |c| c.as_ptr()),
@@ -3497,22 +3651,12 @@ mod tests {
         let mut ctx = Context::new().unwrap();
 
         // This will fail without a working copy, but tests the API
+        let options = SwitchEditorOptions::new();
         let result = ctx.get_switch_editor(
             temp_dir.path().to_str().unwrap(),
             "",
             "http://example.com/repo/branches/test",
-            false,
-            crate::Depth::Infinity,
-            false,
-            false,
-            false, // server_performs_filtering
-            None,
-            &[],  // preserved_exts
-            None, // fetch_dirents_func
-            None, // no conflict callback
-            None, // no external callback
-            None, // no cancel callback
-            None, // no notify callback
+            options,
         );
 
         // Expected to fail without a valid working copy
@@ -3526,22 +3670,12 @@ mod tests {
         let mut ctx = Context::new().unwrap();
 
         // This will fail without a working copy, but tests the API
+        let options = SwitchEditorOptions::new();
         let result = ctx.get_switch_editor(
             temp_dir.path().to_str().unwrap(),
             "",
             "http://example.com/svn/trunk",
-            false, // use_commit_times
-            crate::Depth::Infinity,
-            false, // depth_is_sticky
-            false, // allow_unver_obstructions
-            false, // server_performs_filtering
-            None,  // diff3_cmd
-            &[],   // preserved_exts
-            None,  // fetch_dirents_func
-            None,  // no conflict callback
-            None,  // no external callback
-            None,  // no cancel callback
-            None,  // no notify callback
+            options,
         );
 
         // Expected to fail without a valid working copy
@@ -3554,22 +3688,18 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let mut ctx = Context::new().unwrap();
 
+        let options = SwitchEditorOptions {
+            use_commit_times: true,
+            depth: crate::Depth::Files,
+            depth_is_sticky: true,
+            allow_unver_obstructions: true,
+            ..Default::default()
+        };
         let result = ctx.get_switch_editor(
             temp_dir.path().to_str().unwrap(),
             "subdir", // target basename
             "http://example.com/svn/branches/test",
-            true, // use_commit_times
-            crate::Depth::Files,
-            true,  // depth_is_sticky
-            true,  // allow_unver_obstructions
-            false, // server_performs_filtering
-            None,  // diff3_cmd
-            &[],   // preserved_exts
-            None,  // fetch_dirents_func
-            None,  // no conflict callback
-            None,  // no external callback
-            None,  // no cancel callback
-            None,  // no notify callback
+            options,
         );
 
         assert!(result.is_err());
@@ -4910,28 +5040,14 @@ mod tests {
         let cancel_called_clone = cancel_called.clone();
 
         let mut wc_ctx = Context::new().unwrap();
-        let result = get_update_editor4(
-            &mut wc_ctx,
-            wc_path.to_str().unwrap(),
-            "",
-            false,
-            crate::Depth::Infinity,
-            false,
-            false,
-            false,
-            false, // server_performs_filtering
-            false, // clean_checkout
-            None,
-            &[],
-            None, // fetch_dirents_func
-            None, // conflict_func
-            None, // external_func
-            Some(Box::new(move || {
+        let options = UpdateEditorOptions {
+            cancel_func: Some(Box::new(move || {
                 cancel_called_clone.store(true, std::sync::atomic::Ordering::SeqCst);
                 Ok(())
             })),
-            None, // notify_func
-        );
+            ..Default::default()
+        };
+        let result = get_update_editor4(&mut wc_ctx, wc_path.to_str().unwrap(), "", options);
 
         assert!(
             result.is_ok(),
@@ -4973,25 +5089,14 @@ mod tests {
         let notify_called_clone = notify_called.clone();
 
         let mut wc_ctx = Context::new().unwrap();
-        let result = wc_ctx.get_switch_editor(
-            wc_path.to_str().unwrap(),
-            "",
-            url_str.as_str(),
-            false,
-            crate::Depth::Infinity,
-            false,
-            false,
-            false, // server_performs_filtering
-            None,
-            &[],  // preserved_exts
-            None, // fetch_dirents_func
-            None, // conflict_func
-            None, // external_func
-            None, // cancel_func
-            Some(Box::new(move |_notify| {
+        let options = SwitchEditorOptions {
+            notify_func: Some(Box::new(move |_notify| {
                 notify_called_clone.store(true, std::sync::atomic::Ordering::SeqCst);
             })),
-        );
+            ..Default::default()
+        };
+        let result =
+            wc_ctx.get_switch_editor(wc_path.to_str().unwrap(), "", url_str.as_str(), options);
 
         assert!(
             result.is_ok(),
@@ -5009,25 +5114,12 @@ mod tests {
         let mut wc_ctx = Context::new().unwrap();
 
         // Test with server_performs_filtering = true
-        let result = get_update_editor4(
-            &mut wc_ctx,
-            temp_dir.path().to_str().unwrap(),
-            "",
-            false,
-            crate::Depth::Infinity,
-            false,
-            false,
-            false,
-            true, // server_performs_filtering = true
-            false,
-            None,
-            &[],
-            None,
-            None,
-            None,
-            None,
-            None,
-        );
+        let options = UpdateEditorOptions {
+            server_performs_filtering: true,
+            ..Default::default()
+        };
+        let result =
+            get_update_editor4(&mut wc_ctx, temp_dir.path().to_str().unwrap(), "", options);
 
         // Will fail without a real working copy, but tests that the parameter is accepted
         assert!(result.is_err());
@@ -5042,25 +5134,12 @@ mod tests {
         let mut wc_ctx = Context::new().unwrap();
 
         // Test with clean_checkout = true
-        let result = get_update_editor4(
-            &mut wc_ctx,
-            temp_dir.path().to_str().unwrap(),
-            "",
-            false,
-            crate::Depth::Infinity,
-            false,
-            false,
-            false,
-            false,
-            true, // clean_checkout = true
-            None,
-            &[],
-            None,
-            None,
-            None,
-            None,
-            None,
-        );
+        let options = UpdateEditorOptions {
+            clean_checkout: true,
+            ..Default::default()
+        };
+        let result =
+            get_update_editor4(&mut wc_ctx, temp_dir.path().to_str().unwrap(), "", options);
 
         // Will fail without a real working copy, but tests that the parameter is accepted
         assert!(result.is_err());
@@ -5075,22 +5154,15 @@ mod tests {
         let mut wc_ctx = Context::new().unwrap();
 
         // Test with server_performs_filtering = true
+        let options = SwitchEditorOptions {
+            server_performs_filtering: true,
+            ..Default::default()
+        };
         let result = wc_ctx.get_switch_editor(
             temp_dir.path().to_str().unwrap(),
             "",
             "http://example.com/svn/trunk",
-            false,
-            crate::Depth::Infinity,
-            false,
-            false,
-            true, // server_performs_filtering = true
-            None,
-            &[], // preserved_exts
-            None,
-            None,
-            None,
-            None,
-            None,
+            options,
         );
 
         // Will fail without a real working copy, but tests that the parameter is accepted
