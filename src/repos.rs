@@ -3085,8 +3085,6 @@ admin = rw
 
     #[test]
     fn test_dir_delta2() {
-        use crate::delta::{DirectoryEditor, Editor};
-
         // Create a temporary repository for testing
         let temp_dir = tempfile::tempdir().unwrap();
         let repo_path = temp_dir.path().join("test_repo");

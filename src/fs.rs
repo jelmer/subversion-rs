@@ -3623,7 +3623,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let fs_path = dir.path().join("test-fs");
 
-        let mut fs = Fs::create(&fs_path).unwrap();
+        let fs = Fs::create(&fs_path).unwrap();
 
         // Create initial revision
         let mut txn = fs.begin_txn(Revnum(0), 0).unwrap();
@@ -3666,7 +3666,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let fs_path = dir.path().join("test-fs");
 
-        let mut fs = Fs::create(&fs_path).unwrap();
+        let fs = Fs::create(&fs_path).unwrap();
 
         // Create initial revision
         let mut txn = fs.begin_txn(Revnum(0), 0).unwrap();
@@ -3702,7 +3702,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let fs_path = dir.path().join("test-fs");
 
-        let mut fs = Fs::create(&fs_path).unwrap();
+        let fs = Fs::create(&fs_path).unwrap();
 
         // Create revision 1
         let mut txn = fs.begin_txn(Revnum(0), 0).unwrap();

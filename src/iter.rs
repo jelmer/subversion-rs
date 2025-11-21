@@ -209,7 +209,7 @@ mod tests {
         let completed = unsafe {
             iter_hash(hash.as_ptr() as *mut _, |key, value| {
                 let key_str = String::from_utf8_lossy(key).into_owned();
-                let value_int = unsafe { *(value as *const i32) };
+                let value_int = *(value as *const i32);
                 collected.insert(key_str, value_int);
                 Ok(())
             })
