@@ -6591,8 +6591,8 @@ impl Conflict {
             .to_owned())
     }
 
-    /// Resolve a text conflict
-    pub fn text_resolve(
+    /// Resolve a text conflict by option ID
+    pub fn text_resolve_by_id(
         &mut self,
         choice: crate::TextConflictChoice,
         ctx: &mut Context,
@@ -6609,8 +6609,8 @@ impl Conflict {
         }
     }
 
-    /// Resolve a property conflict
-    pub fn prop_resolve(
+    /// Resolve a property conflict by option ID
+    pub fn prop_resolve_by_id(
         &mut self,
         propname: &str,
         choice: crate::TextConflictChoice,
@@ -6654,8 +6654,29 @@ impl Conflict {
         }
     }
 
-    /// Resolve a tree conflict
-    pub fn tree_resolve(
+    /// Resolve a text conflict with a specific option
+    ///
+    /// This is useful when you've customized an option
+    /// and want to resolve using that customized option.
+    pub fn text_resolve(
+        &mut self,
+        option: &ConflictOption,
+        ctx: &mut Context,
+    ) -> Result<(), Error> {
+        let scratch_pool = apr::pool::Pool::new();
+        unsafe {
+            let err = subversion_sys::svn_client_conflict_text_resolve(
+                self.ptr,
+                option.ptr,
+                ctx.as_mut_ptr(),
+                scratch_pool.as_mut_ptr(),
+            );
+            svn_result(err)
+        }
+    }
+
+    /// Resolve a tree conflict by option ID
+    pub fn tree_resolve_by_id(
         &mut self,
         choice: crate::TreeConflictChoice,
         ctx: &mut Context,
@@ -6665,6 +6686,27 @@ impl Conflict {
             let err = subversion_sys::svn_client_conflict_tree_resolve_by_id(
                 self.ptr,
                 choice.into(),
+                ctx.as_mut_ptr(),
+                scratch_pool.as_mut_ptr(),
+            );
+            svn_result(err)
+        }
+    }
+
+    /// Resolve a tree conflict with a specific option
+    ///
+    /// This is useful when you've customized an option (e.g., with set_moved_to_abspath)
+    /// and want to resolve using that customized option.
+    pub fn tree_resolve(
+        &mut self,
+        option: &ConflictOption,
+        ctx: &mut Context,
+    ) -> Result<(), Error> {
+        let scratch_pool = apr::pool::Pool::new();
+        unsafe {
+            let err = subversion_sys::svn_client_conflict_tree_resolve(
+                self.ptr,
+                option.ptr,
                 ctx.as_mut_ptr(),
                 scratch_pool.as_mut_ptr(),
             );
@@ -7232,6 +7274,111 @@ impl ConflictOption {
 
         // Store the pool to keep the value alive
         self.merged_value_pool = Some(pool);
+    }
+
+    /// Get the list of possible moved-to repository relative paths for tree conflict resolution
+    pub fn get_moved_to_repos_relpath_candidates(&self) -> Result<Vec<String>, Error> {
+        let pool = apr::pool::Pool::new();
+        let mut candidates: *mut apr_sys::apr_array_header_t = std::ptr::null_mut();
+
+        unsafe {
+            let err =
+                subversion_sys::svn_client_conflict_option_get_moved_to_repos_relpath_candidates2(
+                    &mut candidates,
+                    self.ptr,
+                    pool.as_mut_ptr(),
+                    pool.as_mut_ptr(),
+                );
+            svn_result(err)?;
+
+            let mut result = Vec::new();
+            if !candidates.is_null() {
+                let array =
+                    apr::tables::TypedArray::<*const std::ffi::c_char>::from_ptr(candidates);
+                for cstr_ptr in array.iter() {
+                    let cstr = std::ffi::CStr::from_ptr(cstr_ptr);
+                    result.push(cstr.to_string_lossy().into_owned());
+                }
+            }
+            Ok(result)
+        }
+    }
+
+    /// Get the list of possible moved-to absolute paths for tree conflict resolution
+    pub fn get_moved_to_abspath_candidates(&self) -> Result<Vec<std::path::PathBuf>, Error> {
+        let pool = apr::pool::Pool::new();
+        let mut candidates: *mut apr_sys::apr_array_header_t = std::ptr::null_mut();
+
+        unsafe {
+            let err = subversion_sys::svn_client_conflict_option_get_moved_to_abspath_candidates2(
+                &mut candidates,
+                self.ptr,
+                pool.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            );
+            svn_result(err)?;
+
+            let mut result = Vec::new();
+            if !candidates.is_null() {
+                let array =
+                    apr::tables::TypedArray::<*const std::ffi::c_char>::from_ptr(candidates);
+                for cstr_ptr in array.iter() {
+                    let cstr = std::ffi::CStr::from_ptr(cstr_ptr);
+                    result.push(std::path::PathBuf::from(cstr.to_str()?));
+                }
+            }
+            Ok(result)
+        }
+    }
+
+    /// Set the moved-to repository relative path for tree conflict resolution by index
+    ///
+    /// The index refers to a candidate from get_moved_to_repos_relpath_candidates()
+    pub fn set_moved_to_repos_relpath(
+        &mut self,
+        preferred_move_target_idx: i32,
+        ctx: &mut Context,
+    ) -> Result<(), Error> {
+        let pool = apr::pool::Pool::new();
+
+        unsafe {
+            let err = subversion_sys::svn_client_conflict_option_set_moved_to_repos_relpath2(
+                self.ptr,
+                preferred_move_target_idx,
+                ctx.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            );
+            svn_result(err)
+        }
+    }
+
+    /// Set the moved-to absolute path for tree conflict resolution by index
+    ///
+    /// The index refers to a candidate from get_moved_to_abspath_candidates()
+    pub fn set_moved_to_abspath(
+        &mut self,
+        preferred_move_target_idx: i32,
+        ctx: &mut Context,
+    ) -> Result<(), Error> {
+        let pool = apr::pool::Pool::new();
+
+        unsafe {
+            let err = subversion_sys::svn_client_conflict_option_set_moved_to_abspath2(
+                self.ptr,
+                preferred_move_target_idx,
+                ctx.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            );
+            svn_result(err)
+        }
+    }
+
+    /// Find a conflict option by its ID
+    pub fn find_by_id(
+        options: &[ConflictOption],
+        option_id: crate::ClientConflictOptionId,
+    ) -> Option<&ConflictOption> {
+        options.iter().find(|opt| opt.get_id() == option_id)
     }
 }
 
