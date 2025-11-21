@@ -243,6 +243,240 @@ impl From<MergeinfoInheritance> for subversion_sys::svn_mergeinfo_inheritance_t 
     }
 }
 
+/// A merge range with start/end revisions and inheritability.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MergeRange {
+    /// Start revision (exclusive)
+    pub start: Revnum,
+    /// End revision (inclusive)
+    pub end: Revnum,
+    /// Whether this range is inheritable
+    pub inheritable: bool,
+}
+
+impl MergeRange {
+    /// Create a new merge range.
+    pub fn new(start: Revnum, end: Revnum, inheritable: bool) -> Self {
+        Self {
+            start,
+            end,
+            inheritable,
+        }
+    }
+}
+
+impl From<&subversion_sys::svn_merge_range_t> for MergeRange {
+    fn from(r: &subversion_sys::svn_merge_range_t) -> Self {
+        Self {
+            start: Revnum(r.start),
+            end: Revnum(r.end),
+            inheritable: r.inheritable != 0,
+        }
+    }
+}
+
+impl From<subversion_sys::svn_merge_range_t> for MergeRange {
+    fn from(r: subversion_sys::svn_merge_range_t) -> Self {
+        Self {
+            start: Revnum(r.start),
+            end: Revnum(r.end),
+            inheritable: r.inheritable != 0,
+        }
+    }
+}
+
+/// A list of merge ranges.
+pub struct Rangelist {
+    ptr: *mut subversion_sys::svn_rangelist_t,
+    pool: apr::Pool<'static>,
+}
+
+impl Rangelist {
+    /// Create a new empty rangelist.
+    pub fn new() -> Self {
+        let pool = apr::Pool::new();
+        let ptr = unsafe {
+            apr_sys::apr_array_make(
+                pool.as_mut_ptr(),
+                0,
+                std::mem::size_of::<subversion_sys::svn_merge_range_t>() as i32,
+            )
+        };
+        Self { ptr, pool }
+    }
+
+    /// Create a rangelist from a raw pointer and pool.
+    ///
+    /// # Safety
+    /// The pointer must be valid and the pool must own the memory.
+    pub(crate) unsafe fn from_ptr_and_pool(
+        ptr: *mut subversion_sys::svn_rangelist_t,
+        pool: apr::Pool<'static>,
+    ) -> Self {
+        Self { ptr, pool }
+    }
+
+    /// Convert the rangelist to a string representation.
+    pub fn to_string(&self) -> Result<String, Error> {
+        unsafe {
+            let mut output: *mut subversion_sys::svn_string_t = std::ptr::null_mut();
+            let err = subversion_sys::svn_rangelist_to_string(
+                &mut output,
+                self.ptr,
+                self.pool.as_mut_ptr(),
+            );
+            svn_result(err)?;
+
+            if output.is_null() || (*output).data.is_null() {
+                return Ok(String::new());
+            }
+
+            let data_slice = std::slice::from_raw_parts((*output).data as *const u8, (*output).len);
+            Ok(std::str::from_utf8(data_slice)
+                .map_err(|_| Error::from_str("Rangelist string is not valid UTF-8"))?
+                .to_string())
+        }
+    }
+
+    /// Compute the difference between two rangelists.
+    ///
+    /// Returns (deleted, added) where:
+    /// - deleted: ranges in `from` but not in `to`
+    /// - added: ranges in `to` but not in `from`
+    pub fn diff(
+        from: &Rangelist,
+        to: &Rangelist,
+        consider_inheritance: bool,
+    ) -> Result<(Rangelist, Rangelist), Error> {
+        let pool1 = apr::Pool::new();
+        let pool2 = apr::Pool::new();
+        unsafe {
+            let mut deleted: *mut subversion_sys::svn_rangelist_t = std::ptr::null_mut();
+            let mut added: *mut subversion_sys::svn_rangelist_t = std::ptr::null_mut();
+            let err = subversion_sys::svn_rangelist_diff(
+                &mut deleted,
+                &mut added,
+                from.ptr,
+                to.ptr,
+                consider_inheritance.into(),
+                pool1.as_mut_ptr(),
+            );
+            svn_result(err)?;
+            Ok((
+                Rangelist::from_ptr_and_pool(deleted, pool1),
+                Rangelist::from_ptr_and_pool(added, pool2),
+            ))
+        }
+    }
+
+    /// Merge changes into this rangelist.
+    pub fn merge(&mut self, changes: &Rangelist) -> Result<(), Error> {
+        unsafe {
+            let err = subversion_sys::svn_rangelist_merge2(
+                self.ptr,
+                changes.ptr,
+                self.pool.as_mut_ptr(),
+                self.pool.as_mut_ptr(),
+            );
+            svn_result(err)
+        }
+    }
+
+    /// Remove ranges in `eraser` from `whiteboard`.
+    pub fn remove(
+        eraser: &Rangelist,
+        whiteboard: &Rangelist,
+        consider_inheritance: bool,
+    ) -> Result<Rangelist, Error> {
+        let pool = apr::Pool::new();
+        unsafe {
+            let mut output: *mut subversion_sys::svn_rangelist_t = std::ptr::null_mut();
+            let err = subversion_sys::svn_rangelist_remove(
+                &mut output,
+                eraser.ptr,
+                whiteboard.ptr,
+                consider_inheritance.into(),
+                pool.as_mut_ptr(),
+            );
+            svn_result(err)?;
+            Ok(Rangelist::from_ptr_and_pool(output, pool))
+        }
+    }
+
+    /// Compute the intersection of two rangelists.
+    pub fn intersect(
+        rangelist1: &Rangelist,
+        rangelist2: &Rangelist,
+        consider_inheritance: bool,
+    ) -> Result<Rangelist, Error> {
+        let pool = apr::Pool::new();
+        unsafe {
+            let mut output: *mut subversion_sys::svn_rangelist_t = std::ptr::null_mut();
+            let err = subversion_sys::svn_rangelist_intersect(
+                &mut output,
+                rangelist1.ptr,
+                rangelist2.ptr,
+                consider_inheritance.into(),
+                pool.as_mut_ptr(),
+            );
+            svn_result(err)?;
+            Ok(Rangelist::from_ptr_and_pool(output, pool))
+        }
+    }
+
+    /// Reverse this rangelist in place.
+    pub fn reverse(&mut self) -> Result<(), Error> {
+        unsafe {
+            let err = subversion_sys::svn_rangelist_reverse(self.ptr, self.pool.as_mut_ptr());
+            svn_result(err)
+        }
+    }
+
+    /// Duplicate this rangelist.
+    pub fn dup(&self) -> Rangelist {
+        let pool = apr::Pool::new();
+        unsafe {
+            let result = subversion_sys::svn_rangelist_dup(self.ptr, pool.as_mut_ptr());
+            Rangelist::from_ptr_and_pool(result, pool)
+        }
+    }
+
+    /// Get the ranges as a Vec.
+    pub fn ranges(&self) -> Vec<MergeRange> {
+        if self.ptr.is_null() {
+            return Vec::new();
+        }
+
+        unsafe {
+            let array =
+                apr::tables::TypedArray::<subversion_sys::svn_merge_range_t>::from_ptr(self.ptr);
+            array.iter().map(|r| MergeRange::from(r)).collect()
+        }
+    }
+
+    /// Check if the rangelist is empty.
+    pub fn is_empty(&self) -> bool {
+        if self.ptr.is_null() {
+            return true;
+        }
+        unsafe { (*self.ptr).nelts == 0 }
+    }
+
+    /// Get the number of ranges.
+    pub fn len(&self) -> usize {
+        if self.ptr.is_null() {
+            return 0;
+        }
+        unsafe { (*self.ptr).nelts as usize }
+    }
+}
+
+impl Default for Rangelist {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -327,5 +561,68 @@ mod tests {
         let mergeinfo = Mergeinfo::parse("/trunk:1-10").unwrap();
         let dup = mergeinfo.dup();
         assert_eq!(dup.to_string().unwrap(), "/trunk:1-10");
+    }
+
+    #[test]
+    fn test_rangelist_new() {
+        let rangelist = Rangelist::new();
+        assert!(rangelist.is_empty());
+        assert_eq!(rangelist.len(), 0);
+    }
+
+    #[test]
+    fn test_merge_range_from() {
+        let range = MergeRange {
+            start: Revnum(1),
+            end: Revnum(10),
+            inheritable: true,
+        };
+        assert_eq!(range.start.0, 1);
+        assert_eq!(range.end.0, 10);
+        assert!(range.inheritable);
+    }
+
+    #[test]
+    fn test_rangelist_dup() {
+        let rangelist = Rangelist::new();
+        let dup = rangelist.dup();
+        assert!(dup.is_empty());
+    }
+
+    #[test]
+    fn test_rangelist_to_string_empty() {
+        let rangelist = Rangelist::new();
+        let s = rangelist.to_string().unwrap();
+        assert_eq!(s, "");
+    }
+
+    #[test]
+    fn test_rangelist_merge() {
+        let mut r1 = Rangelist::new();
+        let r2 = Rangelist::new();
+        r1.merge(&r2).unwrap();
+        assert!(r1.is_empty());
+    }
+
+    #[test]
+    fn test_rangelist_intersect() {
+        let r1 = Rangelist::new();
+        let r2 = Rangelist::new();
+        let intersected = Rangelist::intersect(&r1, &r2, true).unwrap();
+        assert!(intersected.is_empty());
+    }
+
+    #[test]
+    fn test_rangelist_reverse() {
+        let mut rangelist = Rangelist::new();
+        rangelist.reverse().unwrap();
+        assert!(rangelist.is_empty());
+    }
+
+    #[test]
+    fn test_rangelist_ranges_empty() {
+        let rangelist = Rangelist::new();
+        let ranges = rangelist.ranges();
+        assert!(ranges.is_empty());
     }
 }
