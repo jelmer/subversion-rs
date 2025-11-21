@@ -2,129 +2,71 @@
 //!
 //! This module provides utilities for configuring Subversion's internal caching
 //! mechanisms, which can significantly improve performance for certain operations.
-//!
-//! Note: Many cache configuration functions are not available in the current
-//! subversion-sys bindings, so this module provides a framework that can be
-//! extended when those bindings become available.
-
-use crate::Error;
-use std::sync::Mutex;
 
 /// Cache configuration settings
+///
+/// This corresponds to SVN's `svn_cache_config_t` structure.
 #[derive(Debug, Clone)]
 pub struct CacheConfig {
-    /// Size of memory cache in bytes (0 = unlimited)
-    pub memory_cache_size: u64,
-    /// Maximum number of cache entries (0 = unlimited)
-    pub max_entries: u64,
-    /// Whether to enable cache statistics collection
-    pub collect_stats: bool,
+    /// Total cache size in bytes. This is a soft limit.
+    /// May be 0, resulting in default caching code being used.
+    pub cache_size: u64,
+    /// Maximum number of files kept open
+    pub file_handle_count: usize,
+    /// Is this application guaranteed to be single-threaded?
+    pub single_threaded: bool,
 }
 
 impl Default for CacheConfig {
     fn default() -> Self {
-        Self {
-            memory_cache_size: 16 * 1024 * 1024, // 16MB default
-            max_entries: 1000,
-            collect_stats: false,
+        // Get default from SVN
+        let svn_config = unsafe { subversion_sys::svn_cache_config_get() };
+        if svn_config.is_null() {
+            Self {
+                cache_size: 0,
+                file_handle_count: 0,
+                single_threaded: false,
+            }
+        } else {
+            unsafe {
+                Self {
+                    cache_size: (*svn_config).cache_size,
+                    file_handle_count: (*svn_config).file_handle_count as usize,
+                    single_threaded: (*svn_config).single_threaded != 0,
+                }
+            }
         }
     }
 }
 
-/// Global cache configuration storage
-///
-/// Note: This is currently a placeholder implementation since the underlying
-/// SVN cache configuration functions are not available in subversion-sys.
-/// The configuration is stored but not applied to the SVN library.
-static CURRENT_CONFIG: Mutex<Option<CacheConfig>> = Mutex::new(None);
-
 /// Sets the global cache configuration.
-pub fn set_cache_config(config: &CacheConfig) -> Result<(), Error> {
-    if let Ok(mut current) = CURRENT_CONFIG.lock() {
-        *current = Some(config.clone());
+pub fn set_cache_config(config: &CacheConfig) {
+    let svn_config = subversion_sys::svn_cache_config_t {
+        cache_size: config.cache_size,
+        file_handle_count: config.file_handle_count as apr_sys::apr_size_t,
+        single_threaded: if config.single_threaded { 1 } else { 0 },
+    };
+    unsafe {
+        subversion_sys::svn_cache_config_set(&svn_config);
     }
-
-    // TODO: When subversion-sys exposes cache config functions, implement:
-    // - svn_cache_config_set_cache_size()
-    // - svn_cache_config_set_max_entries()
-    // - svn_cache_config_set_collect_stats()
-
-    Ok(())
 }
 
 /// Get current cache configuration
 ///
-/// Returns the current cache configuration settings.
-pub fn get_cache_config() -> Result<CacheConfig, Error> {
-    if let Ok(current) = CURRENT_CONFIG.lock() {
-        Ok(current.clone().unwrap_or_default())
+/// Returns the current cache configuration settings from SVN.
+pub fn get_cache_config() -> CacheConfig {
+    let svn_config = unsafe { subversion_sys::svn_cache_config_get() };
+    if svn_config.is_null() {
+        CacheConfig::default()
     } else {
-        Ok(CacheConfig::default())
-    }
-}
-
-/// Enable or disable cache statistics collection
-///
-/// Note: This is currently a placeholder since the underlying function
-/// is not available in subversion-sys.
-pub fn set_cache_stats(enabled: bool) -> Result<(), Error> {
-    if let Ok(mut current) = CURRENT_CONFIG.lock() {
-        let config = current.get_or_insert_with(CacheConfig::default);
-        config.collect_stats = enabled;
-    }
-
-    // TODO: When available, implement:
-    // svn_cache_config_set_collect_stats(enabled)
-
-    Ok(())
-}
-
-/// Reset cache to default settings
-pub fn reset_cache_config() -> Result<(), Error> {
-    let default_config = CacheConfig::default();
-    set_cache_config(&default_config)
-}
-
-/// Cache statistics information
-#[derive(Debug, Clone, Default)]
-pub struct CacheStats {
-    /// Total cache requests
-    pub requests: u64,
-    /// Cache hits
-    pub hits: u64,
-    /// Cache misses  
-    pub misses: u64,
-    /// Current cache size in bytes
-    pub current_size: u64,
-    /// Maximum cache size in bytes
-    pub max_size: u64,
-}
-
-impl CacheStats {
-    /// Calculate hit rate as a percentage
-    pub fn hit_rate(&self) -> f64 {
-        if self.requests == 0 {
-            0.0
-        } else {
-            (self.hits as f64 / self.requests as f64) * 100.0
+        unsafe {
+            CacheConfig {
+                cache_size: (*svn_config).cache_size,
+                file_handle_count: (*svn_config).file_handle_count as usize,
+                single_threaded: (*svn_config).single_threaded != 0,
+            }
         }
     }
-
-    /// Calculate miss rate as a percentage
-    pub fn miss_rate(&self) -> f64 {
-        100.0 - self.hit_rate()
-    }
-}
-
-/// Get cache statistics
-///
-/// Note: This currently returns empty stats since the underlying
-/// SVN cache statistics functions are not available in subversion-sys.
-pub fn get_cache_stats() -> Result<CacheStats, Error> {
-    // TODO: When available, implement:
-    // svn_cache_config_get_stats()
-
-    Ok(CacheStats::default())
 }
 
 #[cfg(test)]
@@ -132,82 +74,40 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_cache_config_creation() {
+    fn test_cache_config_default() {
         let config = CacheConfig::default();
-        assert_eq!(config.memory_cache_size, 16 * 1024 * 1024);
-        assert_eq!(config.max_entries, 1000);
-        assert!(!config.collect_stats);
+        // Default values come from SVN, just check we can create it
+        let _ = config.cache_size;
+        let _ = config.file_handle_count;
+        let _ = config.single_threaded;
     }
 
     #[test]
     fn test_cache_config_custom() {
         let config = CacheConfig {
-            memory_cache_size: 32 * 1024 * 1024,
-            max_entries: 2000,
-            collect_stats: true,
+            cache_size: 32 * 1024 * 1024,
+            file_handle_count: 100,
+            single_threaded: true,
         };
 
-        assert_eq!(config.memory_cache_size, 32 * 1024 * 1024);
-        assert_eq!(config.max_entries, 2000);
-        assert!(config.collect_stats);
+        assert_eq!(config.cache_size, 32 * 1024 * 1024);
+        assert_eq!(config.file_handle_count, 100);
+        assert!(config.single_threaded);
     }
 
     #[test]
-    fn test_cache_stats_calculations() {
-        let stats = CacheStats {
-            requests: 100,
-            hits: 80,
-            misses: 20,
-            current_size: 1024,
-            max_size: 2048,
-        };
-
-        assert_eq!(stats.hit_rate(), 80.0);
-        assert_eq!(stats.miss_rate(), 20.0);
-    }
-
-    #[test]
-    fn test_cache_stats_zero_requests() {
-        let stats = CacheStats::default();
-        assert_eq!(stats.hit_rate(), 0.0);
-        assert_eq!(stats.miss_rate(), 100.0);
-    }
-
-    #[test]
-    fn test_set_cache_config() {
+    fn test_set_and_get_cache_config() {
         let config = CacheConfig {
-            memory_cache_size: 8 * 1024 * 1024,
-            max_entries: 500,
-            collect_stats: false,
+            cache_size: 16 * 1024 * 1024,
+            file_handle_count: 50,
+            single_threaded: false,
         };
 
-        // This will likely fail since the functions may not be available,
-        // but it should not panic
-        let result = set_cache_config(&config);
-        // We expect this to potentially fail due to missing FFI bindings
-        // but the function should handle it gracefully
-        let _ = result;
-    }
+        set_cache_config(&config);
+        let retrieved = get_cache_config();
 
-    #[test]
-    fn test_get_cache_config() {
-        // This should not panic even if underlying functions are not available
-        let result = get_cache_config();
-        // Should either return a config or an error, but not panic
-        let _ = result;
-    }
-
-    #[test]
-    fn test_reset_cache_config() {
-        // Should not panic
-        let result = reset_cache_config();
-        let _ = result;
-    }
-
-    #[test]
-    fn test_cache_stats() {
-        // Should not panic even if stats collection is not available
-        let result = get_cache_stats();
-        let _ = result;
+        assert_eq!(retrieved.cache_size, config.cache_size);
+        assert_eq!(retrieved.file_handle_count, config.file_handle_count);
+        assert_eq!(retrieved.single_threaded, config.single_threaded);
     }
 }
