@@ -816,6 +816,106 @@ impl<'pool> LogEntry<'pool> {
     pub fn has_children(&self) -> bool {
         unsafe { (*self.ptr).has_children != 0 }
     }
+
+    /// Get all revision properties as a HashMap
+    pub fn revprops(&self) -> std::collections::HashMap<String, Vec<u8>> {
+        unsafe {
+            let revprops = (*self.ptr).revprops;
+            if revprops.is_null() {
+                return std::collections::HashMap::new();
+            }
+
+            let hash = apr::hash::TypedHash::<subversion_sys::svn_string_t>::from_ptr(revprops);
+            let mut result = std::collections::HashMap::new();
+            for (key, svn_string) in hash.iter() {
+                if !svn_string.data.is_null() {
+                    let data_slice =
+                        std::slice::from_raw_parts(svn_string.data as *const u8, svn_string.len);
+                    let key_str = std::str::from_utf8(key)
+                        .expect("revprop key is not valid UTF-8")
+                        .to_string();
+                    result.insert(key_str, data_slice.to_vec());
+                }
+            }
+            result
+        }
+    }
+
+    /// Get the changed paths for this log entry
+    ///
+    /// Returns None if changed paths were not requested in the log operation.
+    pub fn changed_paths(&self) -> Option<std::collections::HashMap<String, LogChangedPath>> {
+        unsafe {
+            let changed_paths2 = (*self.ptr).changed_paths2;
+            if changed_paths2.is_null() {
+                return None;
+            }
+
+            let hash = apr::hash::TypedHash::<subversion_sys::svn_log_changed_path2_t>::from_ptr(
+                changed_paths2,
+            );
+            let mut result = std::collections::HashMap::new();
+            for (key, changed_path) in hash.iter() {
+                let key_str = std::str::from_utf8(key)
+                    .expect("changed path key is not valid UTF-8")
+                    .to_string();
+                result.insert(key_str, LogChangedPath::from_raw(changed_path));
+            }
+            Some(result)
+        }
+    }
+}
+
+/// A changed path entry from a log entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LogChangedPath {
+    /// The action: 'A'dd, 'D'elete, 'R'eplace, 'M'odify
+    pub action: char,
+    /// Source path of copy (if any)
+    pub copyfrom_path: Option<String>,
+    /// Source revision of copy (if any)
+    pub copyfrom_rev: Option<Revnum>,
+    /// The type of the node
+    pub node_kind: NodeKind,
+    /// Whether text was modified (None if unknown)
+    pub text_modified: Option<bool>,
+    /// Whether properties were modified (None if unknown)
+    pub props_modified: Option<bool>,
+}
+
+impl LogChangedPath {
+    fn from_raw(raw: &subversion_sys::svn_log_changed_path2_t) -> Self {
+        let copyfrom_path = if raw.copyfrom_path.is_null() {
+            None
+        } else {
+            unsafe {
+                Some(
+                    std::ffi::CStr::from_ptr(raw.copyfrom_path)
+                        .to_string_lossy()
+                        .into_owned(),
+                )
+            }
+        };
+
+        let copyfrom_rev = Revnum::from_raw(raw.copyfrom_rev);
+
+        fn tristate_to_option(ts: subversion_sys::svn_tristate_t) -> Option<bool> {
+            match ts {
+                subversion_sys::svn_tristate_t_svn_tristate_false => Some(false),
+                subversion_sys::svn_tristate_t_svn_tristate_true => Some(true),
+                _ => None, // svn_tristate_unknown
+            }
+        }
+
+        Self {
+            action: raw.action as u8 as char,
+            copyfrom_path,
+            copyfrom_rev,
+            node_kind: raw.node_kind.into(),
+            text_modified: tristate_to_option(raw.text_modified),
+            props_modified: tristate_to_option(raw.props_modified),
+        }
+    }
 }
 
 /// File size type.
