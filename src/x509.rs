@@ -296,13 +296,13 @@ pub fn parse_certificate_der(der_data: &[u8]) -> Result<CertificateInfo, Error> 
     }
 
     let pool = apr::Pool::new();
-    let mut certinfo: *const subversion_sys::svn_x509_certinfo_t = std::ptr::null();
+    let mut certinfo: *mut subversion_sys::svn_x509_certinfo_t = std::ptr::null_mut();
 
     let err = unsafe {
         subversion_sys::svn_x509_parse_cert(
             &mut certinfo,
             der_data.as_ptr() as *const i8,
-            der_data.len(),
+            der_data.len() as apr_sys::apr_size_t,
             pool.as_mut_ptr(),
             pool.as_mut_ptr(),
         )
@@ -352,10 +352,11 @@ pub fn parse_certificate_der(der_data: &[u8]) -> Result<CertificateInfo, Error> 
 
     let fingerprint = unsafe {
         let digest = subversion_sys::svn_x509_certinfo_get_digest(certinfo);
-        if digest.is_null() || (*digest).data.is_null() {
+        if digest.is_null() || (*digest).digest.is_null() {
             "".to_string()
         } else {
-            let slice = std::slice::from_raw_parts((*digest).data as *const u8, (*digest).len);
+            let digest_size = subversion_sys::svn_checksum_size(digest) as usize;
+            let slice = std::slice::from_raw_parts((*digest).digest, digest_size);
             slice
                 .iter()
                 .map(|b| format!("{:02x}", b))
@@ -369,14 +370,13 @@ pub fn parse_certificate_der(der_data: &[u8]) -> Result<CertificateInfo, Error> 
         if hostnames.is_null() {
             Vec::new()
         } else {
-            let arr = apr::tables::ArrayHeader::from_raw_parts(hostnames, &pool);
+            let arr = &*(hostnames as *const apr_sys::apr_array_header_t);
             let mut names = Vec::new();
-            for i in 0..arr.len() {
-                if let Some(ptr) = arr.get::<*const i8>(i as usize) {
-                    if !ptr.is_null() {
-                        if let Ok(s) = std::ffi::CStr::from_ptr(ptr).to_str() {
-                            names.push(s.to_string());
-                        }
+            for i in 0..arr.nelts {
+                let ptr = *(arr.elts as *const *const i8).offset(i as isize);
+                if !ptr.is_null() {
+                    if let Ok(s) = std::ffi::CStr::from_ptr(ptr).to_str() {
+                        names.push(s.to_string());
                     }
                 }
             }
@@ -685,13 +685,17 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_certificate_der() {
-        let der_data = vec![0x30, 0x82, 0x02, 0x5c]; // Fake DER data
-        let result = parse_certificate_der(&der_data);
-        assert!(result.is_ok());
-
+    fn test_parse_certificate_der_empty() {
         let empty_der: Vec<u8> = vec![];
         let result = parse_certificate_der(&empty_der);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_certificate_der_invalid() {
+        // Invalid DER data should return an error
+        let invalid_der = vec![0x30, 0x82, 0x02, 0x5c];
+        let result = parse_certificate_der(&invalid_der);
         assert!(result.is_err());
     }
 
