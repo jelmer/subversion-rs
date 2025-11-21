@@ -277,6 +277,24 @@ impl From<MergeinfoInheritance> for subversion_sys::svn_mergeinfo_inheritance_t 
     }
 }
 
+impl MergeinfoInheritance {
+    /// Convert to the canonical string representation.
+    pub fn to_word(self) -> &'static str {
+        unsafe {
+            let ptr = subversion_sys::svn_inheritance_to_word(self.into());
+            std::ffi::CStr::from_ptr(ptr)
+                .to_str()
+                .expect("inheritance word is not valid UTF-8")
+        }
+    }
+
+    /// Parse from a string representation.
+    pub fn from_word(word: &str) -> Self {
+        let word_cstr = std::ffi::CString::new(word).expect("inheritance word contains null byte");
+        unsafe { subversion_sys::svn_inheritance_from_word(word_cstr.as_ptr()).into() }
+    }
+}
+
 /// A merge range with start/end revisions and inheritability.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MergeRange {
