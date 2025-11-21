@@ -10152,6 +10152,110 @@ mod tests {
     }
 
     #[test]
+    fn test_text_conflict_resolution() {
+        let td = tempfile::tempdir().unwrap();
+        let repo_path = td.path().join("repo");
+        let wc1_path = td.path().join("wc1");
+        let wc2_path = td.path().join("wc2");
+
+        crate::repos::Repos::create(&repo_path).unwrap();
+
+        let mut ctx = Context::new().unwrap();
+        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        let url = crate::uri::Uri::new(&url_str).unwrap();
+
+        // Checkout first working copy
+        ctx.checkout(
+            url.clone(),
+            &wc1_path,
+            &CheckoutOptions {
+                peg_revision: Revision::Head,
+                revision: Revision::Head,
+                depth: Depth::Infinity,
+                ignore_externals: false,
+                allow_unver_obstructions: false,
+            },
+        )
+        .unwrap();
+
+        // Create and commit a file in wc1
+        let test_file1 = wc1_path.join("test.txt");
+        std::fs::write(&test_file1, "line1\nline2\nline3\n").unwrap();
+        ctx.add(
+            &test_file1,
+            &AddOptions {
+                depth: Depth::Empty,
+                force: false,
+                no_ignore: false,
+                no_autoprops: false,
+                add_parents: false,
+            },
+        )
+        .unwrap();
+        let wc1_str = wc1_path.to_str().unwrap();
+        ctx.commit(
+            &[wc1_str],
+            &CommitOptions::default(),
+            std::collections::HashMap::new(),
+            &|_| Ok(()),
+        )
+        .unwrap();
+
+        // Checkout second working copy
+        ctx.checkout(
+            url,
+            &wc2_path,
+            &CheckoutOptions {
+                peg_revision: Revision::Head,
+                revision: Revision::Head,
+                depth: Depth::Infinity,
+                ignore_externals: false,
+                allow_unver_obstructions: false,
+            },
+        )
+        .unwrap();
+
+        // Modify file in wc1 and commit
+        std::fs::write(&test_file1, "line1\nmodified by wc1\nline3\n").unwrap();
+        ctx.commit(
+            &[wc1_str],
+            &CommitOptions::default(),
+            std::collections::HashMap::new(),
+            &|_| Ok(()),
+        )
+        .unwrap();
+
+        // Modify same file in wc2 (different change on same line)
+        let test_file2 = wc2_path.join("test.txt");
+        std::fs::write(&test_file2, "line1\nmodified by wc2\nline3\n").unwrap();
+
+        // Update wc2 - should create a conflict
+        let wc2_str = wc2_path.to_str().unwrap();
+        let _ = ctx.update(&[wc2_str], Revision::Head, &UpdateOptions::default());
+
+        // Get conflict for the file
+        let mut conflict = ctx.conflict_get(&test_file2).unwrap();
+
+        // Test text_get_resolution_options and find_by_id
+        let options = conflict.text_get_resolution_options(&mut ctx).unwrap();
+        assert!(!options.is_empty(), "Should have resolution options");
+
+        // Test find_by_id
+        let base_option =
+            ConflictOption::find_by_id(&options, crate::ClientConflictOptionId::MergedText);
+        assert!(base_option.is_some(), "Should find merged text option");
+
+        // Test text_resolve_by_id
+        conflict
+            .text_resolve_by_id(crate::TextConflictChoice::Merged, &mut ctx)
+            .unwrap();
+
+        // Verify resolution was applied
+        let text_res = conflict.text_get_resolution();
+        assert_eq!(text_res, crate::ClientConflictOptionId::MergedText);
+    }
+
+    #[test]
     fn test_conflict_with_prop_conflict() {
         let td = tempfile::tempdir().unwrap();
         let repo_path = td.path().join("repo");
@@ -10277,6 +10381,127 @@ mod tests {
         // prop_get_reject_abspath should return a path now
         let reject_path = conflict.prop_get_reject_abspath();
         assert!(reject_path.is_some(), "Should have reject file path");
+    }
+
+    #[test]
+    fn test_prop_conflict_resolution() {
+        let td = tempfile::tempdir().unwrap();
+        let repo_path = td.path().join("repo");
+        let wc1_path = td.path().join("wc1");
+        let wc2_path = td.path().join("wc2");
+
+        crate::repos::Repos::create(&repo_path).unwrap();
+
+        let mut ctx = Context::new().unwrap();
+        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        let url = crate::uri::Uri::new(&url_str).unwrap();
+
+        // Checkout first working copy
+        ctx.checkout(
+            url.clone(),
+            &wc1_path,
+            &CheckoutOptions {
+                peg_revision: Revision::Head,
+                revision: Revision::Head,
+                depth: Depth::Infinity,
+                ignore_externals: false,
+                allow_unver_obstructions: false,
+            },
+        )
+        .unwrap();
+
+        // Create and commit a file with property
+        let test_file1 = wc1_path.join("test.txt");
+        std::fs::write(&test_file1, "content\n").unwrap();
+        ctx.add(&test_file1, &AddOptions::default()).unwrap();
+        ctx.propset(
+            "svn:custom",
+            Some(b"initial"),
+            test_file1.to_str().unwrap(),
+            &PropSetOptions::default(),
+        )
+        .unwrap();
+
+        let wc1_str = wc1_path.to_str().unwrap();
+        ctx.commit(
+            &[wc1_str],
+            &CommitOptions::default(),
+            std::collections::HashMap::new(),
+            &|_| Ok(()),
+        )
+        .unwrap();
+
+        // Checkout second working copy
+        ctx.checkout(
+            url,
+            &wc2_path,
+            &CheckoutOptions {
+                peg_revision: Revision::Head,
+                revision: Revision::Head,
+                depth: Depth::Infinity,
+                ignore_externals: false,
+                allow_unver_obstructions: false,
+            },
+        )
+        .unwrap();
+
+        // Change property in wc1 and commit
+        ctx.propset(
+            "svn:custom",
+            Some(b"from_wc1"),
+            test_file1.to_str().unwrap(),
+            &PropSetOptions::default(),
+        )
+        .unwrap();
+        ctx.commit(
+            &[wc1_str],
+            &CommitOptions::default(),
+            std::collections::HashMap::new(),
+            &|_| Ok(()),
+        )
+        .unwrap();
+
+        // Change same property in wc2 (different value)
+        let test_file2 = wc2_path.join("test.txt");
+        ctx.propset(
+            "svn:custom",
+            Some(b"from_wc2"),
+            test_file2.to_str().unwrap(),
+            &PropSetOptions::default(),
+        )
+        .unwrap();
+
+        // Update wc2 - should create a property conflict
+        let wc2_str = wc2_path.to_str().unwrap();
+        let _ = ctx.update(&[wc2_str], Revision::Head, &UpdateOptions::default());
+
+        // Get conflict for the file
+        let mut conflict = ctx.conflict_get(&test_file2).unwrap();
+
+        // Test prop_get_propvals
+        let propvals = conflict.prop_get_propvals("svn:custom").unwrap();
+        assert!(propvals.1.is_some(), "Should have working propval");
+        assert!(propvals.3.is_some(), "Should have incoming new propval");
+
+        // Test prop_get_resolution_options
+        let options = conflict.prop_get_resolution_options(&mut ctx).unwrap();
+        assert!(!options.is_empty(), "Should have resolution options");
+
+        // Test prop_resolve_by_id
+        conflict
+            .prop_resolve_by_id(
+                "svn:custom",
+                crate::TextConflictChoice::MineConflict,
+                &mut ctx,
+            )
+            .unwrap();
+
+        // Verify resolution was applied
+        let prop_res = conflict.prop_get_resolution("svn:custom").unwrap();
+        assert_eq!(
+            prop_res,
+            crate::ClientConflictOptionId::WorkingTextWhereConflicted
+        );
     }
 
     #[test]
