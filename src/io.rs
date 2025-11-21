@@ -444,7 +444,7 @@ impl Stream {
         Ok(Self {
             ptr: stream,
             _pool: pool,
-            backend: None, // Backend is managed by close_trampoline, not by Drop
+            backend: None,     // Backend is managed by close_trampoline, not by Drop
             needs_close: true, // Ensure close_trampoline runs to free the backend
             _phantom: PhantomData,
         })

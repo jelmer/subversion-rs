@@ -106,7 +106,8 @@ pub fn translation_required(
                         let svn_str =
                             subversion_sys::svn_string_create(v_cstr.as_ptr(), pool.as_mut_ptr());
                         // Use the pooled key which is null-terminated
-                        let key_slice = std::slice::from_raw_parts(k_pooled as *const u8, k.len() + 1);
+                        let key_slice =
+                            std::slice::from_raw_parts(k_pooled as *const u8, k.len() + 1);
                         hash.insert(key_slice, svn_str as *mut std::ffi::c_void);
                     }
                 }
@@ -410,7 +411,8 @@ pub fn translate_stream(
                         let svn_str =
                             subversion_sys::svn_string_create(v_cstr.as_ptr(), pool.as_mut_ptr());
                         // Use the pooled key which is null-terminated
-                        let key_slice = std::slice::from_raw_parts(k_pooled as *const u8, k.len() + 1);
+                        let key_slice =
+                            std::slice::from_raw_parts(k_pooled as *const u8, k.len() + 1);
                         hash.insert(key_slice, svn_str as *mut std::ffi::c_void);
                     }
                 }

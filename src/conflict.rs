@@ -157,7 +157,9 @@ pub struct ConflictDescription {
 
 impl ConflictDescription {
     /// Create from raw SVN conflict description
-    pub(crate) unsafe fn from_raw(desc: *const subversion_sys::svn_wc_conflict_description2_t) -> Result<Self, Error> {
+    pub(crate) unsafe fn from_raw(
+        desc: *const subversion_sys::svn_wc_conflict_description2_t,
+    ) -> Result<Self, Error> {
         if desc.is_null() {
             return Err(Error::from_str("Null conflict description"));
         }
@@ -307,7 +309,10 @@ impl Default for ConflictResult {
 
 impl ConflictResult {
     /// Convert to raw SVN conflict result
-    pub(crate) unsafe fn to_raw(&self, pool: *mut apr_sys::apr_pool_t) -> *mut subversion_sys::svn_wc_conflict_result_t {
+    pub(crate) unsafe fn to_raw(
+        &self,
+        pool: *mut apr_sys::apr_pool_t,
+    ) -> *mut subversion_sys::svn_wc_conflict_result_t {
         let merged_file_cstr;
         let merged_file_ptr = if let Some(ref merged_file) = self.merged_file {
             merged_file_cstr = std::ffi::CString::new(merged_file.as_str()).unwrap();

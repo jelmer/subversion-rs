@@ -824,8 +824,10 @@ pub fn get_update_editor4(
     let preserved_exts_apr = if preserved_exts_cstrs.is_empty() {
         std::ptr::null()
     } else {
-        let mut arr =
-            apr::tables::TypedArray::<*const i8>::new(&result_pool, preserved_exts_cstrs.len() as i32);
+        let mut arr = apr::tables::TypedArray::<*const i8>::new(
+            &result_pool,
+            preserved_exts_cstrs.len() as i32,
+        );
         for cstr in &preserved_exts_cstrs {
             arr.push(cstr.as_ptr());
         }
@@ -1827,8 +1829,10 @@ impl Context {
         let preserved_exts_apr = if preserved_exts_cstrs.is_empty() {
             std::ptr::null()
         } else {
-            let mut arr =
-                apr::tables::TypedArray::<*const i8>::new(&result_pool, preserved_exts_cstrs.len() as i32);
+            let mut arr = apr::tables::TypedArray::<*const i8>::new(
+                &result_pool,
+                preserved_exts_cstrs.len() as i32,
+            );
             for cstr in &preserved_exts_cstrs {
                 arr.push(cstr.as_ptr());
             }
@@ -1860,59 +1864,57 @@ impl Context {
             .map(|f| box_notify_baton(f))
             .unwrap_or(std::ptr::null_mut());
 
-        let err = with_tmp_pool(|scratch_pool| {
-            unsafe {
-                svn_result(subversion_sys::svn_wc_get_switch_editor4(
-                    &mut editor_ptr,
-                    &mut edit_baton,
-                    &mut target_revision,
-                    self.ptr,
-                    anchor_abspath_cstr.as_ptr(),
-                    target_basename_cstr.as_ptr(),
-                    switch_url_cstr.as_ptr(),
-                    if use_commit_times { 1 } else { 0 },
-                    depth.into(),
-                    if depth_is_sticky { 1 } else { 0 },
-                    if allow_unver_obstructions { 1 } else { 0 },
-                    if server_performs_filtering { 1 } else { 0 },
-                    diff3_cmd_cstr
-                        .as_ref()
-                        .map_or(std::ptr::null(), |c| c.as_ptr()),
-                    preserved_exts_apr,
-                    if has_fetch_dirents {
-                        Some(wrap_fetch_dirents_func)
-                    } else {
-                        None
-                    },
-                    fetch_dirents_baton,
-                    if has_conflict {
-                        Some(wrap_conflict_func)
-                    } else {
-                        None
-                    },
-                    conflict_baton,
-                    if has_external {
-                        Some(wrap_external_func)
-                    } else {
-                        None
-                    },
-                    external_baton,
-                    if has_cancel {
-                        Some(crate::wrap_cancel_func)
-                    } else {
-                        None
-                    },
-                    cancel_baton,
-                    if has_notify {
-                        Some(wrap_notify_func)
-                    } else {
-                        None
-                    },
-                    notify_baton,
-                    result_pool.as_mut_ptr(),
-                    scratch_pool.as_mut_ptr(),
-                ))
-            }
+        let err = with_tmp_pool(|scratch_pool| unsafe {
+            svn_result(subversion_sys::svn_wc_get_switch_editor4(
+                &mut editor_ptr,
+                &mut edit_baton,
+                &mut target_revision,
+                self.ptr,
+                anchor_abspath_cstr.as_ptr(),
+                target_basename_cstr.as_ptr(),
+                switch_url_cstr.as_ptr(),
+                if use_commit_times { 1 } else { 0 },
+                depth.into(),
+                if depth_is_sticky { 1 } else { 0 },
+                if allow_unver_obstructions { 1 } else { 0 },
+                if server_performs_filtering { 1 } else { 0 },
+                diff3_cmd_cstr
+                    .as_ref()
+                    .map_or(std::ptr::null(), |c| c.as_ptr()),
+                preserved_exts_apr,
+                if has_fetch_dirents {
+                    Some(wrap_fetch_dirents_func)
+                } else {
+                    None
+                },
+                fetch_dirents_baton,
+                if has_conflict {
+                    Some(wrap_conflict_func)
+                } else {
+                    None
+                },
+                conflict_baton,
+                if has_external {
+                    Some(wrap_external_func)
+                } else {
+                    None
+                },
+                external_baton,
+                if has_cancel {
+                    Some(crate::wrap_cancel_func)
+                } else {
+                    None
+                },
+                cancel_baton,
+                if has_notify {
+                    Some(wrap_notify_func)
+                } else {
+                    None
+                },
+                notify_baton,
+                result_pool.as_mut_ptr(),
+                scratch_pool.as_mut_ptr(),
+            ))
         });
 
         err?;
@@ -5072,7 +5074,7 @@ mod tests {
             false,
             true, // server_performs_filtering = true
             None,
-            &[],  // preserved_exts
+            &[], // preserved_exts
             None,
             None,
             None,
