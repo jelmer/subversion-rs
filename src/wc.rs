@@ -814,18 +814,23 @@ pub fn get_update_editor4(
     let target_basename_cstr = std::ffi::CString::new(target_basename)?;
     let diff3_cmd_cstr = diff3_cmd.map(std::ffi::CString::new).transpose()?;
 
+    let result_pool = apr::Pool::new();
+
     // Create preserved extensions array
     let preserved_exts_cstrs: Vec<std::ffi::CString> = preserved_exts
         .iter()
         .map(|&s| std::ffi::CString::new(s))
         .collect::<Result<Vec<_>, _>>()?;
-    let _preserved_exts_ptrs: Vec<*const std::ffi::c_char> = preserved_exts_cstrs
-        .iter()
-        .map(|s| s.as_ptr())
-        .chain(std::iter::once(std::ptr::null()))
-        .collect();
-
-    let result_pool = apr::Pool::new();
+    let preserved_exts_apr = if preserved_exts_cstrs.is_empty() {
+        std::ptr::null()
+    } else {
+        let mut arr =
+            apr::tables::TypedArray::<*const i8>::new(&result_pool, preserved_exts_cstrs.len() as i32);
+        for cstr in &preserved_exts_cstrs {
+            arr.push(cstr.as_ptr());
+        }
+        unsafe { arr.as_ptr() }
+    };
     let mut target_revision: subversion_sys::svn_revnum_t = 0;
     let mut editor_ptr: *const subversion_sys::svn_delta_editor_t = std::ptr::null();
     let mut edit_baton: *mut std::ffi::c_void = std::ptr::null_mut();
@@ -871,7 +876,7 @@ pub fn get_update_editor4(
                 diff3_cmd_cstr
                     .as_ref()
                     .map_or(std::ptr::null(), |c| c.as_ptr()),
-                std::ptr::null(), // preserved_exts - TODO: create proper apr_array_header_t
+                preserved_exts_apr,
                 if has_fetch_dirents {
                     Some(wrap_fetch_dirents_func)
                 } else {
@@ -1784,6 +1789,7 @@ impl Context {
         allow_unver_obstructions: bool,
         server_performs_filtering: bool,
         diff3_cmd: Option<&str>,
+        preserved_exts: &[&str],
         fetch_dirents_func: Option<
             Box<
                 dyn Fn(
@@ -1812,6 +1818,22 @@ impl Context {
         let diff3_cmd_cstr = diff3_cmd.map(std::ffi::CString::new).transpose()?;
 
         let result_pool = apr::Pool::new();
+
+        // Create preserved extensions array
+        let preserved_exts_cstrs: Vec<std::ffi::CString> = preserved_exts
+            .iter()
+            .map(|&s| std::ffi::CString::new(s))
+            .collect::<Result<Vec<_>, _>>()?;
+        let preserved_exts_apr = if preserved_exts_cstrs.is_empty() {
+            std::ptr::null()
+        } else {
+            let mut arr =
+                apr::tables::TypedArray::<*const i8>::new(&result_pool, preserved_exts_cstrs.len() as i32);
+            for cstr in &preserved_exts_cstrs {
+                arr.push(cstr.as_ptr());
+            }
+            unsafe { arr.as_ptr() }
+        };
         let mut target_revision: subversion_sys::svn_revnum_t = 0;
         let mut editor_ptr: *const subversion_sys::svn_delta_editor_t = std::ptr::null();
         let mut edit_baton: *mut std::ffi::c_void = std::ptr::null_mut();
@@ -1856,7 +1878,7 @@ impl Context {
                     diff3_cmd_cstr
                         .as_ref()
                         .map_or(std::ptr::null(), |c| c.as_ptr()),
-                    std::ptr::null(), // preserved_exts - TODO: expose
+                    preserved_exts_apr,
                     if has_fetch_dirents {
                         Some(wrap_fetch_dirents_func)
                     } else {
@@ -3473,6 +3495,7 @@ mod tests {
             false,
             false, // server_performs_filtering
             None,
+            &[],  // preserved_exts
             None, // fetch_dirents_func
             None, // no conflict callback
             None, // no external callback
@@ -3501,6 +3524,7 @@ mod tests {
             false, // allow_unver_obstructions
             false, // server_performs_filtering
             None,  // diff3_cmd
+            &[],   // preserved_exts
             None,  // fetch_dirents_func
             None,  // no conflict callback
             None,  // no external callback
@@ -3528,6 +3552,7 @@ mod tests {
             true,  // allow_unver_obstructions
             false, // server_performs_filtering
             None,  // diff3_cmd
+            &[],   // preserved_exts
             None,  // fetch_dirents_func
             None,  // no conflict callback
             None,  // no external callback
@@ -4945,6 +4970,7 @@ mod tests {
             false,
             false, // server_performs_filtering
             None,
+            &[],  // preserved_exts
             None, // fetch_dirents_func
             None, // conflict_func
             None, // external_func
@@ -5046,6 +5072,7 @@ mod tests {
             false,
             true, // server_performs_filtering = true
             None,
+            &[],  // preserved_exts
             None,
             None,
             None,
