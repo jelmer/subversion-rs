@@ -3592,14 +3592,17 @@ impl Context {
                 .zip(path_cstrings.iter())
                 .map(|((_, rev), path_c)| {
                     let src: *mut subversion_sys::svn_client_copy_source_t = pool.calloc();
+                    let revision: *mut subversion_sys::svn_opt_revision_t = pool.calloc();
+                    let peg_revision: *mut subversion_sys::svn_opt_revision_t = pool.calloc();
                     unsafe {
                         (*src).path = path_c.as_ptr();
-                        (*src).revision = Box::into_raw(Box::new(
-                            rev.as_ref()
-                                .map(|r| (*r).into())
-                                .unwrap_or(Revision::Head.into()),
-                        ));
-                        (*src).peg_revision = Box::into_raw(Box::new(Revision::Head.into()));
+                        *revision = rev
+                            .as_ref()
+                            .map(|r| (*r).into())
+                            .unwrap_or(Revision::Head.into());
+                        (*src).revision = revision;
+                        *peg_revision = Revision::Head.into();
+                        (*src).peg_revision = peg_revision;
                     }
                     src
                 })
@@ -6350,7 +6353,8 @@ impl Status {
         if lock_ptr.is_null() {
             None
         } else {
-            let pool_handle = unsafe { apr::PoolHandle::from_borrowed_raw(self._pool.as_mut_ptr()) };
+            let pool_handle =
+                unsafe { apr::PoolHandle::from_borrowed_raw(self._pool.as_mut_ptr()) };
             Some(crate::Lock::from_raw(lock_ptr, pool_handle))
         }
     }
@@ -6401,7 +6405,8 @@ impl Status {
         if lock_ptr.is_null() {
             None
         } else {
-            let pool_handle = unsafe { apr::PoolHandle::from_borrowed_raw(self._pool.as_mut_ptr()) };
+            let pool_handle =
+                unsafe { apr::PoolHandle::from_borrowed_raw(self._pool.as_mut_ptr()) };
             Some(crate::Lock::from_raw(lock_ptr, pool_handle))
         }
     }
