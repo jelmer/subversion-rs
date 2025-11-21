@@ -61,6 +61,51 @@ pub fn canonicalize_uri(uri: &str) -> Result<String, crate::Error> {
     })
 }
 
+/// Get the longest common ancestor of two URIs
+pub fn get_longest_ancestor(uri1: &str, uri2: &str) -> Result<String, crate::Error> {
+    with_tmp_pool(|pool| unsafe {
+        let uri1_cstr = std::ffi::CString::new(uri1)?;
+        let uri2_cstr = std::ffi::CString::new(uri2)?;
+        let ancestor = subversion_sys::svn_uri_get_longest_ancestor(
+            uri1_cstr.as_ptr(),
+            uri2_cstr.as_ptr(),
+            pool.as_mut_ptr(),
+        );
+        let ancestor_cstr = std::ffi::CStr::from_ptr(ancestor);
+        Ok(ancestor_cstr.to_str()?.to_owned())
+    })
+}
+
+/// Check if one URI is an ancestor of another
+pub fn is_ancestor(ancestor: &str, path: &str) -> bool {
+    unsafe {
+        let ancestor_cstr = std::ffi::CString::new(ancestor).unwrap();
+        let path_cstr = std::ffi::CString::new(path).unwrap();
+        subversion_sys::svn_uri__is_ancestor(ancestor_cstr.as_ptr(), path_cstr.as_ptr()) != 0
+    }
+}
+
+/// Skip the ancestor portion of a URI, returning the remainder
+///
+/// Returns None if `ancestor` is not an ancestor of `path`.
+pub fn skip_ancestor(ancestor: &str, path: &str) -> Option<String> {
+    with_tmp_pool(|pool| unsafe {
+        let ancestor_cstr = std::ffi::CString::new(ancestor).ok()?;
+        let path_cstr = std::ffi::CString::new(path).ok()?;
+        let result = subversion_sys::svn_uri_skip_ancestor(
+            ancestor_cstr.as_ptr(),
+            path_cstr.as_ptr(),
+            pool.as_mut_ptr(),
+        );
+        if result.is_null() {
+            None
+        } else {
+            let result_cstr = std::ffi::CStr::from_ptr(result);
+            Some(result_cstr.to_str().ok()?.to_owned())
+        }
+    })
+}
+
 /// Trait for types that can be converted to canonical URIs
 pub trait AsCanonicalUri {
     /// Convert to a canonical URI
@@ -197,5 +242,42 @@ mod tests {
         assert!(result.is_ok());
         let canonical = result.unwrap();
         assert_eq!(canonical.0.as_str(), "http://example.com/path");
+    }
+
+    #[test]
+    fn test_get_longest_ancestor() {
+        let result =
+            get_longest_ancestor("http://example.com/a/b/c", "http://example.com/a/b/d").unwrap();
+        assert_eq!(result, "http://example.com/a/b");
+    }
+
+    #[test]
+    fn test_get_longest_ancestor_no_common() {
+        let result = get_longest_ancestor("http://example.com/a", "http://other.com/b").unwrap();
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn test_is_ancestor() {
+        assert!(is_ancestor(
+            "http://example.com/a",
+            "http://example.com/a/b/c"
+        ));
+        assert!(!is_ancestor(
+            "http://example.com/a/b",
+            "http://example.com/a"
+        ));
+    }
+
+    #[test]
+    fn test_skip_ancestor() {
+        let result = skip_ancestor("http://example.com/a", "http://example.com/a/b/c");
+        assert_eq!(result, Some("b/c".to_string()));
+    }
+
+    #[test]
+    fn test_skip_ancestor_not_ancestor() {
+        let result = skip_ancestor("http://example.com/x", "http://example.com/a/b");
+        assert_eq!(result, None);
     }
 }
