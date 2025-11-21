@@ -77,6 +77,210 @@ impl From<LoadUUID> for subversion_sys::svn_repos_load_uuid {
     }
 }
 
+/// Options for repository dump operations.
+#[derive(Default)]
+pub struct DumpOptions<'a> {
+    /// Starting revision (None for revision 0).
+    pub start_rev: Option<Revnum>,
+    /// Ending revision (None for HEAD).
+    pub end_rev: Option<Revnum>,
+    /// If true, produce incremental dump (only changes since start_rev).
+    pub incremental: bool,
+    /// If true, use deltas for file contents.
+    pub use_deltas: bool,
+    /// If true, include revision properties.
+    pub include_revprops: bool,
+    /// If true, include node changes.
+    pub include_changes: bool,
+    /// Optional notification callback.
+    pub notify_func: Option<&'a dyn Fn(&Notify)>,
+    /// Optional filter callback to control which paths are dumped.
+    pub filter_func: Option<Box<dyn FnMut(&crate::fs::Root, &str) -> Result<bool, Error> + 'a>>,
+    /// Optional cancellation callback.
+    pub cancel_func: Option<&'a dyn Fn() -> Result<(), Error>>,
+}
+
+impl<'a> DumpOptions<'a> {
+    /// Creates new DumpOptions with default values.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets the starting revision.
+    pub fn with_start_rev(mut self, rev: Revnum) -> Self {
+        self.start_rev = Some(rev);
+        self
+    }
+
+    /// Sets the ending revision.
+    pub fn with_end_rev(mut self, rev: Revnum) -> Self {
+        self.end_rev = Some(rev);
+        self
+    }
+
+    /// Sets whether to produce an incremental dump.
+    pub fn with_incremental(mut self, incremental: bool) -> Self {
+        self.incremental = incremental;
+        self
+    }
+
+    /// Sets whether to use deltas for file contents.
+    pub fn with_use_deltas(mut self, use_deltas: bool) -> Self {
+        self.use_deltas = use_deltas;
+        self
+    }
+
+    /// Sets whether to include revision properties.
+    pub fn with_include_revprops(mut self, include: bool) -> Self {
+        self.include_revprops = include;
+        self
+    }
+
+    /// Sets whether to include node changes.
+    pub fn with_include_changes(mut self, include: bool) -> Self {
+        self.include_changes = include;
+        self
+    }
+}
+
+/// Options for repository load operations.
+#[derive(Default)]
+pub struct LoadOptions<'a> {
+    /// Starting revision (None for all revisions).
+    pub start_rev: Option<Revnum>,
+    /// Ending revision (None for all revisions).
+    pub end_rev: Option<Revnum>,
+    /// How to handle UUID from dump stream.
+    pub uuid_action: LoadUUID,
+    /// Parent directory to load into (None for root).
+    pub parent_dir: Option<&'a str>,
+    /// If true, run pre-commit hook for each loaded revision.
+    pub use_pre_commit_hook: bool,
+    /// If true, run post-commit hook for each loaded revision.
+    pub use_post_commit_hook: bool,
+    /// If true, validate properties.
+    pub validate_props: bool,
+    /// If true, ignore dates from dump and use current time.
+    pub ignore_dates: bool,
+    /// If true, normalize properties (e.g., line endings).
+    pub normalize_props: bool,
+    /// Optional notification callback.
+    pub notify_func: Option<&'a dyn Fn(&Notify)>,
+    /// Optional cancellation callback.
+    pub cancel_func: Option<&'a dyn Fn() -> Result<(), Error>>,
+}
+
+impl<'a> LoadOptions<'a> {
+    /// Creates new LoadOptions with default values.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets the starting revision.
+    pub fn with_start_rev(mut self, rev: Revnum) -> Self {
+        self.start_rev = Some(rev);
+        self
+    }
+
+    /// Sets the ending revision.
+    pub fn with_end_rev(mut self, rev: Revnum) -> Self {
+        self.end_rev = Some(rev);
+        self
+    }
+
+    /// Sets how to handle UUID from dump stream.
+    pub fn with_uuid_action(mut self, action: LoadUUID) -> Self {
+        self.uuid_action = action;
+        self
+    }
+
+    /// Sets the parent directory to load into.
+    pub fn with_parent_dir(mut self, dir: &'a str) -> Self {
+        self.parent_dir = Some(dir);
+        self
+    }
+
+    /// Sets whether to run pre-commit hooks.
+    pub fn with_use_pre_commit_hook(mut self, use_hook: bool) -> Self {
+        self.use_pre_commit_hook = use_hook;
+        self
+    }
+
+    /// Sets whether to run post-commit hooks.
+    pub fn with_use_post_commit_hook(mut self, use_hook: bool) -> Self {
+        self.use_post_commit_hook = use_hook;
+        self
+    }
+
+    /// Sets whether to validate properties.
+    pub fn with_validate_props(mut self, validate: bool) -> Self {
+        self.validate_props = validate;
+        self
+    }
+
+    /// Sets whether to ignore dates from dump.
+    pub fn with_ignore_dates(mut self, ignore: bool) -> Self {
+        self.ignore_dates = ignore;
+        self
+    }
+
+    /// Sets whether to normalize properties.
+    pub fn with_normalize_props(mut self, normalize: bool) -> Self {
+        self.normalize_props = normalize;
+        self
+    }
+}
+
+/// Options for repository verify operations.
+#[derive(Default)]
+pub struct VerifyOptions<'a> {
+    /// Starting revision to verify.
+    pub start_rev: Revnum,
+    /// Ending revision to verify.
+    pub end_rev: Revnum,
+    /// If true, check for normalization issues.
+    pub check_normalization: bool,
+    /// If true, only verify metadata (not file contents).
+    pub metadata_only: bool,
+    /// Optional notification callback.
+    pub notify_func: Option<&'a dyn Fn(&Notify)>,
+    /// Optional callback for verification errors.
+    pub verify_callback: Option<&'a dyn Fn(Revnum, &Error) -> Result<(), Error>>,
+    /// Optional cancellation callback.
+    pub cancel_func: Option<&'a dyn Fn() -> Result<(), Error>>,
+}
+
+impl<'a> VerifyOptions<'a> {
+    /// Creates new VerifyOptions with default values.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets the starting revision.
+    pub fn with_start_rev(mut self, rev: Revnum) -> Self {
+        self.start_rev = rev;
+        self
+    }
+
+    /// Sets the ending revision.
+    pub fn with_end_rev(mut self, rev: Revnum) -> Self {
+        self.end_rev = rev;
+        self
+    }
+
+    /// Sets whether to check for normalization issues.
+    pub fn with_check_normalization(mut self, check: bool) -> Self {
+        self.check_normalization = check;
+        self
+    }
+
+    /// Sets whether to only verify metadata.
+    pub fn with_metadata_only(mut self, metadata_only: bool) -> Self {
+        self.metadata_only = metadata_only;
+        self
+    }
+}
+
 /// Authorization access levels
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthzAccess {
@@ -963,28 +1167,24 @@ impl Repos {
     pub fn dump(
         &self,
         stream: &mut crate::io::Stream,
-        start_rev: Option<Revnum>,
-        end_rev: Option<Revnum>,
-        incremental: bool,
-        use_deltas: bool,
-        include_revprops: bool,
-        include_changes: bool,
-        notify_func: Option<&dyn Fn(&Notify)>,
-        filter_func: Option<Box<dyn FnMut(&crate::fs::Root, &str) -> Result<bool, Error>>>,
-        cancel_func: Option<&dyn Fn() -> Result<(), Error>>,
+        options: &mut DumpOptions,
     ) -> Result<(), Error> {
         let pool = apr::Pool::new();
-        let notify_baton = notify_func
+        let notify_baton = options
+            .notify_func
             .map(|notify_func| {
                 let boxed: Box<dyn FnMut(&Notify)> = Box::new(move |n| notify_func(n));
                 Box::into_raw(Box::new(boxed)) as *mut std::ffi::c_void
             })
             .unwrap_or(std::ptr::null_mut());
-        let has_filter = filter_func.is_some();
-        let filter_baton = filter_func
+        let has_filter = options.filter_func.is_some();
+        let filter_baton = options
+            .filter_func
+            .take()
             .map(|f| Box::into_raw(Box::new(f)) as *mut std::ffi::c_void)
             .unwrap_or(std::ptr::null_mut());
-        let cancel_baton = cancel_func
+        let cancel_baton = options
+            .cancel_func
             .map(|cancel_func| {
                 let boxed: Box<dyn Fn() -> Result<(), Error>> = Box::new(move || cancel_func());
                 Box::into_raw(Box::new(boxed)) as *mut std::ffi::c_void
@@ -995,13 +1195,13 @@ impl Repos {
             svn_repos_dump_fs4(
                 self.ptr,
                 stream.as_mut_ptr(),
-                start_rev.map(|r| r.into()).unwrap_or(-1),
-                end_rev.map(|r| r.into()).unwrap_or(-1),
-                incremental.into(),
-                use_deltas.into(),
-                include_revprops.into(),
-                include_changes.into(),
-                if notify_func.is_some() {
+                options.start_rev.map(|r| r.into()).unwrap_or(-1),
+                options.end_rev.map(|r| r.into()).unwrap_or(-1),
+                options.incremental.into(),
+                options.use_deltas.into(),
+                options.include_revprops.into(),
+                options.include_changes.into(),
+                if options.notify_func.is_some() {
                     Some(wrap_notify_func)
                 } else {
                     None
@@ -1013,7 +1213,7 @@ impl Repos {
                     None
                 },
                 filter_baton,
-                if cancel_func.is_some() {
+                if options.cancel_func.is_some() {
                     Some(crate::wrap_cancel_func)
                 } else {
                     None
@@ -1051,32 +1251,26 @@ impl Repos {
     pub fn load(
         &self,
         dumpstream: &mut crate::io::Stream,
-        start_rev: Option<Revnum>,
-        end_rev: Option<Revnum>,
-        uuid_action: LoadUUID,
-        parent_dir: Option<&str>,
-        use_pre_commit_hook: bool,
-        use_post_commit_hook: bool,
-        validate_props: bool,
-        ignore_dates: bool,
-        normalize_props: bool,
-        notify_func: Option<&dyn Fn(&Notify)>,
-        cancel_func: Option<&dyn Fn() -> Result<(), Error>>,
+        options: &LoadOptions,
     ) -> Result<(), Error> {
         let pool = apr::Pool::new();
-        let parent_dir_cstr = parent_dir.map(|p| std::ffi::CString::new(p).unwrap());
+        let parent_dir_cstr = options
+            .parent_dir
+            .map(|p| std::ffi::CString::new(p).unwrap());
         let parent_dir_ptr = parent_dir_cstr
             .as_ref()
             .map(|s| s.as_ptr())
             .unwrap_or(std::ptr::null());
 
-        let notify_baton = notify_func
+        let notify_baton = options
+            .notify_func
             .map(|notify_func| {
                 let boxed: Box<dyn FnMut(&Notify)> = Box::new(move |n| notify_func(n));
                 Box::into_raw(Box::new(boxed)) as *mut std::ffi::c_void
             })
             .unwrap_or(std::ptr::null_mut());
-        let cancel_baton = cancel_func
+        let cancel_baton = options
+            .cancel_func
             .map(|cancel_func| {
                 let boxed: Box<dyn Fn() -> Result<(), Error>> = Box::new(move || cancel_func());
                 Box::into_raw(Box::new(boxed)) as *mut std::ffi::c_void
@@ -1087,22 +1281,22 @@ impl Repos {
             svn_repos_load_fs6(
                 self.ptr,
                 dumpstream.as_mut_ptr(),
-                start_rev.map(|r| r.into()).unwrap_or(-1),
-                end_rev.map(|r| r.into()).unwrap_or(-1),
-                uuid_action.into(),
+                options.start_rev.map(|r| r.into()).unwrap_or(-1),
+                options.end_rev.map(|r| r.into()).unwrap_or(-1),
+                options.uuid_action.into(),
                 parent_dir_ptr,
-                use_pre_commit_hook.into(),
-                use_post_commit_hook.into(),
-                validate_props.into(),
-                ignore_dates.into(),
-                normalize_props.into(),
-                if notify_func.is_some() {
+                options.use_pre_commit_hook.into(),
+                options.use_post_commit_hook.into(),
+                options.validate_props.into(),
+                options.ignore_dates.into(),
+                options.normalize_props.into(),
+                if options.notify_func.is_some() {
                     Some(wrap_notify_func)
                 } else {
                     None
                 },
                 notify_baton,
-                if cancel_func.is_some() {
+                if options.cancel_func.is_some() {
                     Some(crate::wrap_cancel_func)
                 } else {
                     None
@@ -1129,16 +1323,7 @@ impl Repos {
     }
 
     /// Verify repository integrity
-    pub fn verify(
-        &self,
-        start_rev: Revnum,
-        end_rev: Revnum,
-        check_normalization: bool,
-        metadata_only: bool,
-        notify_func: Option<&dyn Fn(&Notify)>,
-        verify_callback: Option<&dyn Fn(Revnum, &Error) -> Result<(), Error>>,
-        cancel_func: Option<&dyn Fn() -> Result<(), Error>>,
-    ) -> Result<(), Error> {
+    pub fn verify(&self, options: &VerifyOptions) -> Result<(), Error> {
         extern "C" fn verify_error_callback(
             baton: *mut std::ffi::c_void,
             revision: subversion_sys::svn_revnum_t,
@@ -1156,16 +1341,19 @@ impl Repos {
         }
 
         let pool = apr::Pool::new();
-        let notify_baton = notify_func
+        let notify_baton = options
+            .notify_func
             .map(|notify_func| {
                 let boxed: Box<dyn FnMut(&Notify)> = Box::new(move |n| notify_func(n));
                 Box::into_raw(Box::new(boxed)) as *mut std::ffi::c_void
             })
             .unwrap_or(std::ptr::null_mut());
-        let verify_baton = verify_callback
+        let verify_baton = options
+            .verify_callback
             .map(|callback| Box::into_raw(Box::new(callback)) as *mut std::ffi::c_void)
             .unwrap_or(std::ptr::null_mut());
-        let cancel_baton = cancel_func
+        let cancel_baton = options
+            .cancel_func
             .map(|cancel_func| {
                 let boxed: Box<dyn Fn() -> Result<(), Error>> = Box::new(move || cancel_func());
                 Box::into_raw(Box::new(boxed)) as *mut std::ffi::c_void
@@ -1175,23 +1363,23 @@ impl Repos {
         let ret = unsafe {
             svn_repos_verify_fs3(
                 self.ptr,
-                start_rev.into(),
-                end_rev.into(),
-                check_normalization.into(),
-                metadata_only.into(),
-                if notify_func.is_some() {
+                options.start_rev.into(),
+                options.end_rev.into(),
+                options.check_normalization.into(),
+                options.metadata_only.into(),
+                if options.notify_func.is_some() {
                     Some(wrap_notify_func)
                 } else {
                     None
                 },
                 notify_baton,
-                if verify_callback.is_some() {
+                if options.verify_callback.is_some() {
                     Some(verify_error_callback)
                 } else {
                     None
                 },
                 verify_baton,
-                if cancel_func.is_some() {
+                if options.cancel_func.is_some() {
                     Some(crate::wrap_cancel_func)
                 } else {
                     None
@@ -1622,18 +1810,14 @@ mod tests {
         let mut stream = crate::io::wrap_write(&mut buffer).unwrap();
 
         // Dump revision 0 only (empty repo)
-        let result = repos.dump(
-            &mut stream,
-            Some(crate::Revnum(0)), // start_rev
-            Some(crate::Revnum(0)), // end_rev
-            false,                  // incremental
-            false,                  // use_deltas
-            true,                   // include_revprops
-            true,                   // include_changes
-            None,                   // notify_func
-            None,                   // filter_func
-            None,                   // cancel_func
-        );
+        let mut options = DumpOptions {
+            start_rev: Some(crate::Revnum(0)),
+            end_rev: Some(crate::Revnum(0)),
+            include_revprops: true,
+            include_changes: true,
+            ..Default::default()
+        };
+        let result = repos.dump(&mut stream, &mut options);
 
         assert!(result.is_ok(), "Failed to dump repository: {:?}", result);
 
@@ -1655,18 +1839,12 @@ mod tests {
         let mut stream = crate::io::wrap_write(&mut buffer).unwrap();
 
         // Dump all revisions (None means use SVN_INVALID_REVNUM = -1)
-        let result = repos.dump(
-            &mut stream,
-            None,  // start_rev (defaults to 0)
-            None,  // end_rev (defaults to HEAD)
-            false, // incremental
-            false, // use_deltas
-            true,  // include_revprops
-            true,  // include_changes
-            None,  // notify_func
-            None,  // filter_func
-            None,  // cancel_func
-        );
+        let mut options = DumpOptions {
+            include_revprops: true,
+            include_changes: true,
+            ..Default::default()
+        };
+        let result = repos.dump(&mut stream, &mut options);
 
         assert!(result.is_ok(), "Failed to dump repository: {:?}", result);
     }
@@ -1699,21 +1877,18 @@ mod tests {
         let filtered_paths_clone = filtered_paths.clone();
 
         // Dump with a filter that accepts all paths but records them
-        let result = repos.dump(
-            &mut stream,
-            Some(crate::Revnum(1)), // start_rev - revision with content
-            Some(crate::Revnum(1)), // end_rev
-            false,                  // incremental
-            false,                  // use_deltas
-            true,                   // include_revprops
-            true,                   // include_changes
-            None,                   // notify_func
-            Some(Box::new(move |_root, path| {
+        let mut options = DumpOptions {
+            start_rev: Some(crate::Revnum(1)),
+            end_rev: Some(crate::Revnum(1)),
+            include_revprops: true,
+            include_changes: true,
+            filter_func: Some(Box::new(move |_root, path| {
                 filtered_paths_clone.lock().unwrap().push(path.to_string());
                 Ok(true) // Accept all paths
             })),
-            None, // cancel_func
-        );
+            ..Default::default()
+        };
+        let result = repos.dump(&mut stream, &mut options);
 
         assert!(
             result.is_ok(),
@@ -1737,15 +1912,8 @@ mod tests {
         let td = tempfile::tempdir().unwrap();
         let repos = super::Repos::create(td.path()).unwrap();
 
-        let result = repos.verify(
-            crate::Revnum(0), // start_rev
-            crate::Revnum(0), // end_rev
-            false,            // check_normalization
-            false,            // metadata_only
-            None,             // notify_func
-            None,             // verify_callback
-            None,             // cancel_func
-        );
+        let options = VerifyOptions::new();
+        let result = repos.verify(&options);
 
         assert!(result.is_ok(), "Failed to verify repository: {:?}", result);
     }
@@ -1786,20 +1954,8 @@ mod tests {
 
         // Test loading from dump stream (may fail with invalid dump format)
         // Note: SVN requires both start_rev and end_rev to be either valid or both invalid
-        let result = repos.load(
-            &mut stream,
-            None,                     // start_rev (None = load all)
-            None,                     // end_rev (None = load all)
-            super::LoadUUID::Default, // uuid_action
-            None,                     // parent_dir
-            false,                    // use_pre_commit_hook
-            false,                    // use_post_commit_hook
-            false,                    // validate_props
-            false,                    // ignore_dates
-            false,                    // normalize_props
-            None,                     // notify_func
-            None,                     // cancel_func
-        );
+        let options = LoadOptions::new();
+        let result = repos.load(&mut stream, &options);
 
         // The test may fail due to dump format issues, but should not crash
         // The important thing is that the API is correctly implemented
@@ -3286,21 +3442,18 @@ admin = rw
             let mut stream = crate::io::wrap_write(&mut buffer).unwrap();
 
             // This should create an editor with a callback, then drop it
-            let result = repo.dump(
-                &mut stream,
-                Some(crate::Revnum(1)),
-                Some(crate::Revnum(1)),
-                false,
-                false,
-                true,
-                true,
-                None,
-                Some(Box::new(move |_root, _path| {
+            let mut options = DumpOptions {
+                start_rev: Some(crate::Revnum(1)),
+                end_rev: Some(crate::Revnum(1)),
+                include_revprops: true,
+                include_changes: true,
+                filter_func: Some(Box::new(move |_root, _path| {
                     callback_called_clone.store(true, Ordering::SeqCst);
                     Ok(true)
                 })),
-                None,
-            );
+                ..Default::default()
+            };
+            let result = repo.dump(&mut stream, &mut options);
 
             assert!(result.is_ok(), "Dump should succeed");
             // Editor is dropped here when result goes out of scope
