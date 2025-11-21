@@ -260,7 +260,6 @@ impl FsDirEntry {
     }
 
     /// Gets the entry name.
-
     pub fn name(&self) -> &str {
         unsafe { std::ffi::CStr::from_ptr((*self.ptr).name).to_str().unwrap() }
     }

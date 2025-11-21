@@ -80,7 +80,6 @@ pub fn default_editor(pool: Pool<'static>) -> WrapEditor<'static> {
 pub type DropperFn = unsafe fn(*mut std::ffi::c_void);
 
 /// Wrapper for a Subversion delta editor.
-
 pub struct WrapEditor<'pool> {
     pub(crate) editor: *const subversion_sys::svn_delta_editor_t,
     pub(crate) baton: *mut std::ffi::c_void,

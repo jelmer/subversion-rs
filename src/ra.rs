@@ -313,6 +313,64 @@ impl<'a> DoDiffOptions<'a> {
     }
 }
 
+/// Options for the get_log operation.
+pub struct GetLogOptions<'a> {
+    /// Maximum number of log entries to return (0 for unlimited).
+    pub limit: usize,
+    /// Whether to discover changed paths.
+    pub discover_changed_paths: bool,
+    /// Whether to use strict node history.
+    pub strict_node_history: bool,
+    /// Whether to include merged revisions.
+    pub include_merged_revisions: bool,
+    /// The revision properties to retrieve.
+    pub revprops: &'a [&'a str],
+}
+
+impl Default for GetLogOptions<'_> {
+    fn default() -> Self {
+        Self {
+            limit: 0,
+            discover_changed_paths: false,
+            strict_node_history: false,
+            include_merged_revisions: false,
+            revprops: &[],
+        }
+    }
+}
+
+impl<'a> GetLogOptions<'a> {
+    /// Sets the maximum number of log entries to return.
+    pub fn with_limit(mut self, limit: usize) -> Self {
+        self.limit = limit;
+        self
+    }
+
+    /// Sets whether to discover changed paths.
+    pub fn with_discover_changed_paths(mut self, discover: bool) -> Self {
+        self.discover_changed_paths = discover;
+        self
+    }
+
+    /// Sets whether to use strict node history.
+    pub fn with_strict_node_history(mut self, strict: bool) -> Self {
+        self.strict_node_history = strict;
+        self
+    }
+
+    /// Sets whether to include merged revisions.
+    pub fn with_include_merged_revisions(mut self, include: bool) -> Self {
+        self.include_merged_revisions = include;
+        self
+    }
+
+    /// Sets the revision properties to retrieve.
+    pub fn with_revprops(mut self, revprops: &'a [&'a str]) -> Self {
+        self.revprops = revprops;
+        self
+    }
+}
+
 impl<'a> Session<'a> {
     /// Creates a Session from a raw pointer and pool.
     pub(crate) unsafe fn from_ptr_and_pool(
@@ -1162,11 +1220,7 @@ impl<'a> Session<'a> {
         paths: &[&str],
         start: Revnum,
         end: Revnum,
-        limit: usize,
-        discover_changed_paths: bool,
-        strict_node_history: bool,
-        include_merged_revisions: bool,
-        revprops: &[&str],
+        options: &GetLogOptions,
         log_receiver: &dyn FnMut(&crate::LogEntry) -> Result<(), Error>,
     ) -> Result<(), Error> {
         let pool = Pool::new();
@@ -1183,13 +1237,14 @@ impl<'a> Session<'a> {
         }
 
         // Convert revprops to proper C strings
-        let revprop_cstrings: Vec<std::ffi::CString> = revprops
+        let revprop_cstrings: Vec<std::ffi::CString> = options
+            .revprops
             .iter()
             .map(|p| std::ffi::CString::new(*p).unwrap())
             .collect();
         let mut revprops_array = apr::tables::TypedArray::<*const std::os::raw::c_char>::new(
             &pool,
-            revprops.len() as i32,
+            options.revprops.len() as i32,
         );
         for cstr in &revprop_cstrings {
             revprops_array.push(cstr.as_ptr());
@@ -1204,10 +1259,10 @@ impl<'a> Session<'a> {
                 paths_array.as_ptr(),
                 start.into(),
                 end.into(),
-                limit as _,
-                discover_changed_paths.into(),
-                strict_node_history.into(),
-                include_merged_revisions.into(),
+                options.limit as _,
+                options.discover_changed_paths.into(),
+                options.strict_node_history.into(),
+                options.include_merged_revisions.into(),
                 revprops_array.as_ptr(),
                 Some(crate::wrap_log_entry_receiver),
                 baton,
@@ -2440,14 +2495,10 @@ mod tests {
         // Try a very simple get_log call without any complex setup
         let mut call_count = 0;
         let result = session.get_log(
-            &[""], // Root path
+            &[""],
             crate::Revnum::from(0u32),
             crate::Revnum::from(0u32),
-            0,     // No limit
-            false, // discover_changed_paths
-            false, // strict_node_history
-            false, // include_merged_revisions
-            &[],   // No revprops
+            &GetLogOptions::default(),
             &|_log_entry| {
                 call_count += 1;
                 Ok(())
@@ -2729,11 +2780,9 @@ mod tests {
                 &[""], // Root path
                 revisions[0],
                 *revisions.last().unwrap(),
-                0,     // No limit
-                true,  // discover_changed_paths
-                false, // strict_node_history
-                false, // include_merged_revisions
-                &["svn:log", "svn:author", "svn:date"],
+                &GetLogOptions::default()
+                    .with_discover_changed_paths(true)
+                    .with_revprops(&["svn:log", "svn:author", "svn:date"]),
                 &mut |log_entry| {
                     if let Some(revision) = log_entry.revision() {
                         let author = log_entry.author().unwrap_or("").to_string();
