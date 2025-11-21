@@ -106,6 +106,60 @@ pub fn skip_ancestor(ancestor: &str, path: &str) -> Option<String> {
     })
 }
 
+/// Get the basename (final component) of a URI
+pub fn basename(uri: &str) -> Result<String, crate::Error> {
+    with_tmp_pool(|pool| unsafe {
+        let uri_cstr = std::ffi::CString::new(uri)?;
+        let basename = subversion_sys::svn_uri_basename(uri_cstr.as_ptr(), pool.as_mut_ptr());
+        let basename_cstr = std::ffi::CStr::from_ptr(basename);
+        Ok(basename_cstr.to_str()?.to_owned())
+    })
+}
+
+/// Get the dirname (parent directory) of a URI
+pub fn dirname(uri: &str) -> Result<String, crate::Error> {
+    with_tmp_pool(|pool| unsafe {
+        let uri_cstr = std::ffi::CString::new(uri)?;
+        let dirname = subversion_sys::svn_uri_dirname(uri_cstr.as_ptr(), pool.as_mut_ptr());
+        let dirname_cstr = std::ffi::CStr::from_ptr(dirname);
+        Ok(dirname_cstr.to_str()?.to_owned())
+    })
+}
+
+/// Split a URI into its dirname and basename components
+///
+/// Returns (dirname, basename)
+pub fn split(uri: &str) -> Result<(String, String), crate::Error> {
+    with_tmp_pool(|pool| unsafe {
+        let uri_cstr = std::ffi::CString::new(uri)?;
+        let mut dirname: *const i8 = std::ptr::null();
+        let mut basename: *const i8 = std::ptr::null();
+
+        subversion_sys::svn_uri_split(
+            &mut dirname,
+            &mut basename,
+            uri_cstr.as_ptr(),
+            pool.as_mut_ptr(),
+        );
+
+        let dirname_cstr = std::ffi::CStr::from_ptr(dirname);
+        let basename_cstr = std::ffi::CStr::from_ptr(basename);
+
+        Ok((
+            dirname_cstr.to_str()?.to_owned(),
+            basename_cstr.to_str()?.to_owned(),
+        ))
+    })
+}
+
+/// Check if a URI is in canonical form
+pub fn is_canonical(uri: &str) -> bool {
+    with_tmp_pool(|pool| unsafe {
+        let uri_cstr = std::ffi::CString::new(uri).unwrap();
+        subversion_sys::svn_uri_is_canonical(uri_cstr.as_ptr(), pool.as_mut_ptr()) != 0
+    })
+}
+
 /// Trait for types that can be converted to canonical URIs
 pub trait AsCanonicalUri {
     /// Convert to a canonical URI
@@ -279,5 +333,48 @@ mod tests {
     fn test_skip_ancestor_not_ancestor() {
         let result = skip_ancestor("http://example.com/x", "http://example.com/a/b");
         assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_basename() {
+        let result = basename("http://example.com/a/b/c");
+        assert_eq!(result.unwrap(), "c");
+    }
+
+    #[test]
+    fn test_basename_root() {
+        // Root URIs don't have a trailing slash in canonical form
+        let result = basename("http://example.com");
+        assert_eq!(result.unwrap(), "");
+    }
+
+    #[test]
+    fn test_dirname() {
+        let result = dirname("http://example.com/a/b/c");
+        assert_eq!(result.unwrap(), "http://example.com/a/b");
+    }
+
+    #[test]
+    fn test_dirname_root() {
+        let result = dirname("http://example.com/a");
+        assert_eq!(result.unwrap(), "http://example.com");
+    }
+
+    #[test]
+    fn test_split() {
+        let result = split("http://example.com/a/b/c");
+        let (dir, base) = result.unwrap();
+        assert_eq!(dir, "http://example.com/a/b");
+        assert_eq!(base, "c");
+    }
+
+    #[test]
+    fn test_is_canonical_true() {
+        assert!(is_canonical("http://example.com/path"));
+    }
+
+    #[test]
+    fn test_is_canonical_false() {
+        assert!(!is_canonical("http://example.com//double//slashes"));
     }
 }
