@@ -7032,6 +7032,112 @@ impl Conflict {
             }
         }
     }
+
+    /// Get the file paths containing the different versions of the conflicted text.
+    ///
+    /// Returns (base_abspath, working_abspath, incoming_old_abspath, incoming_new_abspath).
+    /// Any of these may be None if that version is not available.
+    pub fn text_get_contents(
+        &self,
+    ) -> Result<
+        (
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+        ),
+        Error,
+    > {
+        let pool = apr::pool::Pool::new();
+        let mut base: *const i8 = std::ptr::null();
+        let mut working: *const i8 = std::ptr::null();
+        let mut incoming_old: *const i8 = std::ptr::null();
+        let mut incoming_new: *const i8 = std::ptr::null();
+
+        unsafe {
+            let err = subversion_sys::svn_client_conflict_text_get_contents(
+                &mut base,
+                &mut working,
+                &mut incoming_old,
+                &mut incoming_new,
+                self.ptr,
+                pool.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            );
+            svn_result(err)?;
+
+            let to_opt_string = |ptr: *const i8| {
+                if ptr.is_null() {
+                    None
+                } else {
+                    Some(std::ffi::CStr::from_ptr(ptr).to_str().unwrap().to_owned())
+                }
+            };
+
+            Ok((
+                to_opt_string(base),
+                to_opt_string(working),
+                to_opt_string(incoming_old),
+                to_opt_string(incoming_new),
+            ))
+        }
+    }
+
+    /// Get the property values for a property conflict.
+    ///
+    /// Returns (base_propval, working_propval, incoming_old_propval, incoming_new_propval).
+    pub fn prop_get_propvals(
+        &self,
+        propname: &str,
+    ) -> Result<
+        (
+            Option<Vec<u8>>,
+            Option<Vec<u8>>,
+            Option<Vec<u8>>,
+            Option<Vec<u8>>,
+        ),
+        Error,
+    > {
+        let pool = apr::pool::Pool::new();
+        let propname_c = std::ffi::CString::new(propname)?;
+        let mut base: *const subversion_sys::svn_string_t = std::ptr::null();
+        let mut working: *const subversion_sys::svn_string_t = std::ptr::null();
+        let mut incoming_old: *const subversion_sys::svn_string_t = std::ptr::null();
+        let mut incoming_new: *const subversion_sys::svn_string_t = std::ptr::null();
+
+        unsafe {
+            let err = subversion_sys::svn_client_conflict_prop_get_propvals(
+                &mut base,
+                &mut working,
+                &mut incoming_old,
+                &mut incoming_new,
+                self.ptr,
+                propname_c.as_ptr(),
+                pool.as_mut_ptr(),
+            );
+            svn_result(err)?;
+
+            let to_opt_vec = |ptr: *const subversion_sys::svn_string_t| {
+                if ptr.is_null() {
+                    None
+                } else {
+                    let s = &*ptr;
+                    if s.data.is_null() {
+                        None
+                    } else {
+                        Some(std::slice::from_raw_parts(s.data as *const u8, s.len).to_vec())
+                    }
+                }
+            };
+
+            Ok((
+                to_opt_vec(base),
+                to_opt_vec(working),
+                to_opt_vec(incoming_old),
+                to_opt_vec(incoming_new),
+            ))
+        }
+    }
 }
 
 /// Represents a conflict resolution option
