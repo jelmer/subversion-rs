@@ -436,6 +436,302 @@ pub fn translate_stream(
     })
 }
 
+/// Copy and translate a file with keyword and EOL substitution.
+///
+/// Copies from `src` to `dst` while performing EOL and keyword translation.
+/// If `special` is true, the file is treated as a special file (symlink, etc.).
+pub fn copy_and_translate(
+    src: &std::path::Path,
+    dst: &std::path::Path,
+    eol_str: Option<&str>,
+    repair: bool,
+    keywords: Option<&HashMap<String, String>>,
+    expand: bool,
+    special: bool,
+) -> Result<(), Error> {
+    with_tmp_pool(|pool| {
+        let src_cstr = std::ffi::CString::new(
+            src.to_str()
+                .ok_or_else(|| Error::from_str("Invalid source path encoding"))?,
+        )?;
+        let dst_cstr = std::ffi::CString::new(
+            dst.to_str()
+                .ok_or_else(|| Error::from_str("Invalid destination path encoding"))?,
+        )?;
+
+        let eol_cstr = eol_str.map(|s| std::ffi::CString::new(s).unwrap());
+        let eol_ptr = eol_cstr
+            .as_ref()
+            .map(|c| c.as_ptr())
+            .unwrap_or(std::ptr::null());
+
+        let keywords_hash = match keywords {
+            Some(kw) => {
+                let mut hash = apr::hash::Hash::new(pool);
+                for (k, v) in kw.iter() {
+                    unsafe {
+                        let k_pooled = apr::strings::pstrdup_raw(k, pool).unwrap();
+                        let v_cstr = std::ffi::CString::new(v.as_str()).unwrap();
+                        let svn_str =
+                            subversion_sys::svn_string_create(v_cstr.as_ptr(), pool.as_mut_ptr());
+                        let key_slice =
+                            std::slice::from_raw_parts(k_pooled as *const u8, k.len() + 1);
+                        hash.insert(key_slice, svn_str as *mut std::ffi::c_void);
+                    }
+                }
+                unsafe { hash.as_mut_ptr() }
+            }
+            None => std::ptr::null_mut(),
+        };
+
+        unsafe {
+            let err = subversion_sys::svn_subst_copy_and_translate4(
+                src_cstr.as_ptr(),
+                dst_cstr.as_ptr(),
+                eol_ptr,
+                if repair { 1 } else { 0 },
+                keywords_hash,
+                if expand { 1 } else { 0 },
+                if special { 1 } else { 0 },
+                None,
+                std::ptr::null_mut(),
+                pool.as_mut_ptr(),
+            );
+            Error::from_raw(err)
+        }
+    })
+}
+
+/// Translate a string with keyword and EOL substitution.
+///
+/// Returns the translated string.
+pub fn translate_cstring(
+    src: &str,
+    eol_str: Option<&str>,
+    repair: bool,
+    keywords: Option<&HashMap<String, String>>,
+    expand: bool,
+) -> Result<String, Error> {
+    with_tmp_pool(|pool| {
+        let src_cstr = std::ffi::CString::new(src)?;
+        let eol_cstr = eol_str.map(|s| std::ffi::CString::new(s).unwrap());
+        let eol_ptr = eol_cstr
+            .as_ref()
+            .map(|c| c.as_ptr())
+            .unwrap_or(std::ptr::null());
+
+        let keywords_hash = match keywords {
+            Some(kw) => {
+                let mut hash = apr::hash::Hash::new(pool);
+                for (k, v) in kw.iter() {
+                    unsafe {
+                        let k_pooled = apr::strings::pstrdup_raw(k, pool).unwrap();
+                        let v_cstr = std::ffi::CString::new(v.as_str()).unwrap();
+                        let svn_str =
+                            subversion_sys::svn_string_create(v_cstr.as_ptr(), pool.as_mut_ptr());
+                        let key_slice =
+                            std::slice::from_raw_parts(k_pooled as *const u8, k.len() + 1);
+                        hash.insert(key_slice, svn_str as *mut std::ffi::c_void);
+                    }
+                }
+                unsafe { hash.as_mut_ptr() }
+            }
+            None => std::ptr::null_mut(),
+        };
+
+        let mut dst_ptr: *const std::ffi::c_char = std::ptr::null();
+
+        unsafe {
+            let err = subversion_sys::svn_subst_translate_cstring2(
+                src_cstr.as_ptr(),
+                &mut dst_ptr,
+                eol_ptr,
+                if repair { 1 } else { 0 },
+                keywords_hash,
+                if expand { 1 } else { 0 },
+                pool.as_mut_ptr(),
+            );
+            Error::from_raw(err)?;
+
+            if dst_ptr.is_null() {
+                return Ok(String::new());
+            }
+
+            Ok(std::ffi::CStr::from_ptr(dst_ptr)
+                .to_str()
+                .map_err(|_| Error::from_str("Translated string is not valid UTF-8"))?
+                .to_string())
+        }
+    })
+}
+
+/// Translate a string to UTF-8 and LF line endings.
+///
+/// Returns the translated string and flags indicating what translations were performed.
+pub fn translate_string(
+    value: &[u8],
+    encoding: Option<&str>,
+    repair: bool,
+) -> Result<(Vec<u8>, bool, bool), Error> {
+    with_tmp_pool(|pool| {
+        let encoding_cstr = encoding.map(|s| std::ffi::CString::new(s).unwrap());
+        let encoding_ptr = encoding_cstr
+            .as_ref()
+            .map(|c| c.as_ptr())
+            .unwrap_or(std::ptr::null());
+
+        // Create svn_string_t for input
+        let input_str = unsafe {
+            subversion_sys::svn_string_ncreate(
+                value.as_ptr() as *const std::ffi::c_char,
+                value.len(),
+                pool.as_mut_ptr(),
+            )
+        };
+
+        let mut new_value: *mut subversion_sys::svn_string_t = std::ptr::null_mut();
+        let mut translated_to_utf8: i32 = 0;
+        let mut translated_line_endings: i32 = 0;
+
+        unsafe {
+            let err = subversion_sys::svn_subst_translate_string2(
+                &mut new_value,
+                &mut translated_to_utf8,
+                &mut translated_line_endings,
+                input_str,
+                encoding_ptr,
+                if repair { 1 } else { 0 },
+                pool.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            );
+            Error::from_raw(err)?;
+
+            if new_value.is_null() || (*new_value).data.is_null() {
+                return Ok((Vec::new(), false, false));
+            }
+
+            let data = std::slice::from_raw_parts((*new_value).data as *const u8, (*new_value).len);
+            Ok((
+                data.to_vec(),
+                translated_to_utf8 != 0,
+                translated_line_endings != 0,
+            ))
+        }
+    })
+}
+
+/// Open a stream for reading a special file (symlink, etc.).
+///
+/// Returns a stream that reads the "normal form" content of the special file.
+pub fn read_specialfile(path: &std::path::Path) -> Result<crate::io::Stream, Error> {
+    let pool = apr::Pool::new();
+    let path_cstr = std::ffi::CString::new(
+        path.to_str()
+            .ok_or_else(|| Error::from_str("Invalid path encoding"))?,
+    )?;
+
+    let mut stream: *mut subversion_sys::svn_stream_t = std::ptr::null_mut();
+
+    unsafe {
+        let err = subversion_sys::svn_subst_read_specialfile(
+            &mut stream,
+            path_cstr.as_ptr(),
+            pool.as_mut_ptr(),
+            pool.as_mut_ptr(),
+        );
+        Error::from_raw(err)?;
+
+        Ok(crate::io::Stream::from_ptr(stream, pool))
+    }
+}
+
+/// Create a stream for writing a special file (symlink, etc.).
+///
+/// Returns a stream that accepts content in "normal form" and creates
+/// the special file when closed.
+pub fn create_specialfile(path: &std::path::Path) -> Result<crate::io::Stream, Error> {
+    let pool = apr::Pool::new();
+    let path_cstr = std::ffi::CString::new(
+        path.to_str()
+            .ok_or_else(|| Error::from_str("Invalid path encoding"))?,
+    )?;
+
+    let mut stream: *mut subversion_sys::svn_stream_t = std::ptr::null_mut();
+
+    unsafe {
+        let err = subversion_sys::svn_subst_create_specialfile(
+            &mut stream,
+            path_cstr.as_ptr(),
+            pool.as_mut_ptr(),
+            pool.as_mut_ptr(),
+        );
+        Error::from_raw(err)?;
+
+        Ok(crate::io::Stream::from_ptr(stream, pool))
+    }
+}
+
+/// Create a detranslated stream (from working copy to repository form).
+///
+/// Returns a stream that translates content from the working copy format
+/// to the repository format.
+pub fn stream_detranslated(
+    src_path: &std::path::Path,
+    eol_style: EolStyle,
+    eol_str: Option<&str>,
+    always_repair_eols: bool,
+    keywords: Option<&HashMap<String, String>>,
+    special: bool,
+) -> Result<crate::io::Stream, Error> {
+    let pool = apr::Pool::new();
+    let path_cstr = std::ffi::CString::new(
+        src_path
+            .to_str()
+            .ok_or_else(|| Error::from_str("Invalid path encoding"))?,
+    )?;
+
+    let eol_ptr = match eol_str {
+        Some(s) => apr::strings::pstrdup_raw(s, &pool)?,
+        None => std::ptr::null(),
+    };
+
+    let keywords_hash = match keywords {
+        Some(kw) => {
+            let mut hash = apr::hash::Hash::new(&pool);
+            for (k, v) in kw.iter() {
+                unsafe {
+                    let key_ptr = apr::strings::pstrdup_raw(k, &pool)?;
+                    let val_ptr = apr::strings::pstrdup_raw(v, &pool)?;
+                    hash.insert(
+                        std::slice::from_raw_parts(key_ptr as *const u8, k.len()),
+                        val_ptr as *mut std::ffi::c_void,
+                    );
+                }
+            }
+            unsafe { hash.as_mut_ptr() }
+        }
+        None => std::ptr::null_mut(),
+    };
+
+    let mut stream: *mut subversion_sys::svn_stream_t = std::ptr::null_mut();
+
+    unsafe {
+        let err = subversion_sys::svn_subst_stream_detranslated(
+            &mut stream,
+            path_cstr.as_ptr(),
+            eol_style.into(),
+            eol_ptr,
+            if always_repair_eols { 1 } else { 0 },
+            keywords_hash,
+            if special { 1 } else { 0 },
+            pool.as_mut_ptr(),
+        );
+        Error::from_raw(err)?;
+
+        Ok(crate::io::Stream::from_ptr(stream, pool))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

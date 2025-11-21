@@ -556,6 +556,97 @@ impl Default for Rangelist {
     }
 }
 
+/// A catalog of mergeinfo, mapping paths to their mergeinfo.
+///
+/// This is essentially a hash table where keys are repository paths
+/// and values are Mergeinfo objects.
+pub struct MergeinfoCatalog {
+    ptr: subversion_sys::svn_mergeinfo_catalog_t,
+    pool: apr::Pool<'static>,
+}
+
+impl MergeinfoCatalog {
+    /// Create a new empty mergeinfo catalog.
+    pub fn new() -> Self {
+        let pool = apr::Pool::new();
+        let ptr = unsafe { apr_sys::apr_hash_make(pool.as_mut_ptr()) };
+        Self { ptr, pool }
+    }
+
+    /// Create a catalog from a raw pointer and pool.
+    ///
+    /// # Safety
+    /// The pointer must be valid and the pool must own the memory.
+    pub(crate) unsafe fn from_ptr_and_pool(
+        ptr: subversion_sys::svn_mergeinfo_catalog_t,
+        pool: apr::Pool<'static>,
+    ) -> Self {
+        Self { ptr, pool }
+    }
+
+    /// Merge changes from another catalog into this one.
+    pub fn merge(&mut self, changes: &MergeinfoCatalog) -> Result<(), Error> {
+        unsafe {
+            let err = subversion_sys::svn_mergeinfo_catalog_merge(
+                self.ptr,
+                changes.ptr,
+                self.pool.as_mut_ptr(),
+                self.pool.as_mut_ptr(),
+            );
+            svn_result(err)
+        }
+    }
+
+    /// Duplicate this catalog.
+    pub fn dup(&self) -> MergeinfoCatalog {
+        let pool = apr::Pool::new();
+        unsafe {
+            let result = subversion_sys::svn_mergeinfo_catalog_dup(self.ptr, pool.as_mut_ptr());
+            MergeinfoCatalog::from_ptr_and_pool(result, pool)
+        }
+    }
+
+    /// Check if the catalog is empty.
+    pub fn is_empty(&self) -> bool {
+        if self.ptr.is_null() {
+            return true;
+        }
+        unsafe { apr_sys::apr_hash_count(self.ptr) == 0 }
+    }
+
+    /// Get the number of entries in the catalog.
+    pub fn len(&self) -> usize {
+        if self.ptr.is_null() {
+            return 0;
+        }
+        unsafe { apr_sys::apr_hash_count(self.ptr) as usize }
+    }
+
+    /// Get the paths in this catalog.
+    pub fn paths(&self) -> Vec<String> {
+        if self.ptr.is_null() {
+            return Vec::new();
+        }
+
+        unsafe {
+            let hash = apr::hash::TypedHash::<svn_mergeinfo_t>::from_ptr(self.ptr);
+            hash.iter()
+                .map(|(key, _)| {
+                    std::str::from_utf8(key)
+                        .expect("catalog path is not valid UTF-8")
+                        .to_string()
+                })
+                .collect()
+        }
+    }
+}
+
+impl Default for MergeinfoCatalog {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -703,5 +794,34 @@ mod tests {
         let rangelist = Rangelist::new();
         let ranges = rangelist.ranges();
         assert!(ranges.is_empty());
+    }
+
+    #[test]
+    fn test_mergeinfo_catalog_new() {
+        let catalog = MergeinfoCatalog::new();
+        assert!(catalog.is_empty());
+        assert_eq!(catalog.len(), 0);
+    }
+
+    #[test]
+    fn test_mergeinfo_catalog_dup() {
+        let catalog = MergeinfoCatalog::new();
+        let dup = catalog.dup();
+        assert!(dup.is_empty());
+    }
+
+    #[test]
+    fn test_mergeinfo_catalog_merge() {
+        let mut c1 = MergeinfoCatalog::new();
+        let c2 = MergeinfoCatalog::new();
+        c1.merge(&c2).unwrap();
+        assert!(c1.is_empty());
+    }
+
+    #[test]
+    fn test_mergeinfo_catalog_paths() {
+        let catalog = MergeinfoCatalog::new();
+        let paths = catalog.paths();
+        assert!(paths.is_empty());
     }
 }
