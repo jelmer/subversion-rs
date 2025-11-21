@@ -110,15 +110,15 @@ static MESSAGE_CATALOGS: LazyLock<Mutex<HashMap<String, MessageCatalog>>> =
 
 /// Initialize NLS with default locale
 ///
-/// Note: This is currently a placeholder since svn_nls_init() is not available
-/// in subversion-sys bindings.
+/// This initializes the Native Language Support system for Subversion,
+/// setting up message catalogs and locale handling.
 pub fn init() -> Result<(), Error> {
     let locale = detect_system_locale();
     set_locale(&locale)?;
 
-    // TODO: When subversion-sys exposes NLS functions, implement:
-    // - svn_nls_init()
-    // - Load message catalogs from system
+    // Initialize SVN's NLS subsystem
+    let err = unsafe { subversion_sys::svn_nls_init() };
+    crate::Error::from_raw(err)?;
 
     Ok(())
 }
