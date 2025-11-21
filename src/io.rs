@@ -167,11 +167,19 @@ pub struct Stream {
     ptr: *mut subversion_sys::svn_stream_t,
     _pool: apr::Pool<'static>,
     backend: Option<*mut std::ffi::c_void>, // Boxed backend for manual cleanup (not used by from_backend)
+    needs_close: bool,                      // Whether to call svn_stream_close on drop
     _phantom: PhantomData<*mut ()>,         // !Send + !Sync
 }
 
 impl Drop for Stream {
     fn drop(&mut self) {
+        // Close the stream if needed (for streams with close callbacks that need to run)
+        if self.needs_close {
+            unsafe {
+                // Ignore errors during drop
+                let _ = subversion_sys::svn_stream_close(self.ptr);
+            }
+        }
         // Free the boxed backend if it exists
         // Note: backends from from_backend() are freed by close_trampoline and won't be stored here
         if let Some(backend_ptr) = self.backend {
@@ -193,6 +201,7 @@ impl Stream {
             ptr: stream,
             _pool: pool,
             backend: None,
+            needs_close: false,
             _phantom: PhantomData,
         }
     }
@@ -205,6 +214,7 @@ impl Stream {
             ptr: stream,
             _pool: pool,
             backend: None,
+            needs_close: false,
             _phantom: PhantomData,
         }
     }
@@ -219,6 +229,7 @@ impl Stream {
             ptr: stream,
             _pool: pool,
             backend: None,
+            needs_close: false,
             _phantom: PhantomData,
         }
     }
@@ -229,6 +240,7 @@ impl Stream {
             ptr,
             _pool: pool,
             backend: None,
+            needs_close: false,
             _phantom: PhantomData,
         }
     }
@@ -242,6 +254,7 @@ impl Stream {
             ptr: stream,
             _pool: pool,
             backend: Some(baton_ptr),
+            needs_close: false,
             _phantom: PhantomData,
         }
     }
@@ -432,6 +445,7 @@ impl Stream {
             ptr: stream,
             _pool: pool,
             backend: None, // Backend is managed by close_trampoline, not by Drop
+            needs_close: true, // Ensure close_trampoline runs to free the backend
             _phantom: PhantomData,
         })
     }
@@ -444,6 +458,7 @@ impl Stream {
             ptr: stream,
             _pool: pool,
             backend: None, // Disowned streams don't own backends
+            needs_close: false,
             _phantom: PhantomData,
         }
     }
@@ -458,6 +473,7 @@ impl Stream {
             ptr: stream,
             _pool: pool,
             backend: None,
+            needs_close: false,
             _phantom: PhantomData,
         }
     }
@@ -481,6 +497,7 @@ impl Stream {
             ptr,
             _pool: pool,
             backend: None,
+            needs_close: false,
             _phantom: PhantomData,
         }
     }
@@ -507,6 +524,7 @@ impl Stream {
             ptr: stream,
             _pool: pool,
             backend: None,
+            needs_close: false,
             _phantom: PhantomData,
         })
     }
@@ -533,6 +551,7 @@ impl Stream {
             ptr: stream,
             _pool: pool,
             backend: None,
+            needs_close: false,
             _phantom: PhantomData,
         })
     }
@@ -576,6 +595,7 @@ impl Stream {
             ptr: stream,
             _pool: pool,
             backend: None,
+            needs_close: false,
             _phantom: PhantomData,
         })
     }
@@ -590,6 +610,7 @@ impl Stream {
             ptr: stream,
             _pool: pool,
             backend: None,
+            needs_close: false,
             _phantom: PhantomData,
         })
     }
@@ -604,6 +625,7 @@ impl Stream {
             ptr: stream,
             _pool: pool,
             backend: None,
+            needs_close: false,
             _phantom: PhantomData,
         })
     }
@@ -649,6 +671,7 @@ impl Stream {
             ptr: stream,
             _pool: pool,
             backend: None,
+            needs_close: false,
             _phantom: PhantomData,
         }
     }
@@ -721,6 +744,7 @@ impl Stream {
 
     /// Closes the stream.
     pub fn close(&mut self) -> Result<(), Error> {
+        self.needs_close = false; // Prevent double-close in Drop
         let err = unsafe { subversion_sys::svn_stream_close(self.ptr) };
         Error::from_raw(err)?;
         Ok(())
@@ -1068,6 +1092,7 @@ impl Stream {
             backend: None,
             ptr: stream,
             _pool: pool,
+            needs_close: false,
             _phantom: PhantomData,
         }
     }
@@ -1114,6 +1139,7 @@ pub fn tee(out1: &mut Stream, out2: &mut Stream) -> Result<Stream, Error> {
         ptr: stream,
         _pool: pool,
         backend: None,
+        needs_close: false,
         _phantom: PhantomData,
     })
 }
@@ -1164,6 +1190,7 @@ impl From<&[u8]> for Stream {
             ptr: stream,
             _pool: pool,
             backend: None,
+            needs_close: false,
             _phantom: PhantomData,
         }
     }
@@ -1246,6 +1273,7 @@ pub fn wrap_write(write: &mut dyn std::io::Write) -> Result<Stream, Error> {
         ptr: stream,
         _pool: pool,
         backend: None,
+        needs_close: false,
         _phantom: PhantomData,
     })
 }
