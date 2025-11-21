@@ -3340,6 +3340,109 @@ impl From<ConflictChoice> for subversion_sys::svn_wc_conflict_choice_t {
 // Context methods for conflict resolution would go here when the
 // underlying FFI bindings are properly implemented
 
+/// An external item definition parsed from svn:externals property.
+#[derive(Debug, Clone)]
+pub struct ExternalItem {
+    /// The subdirectory into which this external should be checked out.
+    pub target_dir: String,
+    /// The URL to check out from (possibly relative).
+    pub url: String,
+    /// The revision to check out.
+    pub revision: crate::Revision,
+    /// The peg revision to use.
+    pub peg_revision: crate::Revision,
+}
+
+/// Parse an svn:externals property value into a list of external items.
+///
+/// The `parent_directory` is used for error messages and to resolve
+/// relative URLs in the externals description.
+pub fn parse_externals_description(
+    parent_directory: &str,
+    desc: &str,
+    canonicalize_url: bool,
+) -> Result<Vec<ExternalItem>, Error> {
+    let pool = apr::Pool::new();
+
+    let parent_cstr = std::ffi::CString::new(parent_directory)
+        .map_err(|_| Error::from_str("Invalid parent directory"))?;
+    let desc_cstr = std::ffi::CString::new(desc)
+        .map_err(|_| Error::from_str("Invalid externals description"))?;
+
+    unsafe {
+        let mut externals_p: *mut apr_sys::apr_array_header_t = std::ptr::null_mut();
+        let err = subversion_sys::svn_wc_parse_externals_description3(
+            &mut externals_p,
+            parent_cstr.as_ptr(),
+            desc_cstr.as_ptr(),
+            canonicalize_url.into(),
+            pool.as_mut_ptr(),
+        );
+        svn_result(err)?;
+
+        if externals_p.is_null() {
+            return Ok(Vec::new());
+        }
+
+        let array =
+            apr::tables::TypedArray::<*const subversion_sys::svn_wc_external_item2_t>::from_ptr(
+                externals_p,
+            );
+
+        let mut result = Vec::new();
+        for item_ptr in array.iter() {
+            let item = &*item_ptr;
+
+            let target_dir = if item.target_dir.is_null() {
+                String::new()
+            } else {
+                std::ffi::CStr::from_ptr(item.target_dir)
+                    .to_str()
+                    .map_err(|_| Error::from_str("Invalid target_dir UTF-8"))?
+                    .to_string()
+            };
+
+            let url = if item.url.is_null() {
+                String::new()
+            } else {
+                std::ffi::CStr::from_ptr(item.url)
+                    .to_str()
+                    .map_err(|_| Error::from_str("Invalid url UTF-8"))?
+                    .to_string()
+            };
+
+            unsafe fn convert_revision(
+                rev: &subversion_sys::svn_opt_revision_t,
+            ) -> crate::Revision {
+                match rev.kind {
+                    subversion_sys::svn_opt_revision_kind_svn_opt_revision_unspecified => {
+                        crate::Revision::Unspecified
+                    }
+                    subversion_sys::svn_opt_revision_kind_svn_opt_revision_number => {
+                        crate::Revision::Number(crate::Revnum(*rev.value.number.as_ref()))
+                    }
+                    subversion_sys::svn_opt_revision_kind_svn_opt_revision_date => {
+                        crate::Revision::Date(*rev.value.date.as_ref())
+                    }
+                    subversion_sys::svn_opt_revision_kind_svn_opt_revision_head => {
+                        crate::Revision::Head
+                    }
+                    _ => crate::Revision::Unspecified,
+                }
+            }
+
+            result.push(ExternalItem {
+                target_dir,
+                url,
+                revision: convert_revision(&item.revision),
+                peg_revision: convert_revision(&item.peg_revision),
+            });
+        }
+
+        Ok(result)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -5167,5 +5270,37 @@ mod tests {
 
         // Will fail without a real working copy, but tests that the parameter is accepted
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_externals_description() {
+        // Test parsing a simple externals definition
+        let desc = "^/trunk/lib lib";
+        let result = parse_externals_description("/parent", desc, true);
+        assert!(result.is_ok());
+        let items = result.unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].target_dir, "lib");
+        assert!(items[0].url.contains("trunk/lib"));
+    }
+
+    #[test]
+    fn test_parse_externals_description_with_revision() {
+        // Test parsing externals with revision
+        let desc = "-r42 http://example.com/svn/trunk external_dir";
+        let result = parse_externals_description("/parent", desc, false);
+        assert!(result.is_ok());
+        let items = result.unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].target_dir, "external_dir");
+        assert_eq!(items[0].url, "http://example.com/svn/trunk");
+    }
+
+    #[test]
+    fn test_parse_externals_description_empty() {
+        // Test parsing empty externals
+        let result = parse_externals_description("/parent", "", true);
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
     }
 }
