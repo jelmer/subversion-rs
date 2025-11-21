@@ -7172,6 +7172,25 @@ impl ConflictOption {
             std::ffi::CStr::from_ptr(desc).to_str().unwrap().to_owned()
         }
     }
+
+    /// Set the merged property value for this conflict option
+    /// Used when manually merging property conflicts.
+    pub fn set_merged_propval(&self, merged_propval: Option<&[u8]>) {
+        let pool = apr::pool::Pool::new();
+        unsafe {
+            let svn_string = merged_propval.map(|val| {
+                subversion_sys::svn_string_ncreate(
+                    val.as_ptr() as *const i8,
+                    val.len(),
+                    pool.as_mut_ptr(),
+                )
+            });
+            subversion_sys::svn_client_conflict_option_set_merged_propval(
+                self.ptr,
+                svn_string.unwrap_or(std::ptr::null_mut()),
+            );
+        }
+    }
 }
 
 #[cfg(test)]
