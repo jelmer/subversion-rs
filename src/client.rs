@@ -3254,6 +3254,71 @@ impl Context {
         })
     }
 
+    /// Walk all conflicts within the specified depth of a path.
+    ///
+    /// Calls the provided closure for each conflict found.
+    pub fn conflict_walk<F>(
+        &mut self,
+        local_abspath: impl AsCanonicalDirent,
+        depth: crate::Depth,
+        mut callback: F,
+    ) -> Result<(), Error>
+    where
+        F: FnMut(Conflict) -> Result<(), Error>,
+    {
+        let local_abspath = local_abspath.as_canonical_dirent()?;
+        let path_cstr = std::ffi::CString::new(local_abspath.as_path().to_str().unwrap())?;
+
+        struct WalkBaton<'a, F: FnMut(Conflict) -> Result<(), Error>> {
+            callback: &'a mut F,
+            error: Option<Error>,
+        }
+
+        unsafe extern "C" fn walk_func<F: FnMut(Conflict) -> Result<(), Error>>(
+            baton: *mut std::ffi::c_void,
+            conflict: *mut subversion_sys::svn_client_conflict_t,
+            scratch_pool: *mut apr_sys::apr_pool_t,
+        ) -> *mut subversion_sys::svn_error_t {
+            let baton = &mut *(baton as *mut WalkBaton<F>);
+            // The conflict is valid for the duration of this callback
+            let pool = apr::Pool::from_raw(scratch_pool);
+
+            let conflict_obj = Conflict {
+                ptr: conflict,
+                pool,
+                _phantom: std::marker::PhantomData,
+            };
+            match (baton.callback)(conflict_obj) {
+                Ok(()) => std::ptr::null_mut(),
+                Err(e) => {
+                    baton.error = Some(e);
+                    std::ptr::null_mut()
+                }
+            }
+        }
+
+        let mut baton = WalkBaton {
+            callback: &mut callback,
+            error: None,
+        };
+
+        with_tmp_pool(|pool| unsafe {
+            let err = subversion_sys::svn_client_conflict_walk(
+                path_cstr.as_ptr(),
+                depth.into(),
+                Some(walk_func::<F>),
+                &mut baton as *mut WalkBaton<F> as *mut std::ffi::c_void,
+                self.ptr,
+                pool.as_mut_ptr(),
+            );
+            Error::from_raw(err)?;
+            if let Some(e) = baton.error {
+                return Err(e);
+            }
+            Ok(())
+        })
+    }
+
     /// Outputs the contents of a file.
     pub fn cat(
         &mut self,
@@ -6832,6 +6897,139 @@ impl Conflict {
                 .to_owned();
 
             Ok((incoming, local))
+        }
+    }
+
+    /// Get details for a tree conflict from the repository.
+    ///
+    /// This function contacts the repository to gather more information about
+    /// a tree conflict. Call this before getting resolution options for better
+    /// recommendations.
+    pub fn tree_get_details(&mut self, ctx: &mut Context) -> Result<(), Error> {
+        let pool = apr::pool::Pool::new();
+        unsafe {
+            let err = subversion_sys::svn_client_conflict_tree_get_details(
+                self.ptr,
+                ctx.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            );
+            svn_result(err)
+        }
+    }
+
+    /// Get the victim node kind of a tree conflict.
+    pub fn tree_get_victim_node_kind(&self) -> crate::NodeKind {
+        unsafe { subversion_sys::svn_client_conflict_tree_get_victim_node_kind(self.ptr).into() }
+    }
+
+    /// Get the incoming old repository location.
+    ///
+    /// Returns (repos_relpath, revision, node_kind).
+    pub fn get_incoming_old_repos_location(
+        &self,
+    ) -> Result<(Option<String>, crate::Revnum, crate::NodeKind), Error> {
+        let pool = apr::pool::Pool::new();
+        let mut repos_relpath: *const i8 = std::ptr::null();
+        let mut revision: subversion_sys::svn_revnum_t = -1;
+        let mut node_kind: subversion_sys::svn_node_kind_t = 0;
+
+        unsafe {
+            let err = subversion_sys::svn_client_conflict_get_incoming_old_repos_location(
+                &mut repos_relpath,
+                &mut revision,
+                &mut node_kind,
+                self.ptr,
+                pool.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            );
+            svn_result(err)?;
+
+            let path = if repos_relpath.is_null() {
+                None
+            } else {
+                Some(
+                    std::ffi::CStr::from_ptr(repos_relpath)
+                        .to_str()
+                        .unwrap()
+                        .to_owned(),
+                )
+            };
+
+            Ok((path, crate::Revnum(revision), node_kind.into()))
+        }
+    }
+
+    /// Get the incoming new repository location.
+    ///
+    /// Returns (repos_relpath, revision, node_kind).
+    pub fn get_incoming_new_repos_location(
+        &self,
+    ) -> Result<(Option<String>, crate::Revnum, crate::NodeKind), Error> {
+        let pool = apr::pool::Pool::new();
+        let mut repos_relpath: *const i8 = std::ptr::null();
+        let mut revision: subversion_sys::svn_revnum_t = -1;
+        let mut node_kind: subversion_sys::svn_node_kind_t = 0;
+
+        unsafe {
+            let err = subversion_sys::svn_client_conflict_get_incoming_new_repos_location(
+                &mut repos_relpath,
+                &mut revision,
+                &mut node_kind,
+                self.ptr,
+                pool.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            );
+            svn_result(err)?;
+
+            let path = if repos_relpath.is_null() {
+                None
+            } else {
+                Some(
+                    std::ffi::CStr::from_ptr(repos_relpath)
+                        .to_str()
+                        .unwrap()
+                        .to_owned(),
+                )
+            };
+
+            Ok((path, crate::Revnum(revision), node_kind.into()))
+        }
+    }
+
+    /// Get the current resolution for a text conflict.
+    pub fn text_get_resolution(&self) -> crate::ClientConflictOptionId {
+        unsafe { subversion_sys::svn_client_conflict_text_get_resolution(self.ptr).into() }
+    }
+
+    /// Get the current resolution for a property conflict.
+    pub fn prop_get_resolution(
+        &self,
+        propname: &str,
+    ) -> Result<crate::ClientConflictOptionId, Error> {
+        let propname_c = std::ffi::CString::new(propname)?;
+        unsafe {
+            Ok(subversion_sys::svn_client_conflict_prop_get_resolution(
+                self.ptr,
+                propname_c.as_ptr(),
+            )
+            .into())
+        }
+    }
+
+    /// Get the current resolution for a tree conflict.
+    pub fn tree_get_resolution(&self) -> crate::ClientConflictOptionId {
+        unsafe { subversion_sys::svn_client_conflict_tree_get_resolution(self.ptr).into() }
+    }
+
+    /// Get the reject file path for a property conflict.
+    pub fn prop_get_reject_abspath(&self) -> Option<String> {
+        unsafe {
+            let path = subversion_sys::svn_client_conflict_prop_get_reject_abspath(self.ptr);
+            if path.is_null() {
+                None
+            } else {
+                Some(std::ffi::CStr::from_ptr(path).to_str().unwrap().to_owned())
+            }
         }
     }
 }
