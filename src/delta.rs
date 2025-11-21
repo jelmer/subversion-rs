@@ -72,16 +72,37 @@ pub fn default_editor(pool: Pool<'static>) -> WrapEditor<'static> {
         editor,
         baton,
         _pool: apr::PoolHandle::owned(pool),
+        callback_batons: Vec::new(), // No callbacks for default editor
     }
 }
 
+/// Type-erased dropper function for callback batons
+pub type DropperFn = unsafe fn(*mut std::ffi::c_void);
+
 /// Wrapper for a Subversion delta editor.
+
 pub struct WrapEditor<'pool> {
     pub(crate) editor: *const subversion_sys::svn_delta_editor_t,
     pub(crate) baton: *mut std::ffi::c_void,
     pub(crate) _pool: apr::PoolHandle<'pool>,
+    // Callback batons with their dropper functions
+    pub(crate) callback_batons: Vec<(*mut std::ffi::c_void, DropperFn)>,
 }
 unsafe impl Send for WrapEditor<'_> {}
+
+impl Drop for WrapEditor<'_> {
+    fn drop(&mut self) {
+        // Clean up callback batons using their type-erased droppers
+        for (baton, dropper) in &self.callback_batons {
+            if !baton.is_null() {
+                unsafe {
+                    dropper(*baton);
+                }
+            }
+        }
+        self.callback_batons.clear();
+    }
+}
 
 impl<'pool> Editor for WrapEditor<'pool> {
     fn set_target_revision(&mut self, revision: Option<Revnum>) -> Result<(), crate::Error> {
