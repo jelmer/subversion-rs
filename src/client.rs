@@ -3237,7 +3237,6 @@ impl Context {
         local_abspath: impl AsCanonicalDirent,
     ) -> Result<Conflict, Error> {
         let pool = apr::Pool::new();
-        let _scratch_pool = apr::Pool::new();
         let local_abspath = local_abspath.as_canonical_dirent()?;
         let mut conflict: *mut subversion_sys::svn_client_conflict_t = std::ptr::null_mut();
         with_tmp_pool(|tmp_pool| unsafe {
@@ -3246,8 +3245,8 @@ impl Context {
                 &mut conflict,
                 path_cstr.as_ptr(),
                 self.ptr,
-                tmp_pool.as_mut_ptr(),
-                tmp_pool.as_mut_ptr(),
+                pool.as_mut_ptr(), // Use persistent pool for conflict allocation
+                tmp_pool.as_mut_ptr(), // Use tmp_pool only for scratch
             );
             Error::from_raw(err)?;
             Ok(Conflict::from_ptr_and_pool(conflict, pool))
@@ -6631,6 +6630,30 @@ impl Conflict {
         }
     }
 
+    /// Resolve a property conflict with a specific option
+    ///
+    /// This is useful when you've customized an option (e.g., with set_merged_propval)
+    /// and want to resolve using that customized option.
+    pub fn prop_resolve_with_option(
+        &mut self,
+        propname: &str,
+        option: &ConflictOption,
+        ctx: &mut Context,
+    ) -> Result<(), Error> {
+        let scratch_pool = apr::pool::Pool::new();
+        let propname_c = std::ffi::CString::new(propname)?;
+        unsafe {
+            let err = subversion_sys::svn_client_conflict_prop_resolve(
+                self.ptr,
+                propname_c.as_ptr(),
+                option.ptr,
+                ctx.as_mut_ptr(),
+                scratch_pool.as_mut_ptr(),
+            );
+            svn_result(err)
+        }
+    }
+
     /// Resolve a tree conflict
     pub fn tree_resolve(
         &mut self,
@@ -6799,7 +6822,10 @@ impl Conflict {
                     *mut subversion_sys::svn_client_conflict_option_t,
                 >::from_ptr(options);
                 for option_ptr in array.iter() {
-                    result.push(ConflictOption { ptr: option_ptr });
+                    result.push(ConflictOption {
+                        ptr: option_ptr,
+                        merged_value_pool: None,
+                    });
                 }
             }
             Ok(result)
@@ -6830,7 +6856,10 @@ impl Conflict {
                     *mut subversion_sys::svn_client_conflict_option_t,
                 >::from_ptr(options);
                 for option_ptr in array.iter() {
-                    result.push(ConflictOption { ptr: option_ptr });
+                    result.push(ConflictOption {
+                        ptr: option_ptr,
+                        merged_value_pool: None,
+                    });
                 }
             }
             Ok(result)
@@ -6861,7 +6890,10 @@ impl Conflict {
                     *mut subversion_sys::svn_client_conflict_option_t,
                 >::from_ptr(options);
                 for option_ptr in array.iter() {
-                    result.push(ConflictOption { ptr: option_ptr });
+                    result.push(ConflictOption {
+                        ptr: option_ptr,
+                        merged_value_pool: None,
+                    });
                 }
             }
             Ok(result)
@@ -7143,6 +7175,8 @@ impl Conflict {
 /// Represents a conflict resolution option
 pub struct ConflictOption {
     ptr: *mut subversion_sys::svn_client_conflict_option_t,
+    // Pool to keep merged propval alive until resolution
+    merged_value_pool: Option<apr::Pool<'static>>,
 }
 
 impl ConflictOption {
@@ -7175,8 +7209,13 @@ impl ConflictOption {
 
     /// Set the merged property value for this conflict option
     /// Used when manually merging property conflicts.
-    pub fn set_merged_propval(&self, merged_propval: Option<&[u8]>) {
+    ///
+    /// The value will be kept alive until the option is dropped or this method is called again.
+    pub fn set_merged_propval(&mut self, merged_propval: Option<&[u8]>) {
+        // Create a new pool to store the merged value
+        // This replaces any previous pool
         let pool = apr::pool::Pool::new();
+
         unsafe {
             let svn_string = merged_propval.map(|val| {
                 subversion_sys::svn_string_ncreate(
@@ -7190,6 +7229,9 @@ impl ConflictOption {
                 svn_string.unwrap_or(std::ptr::null_mut()),
             );
         }
+
+        // Store the pool to keep the value alive
+        self.merged_value_pool = Some(pool);
     }
 }
 
@@ -10088,5 +10130,171 @@ mod tests {
         // prop_get_reject_abspath should return a path now
         let reject_path = conflict.prop_get_reject_abspath();
         assert!(reject_path.is_some(), "Should have reject file path");
+    }
+
+    #[test]
+    fn test_conflict_option_set_merged_propval() {
+        let td = tempfile::tempdir().unwrap();
+        let base_path = td.path().canonicalize().unwrap();
+        let repo_path = base_path.join("repo");
+        let wc1_path = base_path.join("wc1");
+        let wc2_path = base_path.join("wc2");
+
+        crate::repos::Repos::create(&repo_path).unwrap();
+
+        let mut ctx = Context::new().unwrap();
+        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        let url = crate::uri::Uri::new(&url_str).unwrap();
+
+        // Checkout first working copy
+        ctx.checkout(
+            url.clone(),
+            &wc1_path,
+            &CheckoutOptions {
+                peg_revision: Revision::Head,
+                revision: Revision::Head,
+                depth: Depth::Infinity,
+                ignore_externals: false,
+                allow_unver_obstructions: false,
+            },
+        )
+        .unwrap();
+
+        // Create and commit a file with property
+        let test_file1 = wc1_path.join("test.txt");
+        std::fs::write(&test_file1, "content\n").unwrap();
+        ctx.add(
+            &test_file1,
+            &AddOptions {
+                depth: Depth::Empty,
+                force: false,
+                no_ignore: false,
+                no_autoprops: false,
+                add_parents: false,
+            },
+        )
+        .unwrap();
+
+        ctx.propset(
+            "custom:prop",
+            Some(b"value1"),
+            test_file1.to_str().unwrap(),
+            &PropSetOptions::default(),
+        )
+        .unwrap();
+
+        let wc1_str = wc1_path.to_str().unwrap();
+        ctx.commit(
+            &[wc1_str],
+            &CommitOptions::default(),
+            std::collections::HashMap::new(),
+            &|_| Ok(()),
+        )
+        .unwrap();
+
+        // Checkout second working copy
+        ctx.checkout(
+            url,
+            &wc2_path,
+            &CheckoutOptions {
+                peg_revision: Revision::Head,
+                revision: Revision::Head,
+                depth: Depth::Infinity,
+                ignore_externals: false,
+                allow_unver_obstructions: false,
+            },
+        )
+        .unwrap();
+
+        // Change property in wc1 and commit
+        ctx.propset(
+            "custom:prop",
+            Some(b"value_from_wc1"),
+            test_file1.to_str().unwrap(),
+            &PropSetOptions::default(),
+        )
+        .unwrap();
+        ctx.commit(
+            &[wc1_str],
+            &CommitOptions::default(),
+            std::collections::HashMap::new(),
+            &|_| Ok(()),
+        )
+        .unwrap();
+
+        // Change same property in wc2 (different value)
+        let test_file2 = wc2_path.join("test.txt");
+        ctx.propset(
+            "custom:prop",
+            Some(b"value_from_wc2"),
+            test_file2.to_str().unwrap(),
+            &PropSetOptions::default(),
+        )
+        .unwrap();
+
+        // Update wc2 - should create a property conflict
+        let wc2_str = wc2_path.to_str().unwrap();
+        let _ = ctx.update(
+            &[wc2_str],
+            Revision::Head,
+            &UpdateOptions {
+                depth: Depth::Infinity,
+                depth_is_sticky: false,
+                ignore_externals: false,
+                allow_unver_obstructions: false,
+                adds_as_modifications: false,
+                make_parents: false,
+            },
+        );
+
+        // Get conflict for the file - must use absolute path
+        // conflict_get uses AsCanonicalDirent which should handle this, but let's be explicit
+        let test_file2_abs = test_file2.canonicalize().unwrap();
+        let mut conflict = ctx.conflict_get(&test_file2_abs).unwrap();
+
+        // Get property conflict resolution options
+        let mut options = conflict.prop_get_resolution_options(&mut ctx).unwrap();
+        assert!(!options.is_empty(), "Should have resolution options");
+
+        // Find the merged option
+        let merged_option = options
+            .iter_mut()
+            .find(|opt| opt.get_id() == crate::ClientConflictOptionId::MergedText);
+
+        if let Some(option) = merged_option {
+            // Test set_merged_propval - set a custom merged value
+            option.set_merged_propval(Some(b"custom_merged_value"));
+
+            // Resolve the conflict using the customized option
+            conflict
+                .prop_resolve_with_option("custom:prop", option, &mut ctx)
+                .unwrap();
+
+            // Verify the merged value was applied by reading the property
+            let mut found_prop = None;
+            ctx.proplist(
+                test_file2_abs.to_str().unwrap(),
+                &ProplistOptions {
+                    peg_revision: Revision::Working,
+                    revision: Revision::Working,
+                    depth: Depth::Empty,
+                    changelists: None,
+                    get_target_inherited_props: false,
+                },
+                &mut |_path, props, _inherited| {
+                    if let Some(val) = props.get("custom:prop") {
+                        found_prop = Some(val.clone());
+                    }
+                    Ok(())
+                },
+            )
+            .unwrap();
+
+            assert_eq!(
+                found_prop.as_deref(),
+                Some(b"custom_merged_value" as &[u8]),
+                "Merged property value should be applied"
+            );
+        }
     }
 }
