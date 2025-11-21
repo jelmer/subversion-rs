@@ -560,7 +560,22 @@ pub trait FileEditor {
         crate::Error,
     >;
 
-    // TODO: fn apply_textdelta_stream(&mut self, base_checksum: Option<&str>) -> Result<&dyn TextDelta, crate::Error>;
+    /// Applies a text delta stream to the file.
+    ///
+    /// The `open_stream` callback should create and return a TxDeltaStream that
+    /// provides the delta data. This is an alternative to `apply_textdelta` that
+    /// can be more efficient for streaming operations.
+    ///
+    /// Default implementation returns an error indicating it's not supported.
+    fn apply_textdelta_stream(
+        &mut self,
+        _base_checksum: Option<&str>,
+        _open_stream: Box<dyn FnOnce() -> Result<TxDeltaStream, crate::Error>>,
+    ) -> Result<(), crate::Error> {
+        Err(crate::Error::from_str(
+            "apply_textdelta_stream not supported by this editor",
+        ))
+    }
 
     /// Changes a property on the file.
     fn change_prop(&mut self, name: &str, value: &[u8]) -> Result<(), crate::Error>;
@@ -1014,6 +1029,53 @@ unsafe extern "C" fn wrap_editor_apply_textdelta(
     }
 }
 
+unsafe extern "C" fn wrap_editor_apply_textdelta_stream(
+    _editor: *const subversion_sys::svn_delta_editor_t,
+    file_baton: *mut std::ffi::c_void,
+    base_checksum: *const std::ffi::c_char,
+    open_func: subversion_sys::svn_txdelta_stream_open_func_t,
+    open_baton: *mut std::ffi::c_void,
+    _scratch_pool: *mut apr_sys::apr_pool_t,
+) -> *mut subversion_sys::svn_error_t {
+    let base_checksum = if base_checksum.is_null() {
+        None
+    } else {
+        Some(unsafe { std::ffi::CStr::from_ptr(base_checksum) })
+    };
+
+    let fat_ptr_ptr = file_baton as *mut *mut dyn FileEditor;
+    let fat_ptr = unsafe { *fat_ptr_ptr };
+    let file = unsafe { &mut *fat_ptr };
+
+    // Wrap the C open_func/open_baton in a Rust closure
+    let open_stream: Box<dyn FnOnce() -> Result<TxDeltaStream, crate::Error>> =
+        Box::new(move || {
+            let pool = apr::Pool::new();
+            let mut stream_ptr: *mut subversion_sys::svn_txdelta_stream_t = std::ptr::null_mut();
+
+            if let Some(func) = open_func {
+                let err = unsafe {
+                    func(
+                        &mut stream_ptr,
+                        open_baton,
+                        pool.as_mut_ptr(),
+                        pool.as_mut_ptr(),
+                    )
+                };
+                crate::Error::from_raw(err)?;
+            } else {
+                return Err(crate::Error::from_str("No open_func provided"));
+            }
+
+            Ok(TxDeltaStream::from_raw(stream_ptr, pool))
+        });
+
+    match file.apply_textdelta_stream(base_checksum.map(|c| c.to_str().unwrap()), open_stream) {
+        Ok(()) => std::ptr::null_mut(),
+        Err(err) => unsafe { err.into_raw() },
+    }
+}
+
 unsafe extern "C" fn wrap_editor_change_file_prop(
     baton: *mut std::ffi::c_void,
     name: *const std::ffi::c_char,
@@ -1129,7 +1191,7 @@ pub(crate) static WRAP_EDITOR: subversion_sys::svn_delta_editor_t =
         close_edit: Some(wrap_editor_close_edit),
         abort_edit: Some(wrap_editor_abort_edit),
         set_target_revision: Some(wrap_editor_set_target_revision),
-        apply_textdelta_stream: None, // TODO
+        apply_textdelta_stream: Some(wrap_editor_apply_textdelta_stream),
     };
 
 /// Txdelta stream for generating delta windows
