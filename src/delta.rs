@@ -1687,6 +1687,19 @@ mod tests {
                 .push(format!("close_file({:?})", text_checksum));
             Ok(())
         }
+
+        fn apply_textdelta_stream(
+            &mut self,
+            base_checksum: Option<&str>,
+            open_stream: Box<dyn FnOnce() -> Result<TxDeltaStream, crate::Error>>,
+        ) -> Result<(), crate::Error> {
+            self.operations
+                .borrow_mut()
+                .push(format!("apply_textdelta_stream({:?})", base_checksum));
+            // Call the open_stream to verify it works
+            let _stream = open_stream()?;
+            Ok(())
+        }
     }
 
     #[test]
@@ -1877,5 +1890,71 @@ mod tests {
 
         let (handler, _baton) = result.unwrap();
         assert!(handler.is_some(), "Handler should not be None");
+    }
+
+    #[test]
+    fn test_apply_textdelta_stream_default() {
+        // Test the default implementation returns an error
+        struct MinimalFileEditor;
+
+        impl FileEditor for MinimalFileEditor {
+            fn apply_textdelta(
+                &mut self,
+                _base_checksum: Option<&str>,
+            ) -> Result<
+                Box<dyn for<'a> Fn(&'a mut TxDeltaWindowRef) -> Result<(), crate::Error>>,
+                crate::Error,
+            > {
+                Ok(Box::new(|_| Ok(())))
+            }
+
+            fn change_prop(&mut self, _name: &str, _value: &[u8]) -> Result<(), crate::Error> {
+                Ok(())
+            }
+
+            fn close(&mut self, _text_checksum: Option<&str>) -> Result<(), crate::Error> {
+                Ok(())
+            }
+        }
+
+        let mut editor = MinimalFileEditor;
+        let open_stream: Box<dyn FnOnce() -> Result<TxDeltaStream, crate::Error>> =
+            Box::new(|| Err(crate::Error::from_str("Not called")));
+
+        // Default implementation should return an error
+        let result = editor.apply_textdelta_stream(None, open_stream);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("not supported"));
+    }
+
+    #[test]
+    fn test_apply_textdelta_stream_custom() {
+        // Test a custom implementation that accepts the stream
+        let operations: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+        let mut editor = TestFileEditor {
+            operations: operations.clone(),
+        };
+
+        // Create a mock open_stream that returns an error (since we can't easily create a real stream)
+        let open_stream: Box<dyn FnOnce() -> Result<TxDeltaStream, crate::Error>> =
+            Box::new(|| Err(crate::Error::from_str("Mock stream error")));
+
+        let result = editor.apply_textdelta_stream(Some("abc123"), open_stream);
+        // Should fail because our mock returns an error
+        assert!(result.is_err());
+
+        // But the operation should have been recorded
+        let ops = operations.borrow();
+        assert!(ops.contains(&"apply_textdelta_stream(Some(\"abc123\"))".to_string()));
+    }
+
+    #[test]
+    fn test_wrap_editor_has_apply_textdelta_stream() {
+        // Test that WRAP_EDITOR has apply_textdelta_stream function pointer set
+        assert!(
+            WRAP_EDITOR.apply_textdelta_stream.is_some(),
+            "WRAP_EDITOR should have apply_textdelta_stream"
+        );
     }
 }
