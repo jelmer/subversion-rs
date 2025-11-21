@@ -156,6 +156,40 @@ impl Mergeinfo {
         }
     }
 
+    /// Get the inheritable or non-inheritable portions of mergeinfo.
+    ///
+    /// If `path` is Some, only examine the mergeinfo for that path.
+    /// If `inheritable` is true, returns inheritable mergeinfo.
+    /// If `inheritable` is false, returns non-inheritable mergeinfo.
+    pub fn inheritable(
+        &self,
+        path: Option<&str>,
+        start: Revnum,
+        end: Revnum,
+        inheritable: bool,
+    ) -> Result<Mergeinfo, Error> {
+        let pool = apr::Pool::new();
+        unsafe {
+            let path_cstr = path
+                .map(|p| std::ffi::CString::new(p).expect("path contains null byte"))
+                .map(|c| c.as_ptr())
+                .unwrap_or(std::ptr::null());
+            let mut result: svn_mergeinfo_t = std::ptr::null_mut();
+            let err = subversion_sys::svn_mergeinfo_inheritable2(
+                &mut result,
+                self.ptr,
+                path_cstr,
+                start.0,
+                end.0,
+                inheritable as i32,
+                pool.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            );
+            svn_result(err)?;
+            Ok(Mergeinfo::from_ptr_and_pool(result, pool))
+        }
+    }
+
     /// Get the paths in this mergeinfo as a HashMap of path -> revision ranges.
     pub fn paths(&self) -> HashMap<String, Vec<crate::RevisionRange>> {
         let mut result = HashMap::new();
@@ -468,6 +502,33 @@ impl Rangelist {
             return 0;
         }
         unsafe { (*self.ptr).nelts as usize }
+    }
+
+    /// Get the inheritable or non-inheritable ranges within a revision range.
+    ///
+    /// If `inheritable` is true, returns ranges that are inheritable.
+    /// If `inheritable` is false, returns ranges that are non-inheritable.
+    pub fn inheritable(
+        &self,
+        start: Revnum,
+        end: Revnum,
+        inheritable: bool,
+    ) -> Result<Rangelist, Error> {
+        let pool = apr::Pool::new();
+        unsafe {
+            let mut result: *mut subversion_sys::svn_rangelist_t = std::ptr::null_mut();
+            let err = subversion_sys::svn_rangelist_inheritable2(
+                &mut result,
+                self.ptr,
+                start.0,
+                end.0,
+                inheritable as i32,
+                pool.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            );
+            svn_result(err)?;
+            Ok(Rangelist::from_ptr_and_pool(result, pool))
+        }
     }
 }
 
