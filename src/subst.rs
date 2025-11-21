@@ -976,4 +976,43 @@ mod tests {
         );
         assert!(result.is_ok());
     }
+
+    #[test]
+    fn test_translate_cstring() {
+        let src = "Hello\nWorld\n";
+        let result = translate_cstring(src, Some("\n"), false, None, false).unwrap();
+        assert_eq!(result, "Hello\nWorld\n");
+    }
+
+    #[test]
+    fn test_translate_cstring_with_eol() {
+        let src = "Hello\nWorld\n";
+        let result = translate_cstring(src, Some("\r\n"), false, None, false).unwrap();
+        assert_eq!(result, "Hello\r\nWorld\r\n");
+    }
+
+    #[test]
+    fn test_translate_string() {
+        let value = b"Hello\nWorld\n";
+        let (result, to_utf8, line_endings) = translate_string(value, None, false).unwrap();
+        assert_eq!(result, b"Hello\nWorld\n");
+        // These flags depend on whether translation was actually needed
+        let _ = to_utf8;
+        let _ = line_endings;
+    }
+
+    #[test]
+    fn test_copy_and_translate() {
+        let td = tempfile::tempdir().unwrap();
+        let src = td.path().join("src.txt");
+        let dst = td.path().join("dst.txt");
+
+        std::fs::write(&src, "Hello\nWorld\n").unwrap();
+
+        let result = copy_and_translate(&src, &dst, Some("\n"), false, None, false, false);
+        assert!(result.is_ok());
+
+        let content = std::fs::read_to_string(&dst).unwrap();
+        assert_eq!(content, "Hello\nWorld\n");
+    }
 }

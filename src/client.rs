@@ -9561,4 +9561,88 @@ mod tests {
             result
         );
     }
+
+    #[test]
+    fn test_conflict_walk_no_conflicts() {
+        let td = tempfile::tempdir().unwrap();
+        let repo_path = td.path().join("repo");
+        let wc_path = td.path().join("wc");
+
+        crate::repos::Repos::create(&repo_path).unwrap();
+
+        let mut ctx = Context::new().unwrap();
+        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        let url = crate::uri::Uri::new(&url_str).unwrap();
+
+        ctx.checkout(
+            url,
+            &wc_path,
+            &CheckoutOptions {
+                peg_revision: Revision::Head,
+                revision: Revision::Head,
+                depth: Depth::Infinity,
+                ignore_externals: false,
+                allow_unver_obstructions: false,
+            },
+        )
+        .unwrap();
+
+        // Walk conflicts - should find none
+        let mut count = 0;
+        ctx.conflict_walk(&wc_path, Depth::Infinity, |_conflict| {
+            count += 1;
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_conflict_get_no_conflict() {
+        let td = tempfile::tempdir().unwrap();
+        let repo_path = td.path().join("repo");
+        let wc_path = td.path().join("wc");
+
+        crate::repos::Repos::create(&repo_path).unwrap();
+
+        let mut ctx = Context::new().unwrap();
+        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        let url = crate::uri::Uri::new(&url_str).unwrap();
+
+        ctx.checkout(
+            url,
+            &wc_path,
+            &CheckoutOptions {
+                peg_revision: Revision::Head,
+                revision: Revision::Head,
+                depth: Depth::Infinity,
+                ignore_externals: false,
+                allow_unver_obstructions: false,
+            },
+        )
+        .unwrap();
+
+        // Create and add a file
+        let test_file = wc_path.join("test.txt");
+        std::fs::write(&test_file, "content").unwrap();
+        ctx.add(
+            &test_file,
+            &AddOptions {
+                depth: Depth::Empty,
+                force: false,
+                no_ignore: false,
+                no_autoprops: false,
+                add_parents: false,
+            },
+        )
+        .unwrap();
+
+        // Get conflict for non-conflicted file - should return conflict with no conflicts
+        let conflict = ctx.conflict_get(&test_file).unwrap();
+        let (text, props, tree) = conflict.get_conflicted().unwrap();
+        assert!(!text);
+        assert!(props.is_empty());
+        assert!(!tree);
+    }
 }
