@@ -351,12 +351,6 @@ unsafe fn drop_authz_read_baton(baton: *mut std::ffi::c_void) {
     ));
 }
 
-unsafe fn drop_filter_baton(baton: *mut std::ffi::c_void) {
-    drop(Box::from_raw(
-        baton as *mut Box<dyn FnMut(&crate::fs::Root, &str) -> Result<bool, Error>>,
-    ));
-}
-
 impl Repos {
     /// Creates a new repository at the specified path.
     pub fn create(path: &std::path::Path) -> Result<Repos, Error> {

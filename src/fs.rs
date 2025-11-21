@@ -456,7 +456,7 @@ impl<'pool> Fs<'pool> {
                 pool.as_mut_ptr(),
             );
             svn_result(err)?;
-            Ok(unsafe { Root::from_raw(root_ptr, apr::PoolHandle::owned(pool)) })
+            Ok(Root::from_raw(root_ptr, apr::PoolHandle::owned(pool)))
         }
     }
 
@@ -1085,7 +1085,10 @@ impl Root {
     ///
     /// # Safety
     /// The pointer must be valid and the pool must outlive the Root.
-    pub unsafe fn from_raw(ptr: *mut subversion_sys::svn_fs_root_t, pool: apr::PoolHandle<'static>) -> Self {
+    pub unsafe fn from_raw(
+        ptr: *mut subversion_sys::svn_fs_root_t,
+        pool: apr::PoolHandle<'static>,
+    ) -> Self {
         Self { ptr, pool }
     }
 
@@ -1438,7 +1441,7 @@ impl Root {
             } else {
                 let path_str = std::ffi::CStr::from_ptr(copy_path).to_str()?.to_owned();
                 Ok(Some((
-                    unsafe { Root::from_raw(copy_root, apr::PoolHandle::owned(pool)) },
+                    Root::from_raw(copy_root, apr::PoolHandle::owned(pool)),
                     path_str,
                 )))
             }
