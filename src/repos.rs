@@ -1882,9 +1882,11 @@ impl Repos {
     /// * `revprops` - Optional additional revision properties (svn:log and svn:author are set automatically)
     /// * `commit_callback` - Optional callback to be called on successful commit
     /// * `authz_callback` - Optional authorization callback to check write access for each path
+    ///
+    /// The returned editor borrows from the repository and must not outlive it.
     #[cfg(feature = "delta")]
-    pub fn get_commit_editor(
-        &self,
+    pub fn get_commit_editor<'s>(
+        &'s self,
         repos_url: &str,
         base_path: &str,
         log_msg: &str,
@@ -1895,7 +1897,7 @@ impl Repos {
             Box<dyn FnMut(AuthzAccess, &crate::fs::Root, &str) -> Result<bool, Error>>,
         >,
         txn: Option<&mut crate::fs::Transaction>,
-    ) -> Result<Box<dyn crate::delta::Editor>, Error> {
+    ) -> Result<Box<dyn crate::delta::Editor + 's>, Error> {
         let repos_url_cstr = std::ffi::CString::new(repos_url)?;
         let base_path_cstr = std::ffi::CString::new(base_path)?;
         let log_msg_cstr = std::ffi::CString::new(log_msg)?;

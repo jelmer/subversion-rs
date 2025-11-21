@@ -575,13 +575,15 @@ impl<'a> Session<'a> {
     }
 
     /// Gets a commit editor for making changes to the repository.
-    pub fn get_commit_editor(
-        &mut self,
+    ///
+    /// The returned editor borrows from the session and must not outlive it.
+    pub fn get_commit_editor<'s>(
+        &'s mut self,
         revprop_table: HashMap<String, Vec<u8>>,
         commit_callback: &dyn FnMut(&crate::CommitInfo) -> Result<(), Error>,
         lock_tokens: HashMap<String, String>,
         keep_locks: bool,
-    ) -> Result<Box<dyn Editor + Send>, Error> {
+    ) -> Result<Box<dyn Editor + Send + 's>, Error> {
         // Create the result pool first - this will live as long as the editor
         let result_pool = Pool::new();
         let commit_callback = Box::into_raw(Box::new(commit_callback));
@@ -827,15 +829,17 @@ impl<'a> Session<'a> {
     }
 
     /// Performs an update operation.
-    pub fn do_update(
-        &mut self,
+    ///
+    /// The returned reporter borrows from the session and must not outlive it.
+    pub fn do_update<'s>(
+        &'s mut self,
         revision_to_update_to: Revnum,
         update_target: &str,
         depth: Depth,
         send_copyfrom_args: bool,
         ignore_ancestry: bool,
         editor: &mut dyn Editor,
-    ) -> Result<Box<dyn Reporter + Send>, Error> {
+    ) -> Result<Box<dyn Reporter + Send + 's>, Error> {
         let update_target = std::ffi::CString::new(update_target)?;
         let pool = Pool::new();
         let scratch_pool = Pool::new();
@@ -867,8 +871,10 @@ impl<'a> Session<'a> {
     }
 
     /// Performs a switch operation.
-    pub fn do_switch(
-        &mut self,
+    ///
+    /// The returned reporter borrows from the session and must not outlive it.
+    pub fn do_switch<'s>(
+        &'s mut self,
         revision_to_switch_to: Revnum,
         switch_target: &str,
         depth: Depth,
@@ -876,7 +882,7 @@ impl<'a> Session<'a> {
         send_copyfrom_args: bool,
         ignore_ancestry: bool,
         editor: &mut dyn Editor,
-    ) -> Result<Box<dyn Reporter + Send>, Error> {
+    ) -> Result<Box<dyn Reporter + Send + 's>, Error> {
         let switch_target = std::ffi::CString::new(switch_target)?;
         let switch_url = std::ffi::CString::new(switch_url)?;
         let pool = Pool::new();
@@ -1107,8 +1113,10 @@ impl<'a> Session<'a> {
     }
 
     /// Performs a diff operation.
-    pub fn diff(
-        &mut self,
+    ///
+    /// The returned reporter borrows from the session and must not outlive it.
+    pub fn diff<'s>(
+        &'s mut self,
         revision: Revnum,
         diff_target: impl TryInto<RelPath, Error = Error>,
         depth: Depth,
@@ -1116,7 +1124,7 @@ impl<'a> Session<'a> {
         text_deltas: bool,
         versus_url: &str,
         diff_editor: &mut dyn Editor,
-    ) -> Result<Box<dyn Reporter + Send>, Error> {
+    ) -> Result<Box<dyn Reporter + Send + 's>, Error> {
         let relpath = diff_target.try_into()?;
         let diff_target = std::ffi::CString::new(relpath.as_str()).unwrap();
         let versus_url = std::ffi::CString::new(versus_url).unwrap();
@@ -1851,12 +1859,14 @@ impl<'a> Session<'a> {
     ///
     /// This wraps svn_ra_do_diff3 to compute differences between revisions.
     /// The diff editor callbacks will be invoked to describe the differences.
-    pub fn do_diff(
-        &mut self,
+    ///
+    /// The returned reporter borrows from the session and must not outlive it.
+    pub fn do_diff<'s>(
+        &'s mut self,
         revision: Revnum,
         diff_target: &str,
         options: &mut DoDiffOptions,
-    ) -> Result<Box<dyn Reporter + Send>, Error> {
+    ) -> Result<Box<dyn Reporter + Send + 's>, Error> {
         let pool = Pool::new();
 
         let mut reporter: *const subversion_sys::svn_ra_reporter3_t = std::ptr::null();

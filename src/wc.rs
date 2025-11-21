@@ -775,8 +775,10 @@ pub fn crawl_revisions5(
 }
 
 /// Get an editor for updating the working copy
-pub fn get_update_editor4(
-    wc_ctx: &mut Context,
+///
+/// The returned editor borrows from the context and must not outlive it.
+pub fn get_update_editor4<'a>(
+    wc_ctx: &'a mut Context,
     anchor_abspath: &str,
     target_basename: &str,
     use_commit_times: bool,
@@ -809,7 +811,7 @@ pub fn get_update_editor4(
     >,
     cancel_func: Option<Box<dyn Fn() -> Result<(), Error>>>,
     notify_func: Option<Box<dyn Fn(&Notify)>>,
-) -> Result<(UpdateEditor, crate::Revnum), crate::Error> {
+) -> Result<(UpdateEditor<'a>, crate::Revnum), crate::Error> {
     let anchor_abspath_cstr = std::ffi::CString::new(anchor_abspath)?;
     let target_basename_cstr = std::ffi::CString::new(target_basename)?;
     let diff3_cmd_cstr = diff3_cmd.map(std::ffi::CString::new).transpose()?;
@@ -942,6 +944,7 @@ pub fn get_update_editor4(
         _pool: result_pool,
         target_revision: crate::Revnum::from_raw(target_revision).unwrap_or_default(),
         callback_batons: batons,
+        _marker: std::marker::PhantomData,
     };
 
     Ok((
@@ -954,16 +957,19 @@ pub fn get_update_editor4(
 type DropperFn = unsafe fn(*mut std::ffi::c_void);
 
 /// Update editor for working copy operations
-pub struct UpdateEditor {
+///
+/// The lifetime parameter ensures the editor does not outlive the Context it was created from.
+pub struct UpdateEditor<'a> {
     editor: *const subversion_sys::svn_delta_editor_t,
     edit_baton: *mut std::ffi::c_void,
     _pool: apr::Pool<'static>,
     target_revision: crate::Revnum,
     // Callback batons with their dropper functions
     callback_batons: Vec<(*mut std::ffi::c_void, DropperFn)>,
+    _marker: std::marker::PhantomData<&'a Context>,
 }
 
-impl Drop for UpdateEditor {
+impl Drop for UpdateEditor<'_> {
     fn drop(&mut self) {
         // Clean up callback batons using their type-erased droppers
         for (baton, dropper) in &self.callback_batons {
@@ -977,14 +983,14 @@ impl Drop for UpdateEditor {
     }
 }
 
-impl UpdateEditor {
+impl UpdateEditor<'_> {
     /// Get the target revision for this update
     pub fn target_revision(&self) -> crate::Revnum {
         self.target_revision
     }
 }
 
-impl crate::delta::Editor for UpdateEditor {
+impl crate::delta::Editor for UpdateEditor<'_> {
     fn as_raw_parts(
         &self,
     ) -> (
@@ -1780,8 +1786,10 @@ impl Context {
     }
 
     /// Get an editor for switching the working copy to a different URL
-    pub fn get_switch_editor(
-        &mut self,
+    ///
+    /// The returned editor borrows from the context and must not outlive it.
+    pub fn get_switch_editor<'s>(
+        &'s mut self,
         anchor_abspath: &str,
         target_basename: &str,
         switch_url: &str,
@@ -1813,7 +1821,7 @@ impl Context {
         >,
         cancel_func: Option<Box<dyn Fn() -> Result<(), Error>>>,
         notify_func: Option<Box<dyn Fn(&Notify)>>,
-    ) -> Result<(Box<dyn crate::delta::Editor>, crate::Revnum), crate::Error> {
+    ) -> Result<(Box<dyn crate::delta::Editor + 's>, crate::Revnum), crate::Error> {
         let anchor_abspath_cstr = std::ffi::CString::new(anchor_abspath)?;
         let target_basename_cstr = std::ffi::CString::new(target_basename)?;
         let switch_url_cstr = std::ffi::CString::new(switch_url)?;
@@ -1964,8 +1972,10 @@ impl Context {
     /// Note: This returns an editor that will generate diff callbacks.
     /// The callbacks parameter should be a valid svn_wc_diff_callbacks4_t structure.
     /// For now, we pass NULL which means no actual diff output will be generated.
-    pub fn get_diff_editor(
-        &mut self,
+    ///
+    /// The returned editor borrows from the context and must not outlive it.
+    pub fn get_diff_editor<'s>(
+        &'s mut self,
         anchor_abspath: &str,
         target_abspath: &str,
         use_text_base: bool,
@@ -1973,7 +1983,7 @@ impl Context {
         ignore_ancestry: bool,
         show_copies_as_adds: bool,
         use_git_diff_format: bool,
-    ) -> Result<Box<dyn crate::delta::Editor>, crate::Error> {
+    ) -> Result<Box<dyn crate::delta::Editor + 's>, crate::Error> {
         let anchor_abspath_cstr = std::ffi::CString::new(anchor_abspath)?;
         let target_abspath_cstr = std::ffi::CString::new(target_abspath)?;
 
@@ -3611,6 +3621,7 @@ mod tests {
 
         // Should succeed since paths exist
         assert!(result.is_ok());
+        drop(result); // Drop before reusing ctx
 
         // Test with different paths
         let anchor_path = temp_dir.path().join("anchor");
@@ -3641,7 +3652,7 @@ mod tests {
         fn check_editor_impl<T: Editor>() {}
 
         // Verify UpdateEditor implements Editor trait
-        check_editor_impl::<UpdateEditor>();
+        check_editor_impl::<UpdateEditor<'_>>();
     }
 
     #[test]
