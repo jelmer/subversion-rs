@@ -571,14 +571,27 @@ impl AsAuthProvider for &AuthProvider {
     }
 }
 
+/// Type alias for a dropper function that frees callback batons
+type DropperFn = unsafe fn(*mut std::ffi::c_void);
+
 #[allow(dead_code)]
 /// Authentication provider.
 pub struct AuthProvider {
     ptr: *const subversion_sys::svn_auth_provider_object_t,
     pool: apr::SharedPool<'static>,
+    /// Optional callback baton and its dropper function
+    callback_baton: Option<(*mut std::ffi::c_void, DropperFn)>,
     _phantom: PhantomData<*mut ()>,
 }
 unsafe impl Send for AuthProvider {}
+
+impl Drop for AuthProvider {
+    fn drop(&mut self) {
+        if let Some((baton, dropper)) = self.callback_baton.take() {
+            unsafe { dropper(baton) };
+        }
+    }
+}
 
 impl AuthProvider {
     /// Returns the credential kind for this provider.
@@ -622,6 +635,7 @@ pub fn get_username_provider() -> AuthProvider {
     AuthProvider {
         ptr: auth_provider,
         pool,
+        callback_baton: None,
         _phantom: PhantomData,
     }
 }
@@ -639,6 +653,7 @@ pub fn get_ssl_server_trust_file_provider() -> AuthProvider {
     AuthProvider {
         ptr: auth_provider,
         pool,
+        callback_baton: None,
         _phantom: PhantomData,
     }
 }
@@ -762,6 +777,7 @@ pub fn get_ssl_server_trust_prompt_provider(
     AuthProvider {
         ptr: auth_provider,
         pool,
+        callback_baton: None,
         _phantom: PhantomData,
     }
 }
@@ -779,6 +795,7 @@ pub fn get_ssl_client_cert_file_provider() -> AuthProvider {
     AuthProvider {
         ptr: auth_provider,
         pool,
+        callback_baton: None,
         _phantom: PhantomData,
     }
 }
@@ -868,6 +885,7 @@ pub fn get_ssl_client_cert_prompt_provider(
     AuthProvider {
         ptr: auth_provider,
         pool,
+        callback_baton: None,
         _phantom: PhantomData,
     }
 }
@@ -898,6 +916,7 @@ pub fn get_ssl_client_cert_pw_file_provider(
     AuthProvider {
         ptr: auth_provider,
         pool,
+        callback_baton: None,
         _phantom: PhantomData,
     }
 }
@@ -932,6 +951,7 @@ pub fn get_ssl_client_cert_pw_file_provider_boxed(
     AuthProvider {
         ptr: auth_provider,
         pool,
+        callback_baton: None,
         _phantom: PhantomData,
     }
 }
@@ -991,6 +1011,7 @@ pub fn get_simple_prompt_provider<'pool>(
     AuthProvider {
         ptr: auth_provider,
         pool,
+        callback_baton: None,
         _phantom: PhantomData,
     }
 }
@@ -1045,6 +1066,16 @@ pub fn get_simple_prompt_provider_boxed(
             .unwrap_or_else(|e| unsafe { e.into_raw() })
     }
 
+    unsafe fn drop_simple_prompt_baton(baton: *mut std::ffi::c_void) {
+        drop(Box::from_raw(
+            baton
+                as *mut Box<
+                    dyn Fn(&str, Option<&str>, bool) -> Result<(String, String, bool), crate::Error>
+                        + Send,
+                >,
+        ));
+    }
+
     unsafe {
         subversion_sys::svn_auth_get_simple_prompt_provider(
             &mut auth_provider,
@@ -1057,6 +1088,7 @@ pub fn get_simple_prompt_provider_boxed(
     AuthProvider {
         ptr: auth_provider,
         pool,
+        callback_baton: Some((baton, drop_simple_prompt_baton)),
         _phantom: PhantomData,
     }
 }
@@ -1105,6 +1137,7 @@ pub fn get_username_prompt_provider(
     AuthProvider {
         ptr: auth_provider,
         pool,
+        callback_baton: None,
         _phantom: PhantomData,
     }
 }
@@ -1149,6 +1182,12 @@ pub fn get_username_prompt_provider_boxed(
             .unwrap_or_else(|e| unsafe { e.into_raw() })
     }
 
+    unsafe fn drop_username_prompt_baton(baton: *mut std::ffi::c_void) {
+        drop(Box::from_raw(
+            baton as *mut Box<dyn Fn(&str, bool) -> Result<String, crate::Error> + Send>,
+        ));
+    }
+
     unsafe {
         subversion_sys::svn_auth_get_username_prompt_provider(
             &mut auth_provider,
@@ -1161,6 +1200,7 @@ pub fn get_username_prompt_provider_boxed(
     AuthProvider {
         ptr: auth_provider,
         pool,
+        callback_baton: Some((baton, drop_username_prompt_baton)),
         _phantom: PhantomData,
     }
 }
@@ -1223,6 +1263,7 @@ pub fn get_simple_provider(
     AuthProvider {
         ptr: auth_provider,
         pool,
+        callback_baton: None,
         _phantom: PhantomData,
     }
 }
@@ -1263,6 +1304,7 @@ pub fn get_simple_provider_boxed(
     AuthProvider {
         ptr: auth_provider,
         pool,
+        callback_baton: None,
         _phantom: PhantomData,
     }
 }
@@ -1288,6 +1330,7 @@ pub fn get_platform_specific_provider(
     Ok(AuthProvider {
         ptr: auth_provider,
         pool,
+        callback_baton: None,
         _phantom: PhantomData,
     })
 }
@@ -1316,6 +1359,7 @@ pub fn get_platform_specific_client_providers() -> Result<Vec<AuthProvider>, Err
         .map(|p| AuthProvider {
             ptr: p as *const _,
             pool: pool.clone(), // Share the same pool across all providers to keep it alive
+            callback_baton: None,
             _phantom: PhantomData,
         })
         .collect())

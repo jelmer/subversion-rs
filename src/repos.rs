@@ -1031,7 +1031,7 @@ impl Repos {
             unsafe {
                 drop(Box::from_raw(
                     filter_baton
-                        as *mut &mut dyn FnMut(&crate::fs::Root, &str) -> Result<bool, Error>,
+                        as *mut Box<dyn FnMut(&crate::fs::Root, &str) -> Result<bool, Error>>,
                 ));
             }
         }

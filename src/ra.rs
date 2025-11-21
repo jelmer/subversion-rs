@@ -360,7 +360,10 @@ impl<'a> Session<'a> {
             (callbacks.as_mut_ptr(), callbacks.get_callback_baton())
         } else {
             default_callbacks = Callbacks::new()?;
-            (default_callbacks.as_mut_ptr(), default_callbacks.get_callback_baton())
+            (
+                default_callbacks.as_mut_ptr(),
+                default_callbacks.get_callback_baton(),
+            )
         };
 
         let err = unsafe {
@@ -643,11 +646,21 @@ impl<'a> Session<'a> {
                 result_pool.as_mut_ptr(),
             )
         };
+        unsafe fn drop_commit_callback_baton(baton: *mut std::ffi::c_void) {
+            drop(Box::from_raw(
+                baton as *mut &dyn FnMut(&crate::CommitInfo) -> Result<(), Error>,
+            ));
+        }
+
         Error::from_raw(err)?;
         Ok(Box::new(crate::delta::WrapEditor {
             editor,
             baton: edit_baton,
             _pool: apr::PoolHandle::owned(result_pool),
+            callback_batons: vec![(
+                commit_callback as *mut std::ffi::c_void,
+                drop_commit_callback_baton,
+            )],
         }))
     }
 
@@ -1560,6 +1573,7 @@ impl<'a> Session<'a> {
                 editor: editor as *const _,
                 baton: edit_baton,
                 _pool: pool_handle,
+                callback_batons: Vec::new(), // No callbacks for replay editor
             };
 
             let prop_hash = unsafe { crate::props::PropHash::from_ptr(rev_props) };
@@ -2216,7 +2230,8 @@ impl Callbacks {
             (*self.ptr).progress_baton = baton_ptr;
         }
         // Store the callback to keep it alive
-        self.progress_func = Some(unsafe { Box::from_raw(baton_ptr as *mut Box<dyn Fn(i64, i64)>) });
+        self.progress_func =
+            Some(unsafe { Box::from_raw(baton_ptr as *mut Box<dyn Fn(i64, i64)>) });
     }
 
     /// Get the callback baton pointer for use with svn_ra_open.
@@ -2224,7 +2239,9 @@ impl Callbacks {
     fn get_callback_baton(&self) -> *mut std::ffi::c_void {
         self.cancel_func
             .as_ref()
-            .map(|b| b.as_ref() as *const Box<dyn Fn() -> Result<(), Error>> as *mut std::ffi::c_void)
+            .map(|b| {
+                b.as_ref() as *const Box<dyn Fn() -> Result<(), Error>> as *mut std::ffi::c_void
+            })
             .unwrap_or(std::ptr::null_mut())
     }
 
@@ -3045,7 +3062,10 @@ mod tests {
         );
 
         // Test get_lock
-        let lock = session.get_lock("lockable.txt").unwrap().expect("Lock should exist");
+        let lock = session
+            .get_lock("lockable.txt")
+            .unwrap()
+            .expect("Lock should exist");
         assert_eq!(lock.path(), "/lockable.txt"); // SVN returns absolute paths within repo
         assert!(!lock.token().is_empty());
 
@@ -3991,5 +4011,43 @@ mod tests {
         // Test do_status - verify it can be called
         let result = session.do_status("", crate::Revnum(0), crate::Depth::Infinity, &mut editor);
         assert!(result.is_ok(), "do_status should succeed");
+    }
+
+    #[test]
+    fn test_callbacks_set_cancel_func() {
+        // Test that set_cancel_func can be called and callbacks are set up correctly
+        let mut callbacks = Callbacks::new().unwrap();
+
+        let cancel_called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let cancel_called_clone = cancel_called.clone();
+
+        callbacks.set_cancel_func(move || {
+            cancel_called_clone.store(true, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        });
+
+        // Verify the callback function pointer is set
+        unsafe {
+            assert!((*callbacks.ptr).cancel_func.is_some());
+        }
+    }
+
+    #[test]
+    fn test_callbacks_set_progress_func() {
+        // Test that set_progress_func can be called and callbacks are set up correctly
+        let mut callbacks = Callbacks::new().unwrap();
+
+        let progress_called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let progress_called_clone = progress_called.clone();
+
+        callbacks.set_progress_func(move |_progress, _total| {
+            progress_called_clone.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+
+        // Verify the callback function pointer is set
+        unsafe {
+            assert!((*callbacks.ptr).progress_func.is_some());
+            assert!(!(*callbacks.ptr).progress_baton.is_null());
+        }
     }
 }

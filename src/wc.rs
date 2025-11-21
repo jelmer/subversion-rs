@@ -2434,6 +2434,20 @@ impl Context {
             )
         };
 
+        // Free callback batons after synchronous operation completes
+        if !cancel_baton.is_null() {
+            unsafe {
+                drop(Box::from_raw(
+                    cancel_baton as *mut &dyn Fn() -> Result<(), Error>,
+                ));
+            }
+        }
+        if !notify_baton.is_null() {
+            unsafe {
+                drop(Box::from_raw(notify_baton as *mut &dyn Fn(&Notify)));
+            }
+        }
+
         Error::from_raw(err)
     }
 }

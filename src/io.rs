@@ -1273,7 +1273,7 @@ pub fn wrap_write(write: &mut dyn std::io::Write) -> Result<Stream, Error> {
         ptr: stream,
         _pool: pool,
         backend: None,
-        needs_close: false,
+        needs_close: true, // Ensure close_fn runs to free the boxed write reference
         _phantom: PhantomData,
     })
 }
