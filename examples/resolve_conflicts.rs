@@ -164,10 +164,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             // Alternative: use working text
             println!("\n5. Resolving conflict with working version...");
-            conflict.text_resolve_by_id(
-                subversion::TextConflictChoice::MineFull,
-                &mut ctx,
-            )?;
+            conflict.text_resolve_by_id(subversion::TextConflictChoice::MineFull, &mut ctx)?;
         }
 
         println!("\n✓ Conflict resolved successfully!");
@@ -222,7 +219,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // Get resolution options
             let prop_options = prop_conflict.prop_get_resolution_options(&mut ctx)?;
-            println!("  Available property resolution options: {}", prop_options.len());
+            println!(
+                "  Available property resolution options: {}",
+                prop_options.len()
+            );
 
             // Resolve by choosing working version
             prop_conflict.prop_resolve_by_id(
