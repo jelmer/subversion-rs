@@ -3101,6 +3101,59 @@ impl Context {
         })
     }
 
+    /// Get the mergeinfo for a single target node (ignoring any subtrees).
+    ///
+    /// Returns mergeinfo describing the ranges which have been merged into
+    /// `path_or_url` as of `peg_revision`, per the node's explicit mergeinfo
+    /// or inherited mergeinfo if no explicit mergeinfo is found.
+    ///
+    /// If no explicit or inherited mergeinfo is found, returns `None`.
+    ///
+    /// # Arguments
+    /// * `path_or_url` - Target path or URL
+    /// * `peg_revision` - Peg revision for the target
+    ///
+    /// # Returns
+    /// A Mergeinfo object mapping merge source URLs to rangelists,
+    /// or None if no mergeinfo found.
+    ///
+    /// Note: Unlike most APIs which deal with mergeinfo, the keys in the returned
+    /// Mergeinfo are absolute repository URLs rather than repository filesystem paths.
+    ///
+    /// This wraps `svn_client_mergeinfo_get_merged`.
+    pub fn mergeinfo_get_merged(
+        &mut self,
+        path_or_url: &str,
+        peg_revision: &Revision,
+    ) -> Result<Option<crate::mergeinfo::Mergeinfo>, Error> {
+        let pool = apr::Pool::new();
+        let path_c = std::ffi::CString::new(path_or_url)?;
+        let mut mergeinfo_hash: *mut apr_sys::apr_hash_t = std::ptr::null_mut();
+
+        let peg_rev: subversion_sys::svn_opt_revision_t = (*peg_revision).into();
+        let err = unsafe {
+            subversion_sys::svn_client_mergeinfo_get_merged(
+                &mut mergeinfo_hash,
+                path_c.as_ptr(),
+                &peg_rev,
+                self.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            )
+        };
+        Error::from_raw(err)?;
+
+        if mergeinfo_hash.is_null() {
+            return Ok(None);
+        }
+
+        unsafe {
+            Ok(Some(crate::mergeinfo::Mergeinfo::from_ptr_and_pool(
+                mergeinfo_hash,
+                pool,
+            )))
+        }
+    }
+
     // TODO: This method needs to be reworked to handle lifetime-bound Context
     // Cannot clone Context anymore due to lifetime bounds
     /*pub fn iter_logs(
@@ -11064,5 +11117,179 @@ mod tests {
                 "Merged property value should be applied"
             );
         }
+    }
+
+    #[test]
+    fn test_mergeinfo_get_merged() {
+        let td = tempfile::tempdir().unwrap();
+        let base_path = td.path().canonicalize().unwrap();
+        let repo_path = base_path.join("repo");
+        let trunk_wc = base_path.join("trunk");
+        let branch_wc = base_path.join("branch");
+
+        crate::repos::Repos::create(&repo_path).unwrap();
+
+        let mut ctx = Context::new().unwrap();
+        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        let url = crate::uri::Uri::new(&url_str).unwrap();
+
+        // Checkout trunk
+        ctx.checkout(
+            url.clone(),
+            &trunk_wc,
+            &CheckoutOptions {
+                peg_revision: Revision::Head,
+                revision: Revision::Head,
+                depth: Depth::Infinity,
+                ignore_externals: false,
+                allow_unver_obstructions: false,
+            },
+        )
+        .unwrap();
+
+        // Create a file and commit
+        let test_file = trunk_wc.join("test.txt");
+        std::fs::write(&test_file, "initial content\n").unwrap();
+        ctx.add(
+            &test_file,
+            &AddOptions {
+                depth: Depth::Empty,
+                force: false,
+                no_ignore: false,
+                no_autoprops: false,
+                add_parents: false,
+            },
+        )
+        .unwrap();
+
+        ctx.commit(
+            &[trunk_wc.to_str().unwrap()],
+            &CommitOptions::default(),
+            std::collections::HashMap::new(),
+            &|_| Ok(()),
+        )
+        .unwrap();
+
+        // Create a branch
+        let branch_url = format!("{}/branch", url.as_str());
+        let mut copy_opts = CopyOptions::new();
+        ctx.copy(
+            &[(url.as_str(), Some(Revision::Head))],
+            &branch_url,
+            &mut copy_opts,
+        )
+        .unwrap();
+
+        // Checkout the branch
+        let branch_url_obj =
+            crate::uri::Uri::new(&format!("file://{}/branch", repo_path.to_str().unwrap()))
+                .unwrap();
+        ctx.checkout(
+            branch_url_obj.clone(),
+            &branch_wc,
+            &CheckoutOptions {
+                peg_revision: Revision::Head,
+                revision: Revision::Head,
+                depth: Depth::Infinity,
+                ignore_externals: false,
+                allow_unver_obstructions: false,
+            },
+        )
+        .unwrap();
+
+        // Make a change in the branch - add a new file to avoid conflicts
+        let branch_file2 = branch_wc.join("branch_file.txt");
+        std::fs::write(&branch_file2, "new file from branch\n").unwrap();
+        ctx.add(
+            &branch_file2,
+            &AddOptions {
+                depth: Depth::Empty,
+                force: false,
+                no_ignore: false,
+                no_autoprops: false,
+                add_parents: false,
+            },
+        )
+        .unwrap();
+
+        ctx.commit(
+            &[branch_wc.to_str().unwrap()],
+            &CommitOptions::default(),
+            std::collections::HashMap::new(),
+            &|_| Ok(()),
+        )
+        .unwrap();
+
+        // Update trunk before merging
+        ctx.update(
+            &[trunk_wc.to_str().unwrap()],
+            Revision::Head,
+            &UpdateOptions {
+                depth: Depth::Infinity,
+                depth_is_sticky: false,
+                ignore_externals: false,
+                allow_unver_obstructions: false,
+                adds_as_modifications: false,
+                make_parents: false,
+            },
+        )
+        .unwrap();
+
+        // Use record-only merge to avoid conflicts - this only records mergeinfo
+        ctx.merge_peg(
+            branch_url_obj.as_str(),
+            &[], // Empty ranges for automatic merge
+            &Revision::Head,
+            trunk_wc.to_str().unwrap(),
+            Depth::Infinity,
+            &MergeSourcesOptions {
+                ignore_mergeinfo: false,
+                diff_ignore_ancestry: false,
+                force_delete: false,
+                record_only: true, // Record-only merge avoids conflicts
+                dry_run: false,
+                allow_mixed_rev: true,
+                merge_options: None,
+            },
+        )
+        .unwrap();
+
+        // Commit the merge
+        ctx.commit(
+            &[trunk_wc.to_str().unwrap()],
+            &CommitOptions::default(),
+            std::collections::HashMap::new(),
+            &|_| Ok(()),
+        )
+        .unwrap();
+
+        // Now test mergeinfo_get_merged
+        let mergeinfo = ctx
+            .mergeinfo_get_merged(url.as_str(), &Revision::Head)
+            .unwrap();
+
+        // After merging, we should have mergeinfo
+        assert!(mergeinfo.is_some(), "Should have mergeinfo after merge");
+
+        if let Some(mi) = mergeinfo {
+            // The mergeinfo should contain the branch URL as a key
+            let entries = mi.paths();
+            assert!(!entries.is_empty(), "Mergeinfo should have entries");
+
+            // Check that we can find the branch in the mergeinfo
+            let has_branch = entries.keys().any(|k| k.contains("branch"));
+            assert!(has_branch, "Mergeinfo should contain the branch URL");
+        }
+
+        // Test on a path with no mergeinfo
+        let test_file_url = format!("{}/test.txt", url.as_str());
+        let mergeinfo2 = ctx
+            .mergeinfo_get_merged(&test_file_url, &Revision::Head)
+            .unwrap();
+
+        // Files inherit mergeinfo from their parent, so this might be Some or None
+        // depending on SVN version and configuration
+        // Just verify the call succeeds
+        let _ = mergeinfo2;
     }
 }
