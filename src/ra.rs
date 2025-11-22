@@ -199,6 +199,8 @@ pub struct Session<'a> {
     _pool: apr::Pool<'static>,
     // Keep a reference to callbacks to ensure they outlive the session
     _callbacks: Option<&'a mut Callbacks>,
+    // Own default callbacks when user doesn't provide them
+    _owned_callbacks: Option<Box<Callbacks>>,
     _phantom: PhantomData<*mut ()>, // !Send + !Sync
 }
 
@@ -381,6 +383,7 @@ impl<'a> Session<'a> {
             ptr,
             _pool: pool,
             _callbacks: None,
+            _owned_callbacks: None,
             _phantom: PhantomData,
         }
     }
@@ -413,15 +416,15 @@ impl<'a> Session<'a> {
         let uuid = uuid.map(|uuid| std::ffi::CString::new(uuid).unwrap());
 
         // Create default callbacks if none provided - SVN requires valid callbacks
-        let mut default_callbacks;
+        let mut owned_callbacks = None;
         let (callbacks_ptr, callback_baton) = if let Some(callbacks) = callbacks.as_mut() {
             (callbacks.as_mut_ptr(), callbacks.get_callback_baton())
         } else {
-            default_callbacks = Callbacks::new()?;
-            (
-                default_callbacks.as_mut_ptr(),
-                default_callbacks.get_callback_baton(),
-            )
+            let mut default_callbacks = Box::new(Callbacks::new()?);
+            let ptr = default_callbacks.as_mut_ptr();
+            let baton = default_callbacks.get_callback_baton();
+            owned_callbacks = Some(default_callbacks);
+            (ptr, baton)
         };
 
         let err = unsafe {
@@ -451,6 +454,7 @@ impl<'a> Session<'a> {
                 ptr: session,
                 _pool: pool,
                 _callbacks: callbacks,
+                _owned_callbacks: owned_callbacks,
                 _phantom: PhantomData,
             },
             if corrected_url.is_null() {
