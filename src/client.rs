@@ -6009,6 +6009,164 @@ impl Context {
         svn_result(err)
     }
 
+    /// Get information about the state of merging between two branches.
+    ///
+    /// Returns comprehensive information about the merge relationship between
+    /// source and target, including whether a reintegration merge is needed.
+    ///
+    /// # Arguments
+    /// * `source_path_or_url` - Source path or URL
+    /// * `source_revision` - Source revision
+    /// * `target_path_or_url` - Target path or URL (WC or repository)
+    /// * `target_revision` - Target revision
+    ///
+    /// # Returns
+    /// A tuple containing:
+    /// - needs_reintegration: true if next merge should be a reintegration
+    /// - yca_url/yca_rev: Youngest common ancestor location
+    /// - base_url/base_rev: Base chosen for 3-way merge
+    /// - right_url/right_rev: Right-hand side of source diff
+    /// - target_url/target_rev: Target location
+    /// - repos_root_url: Repository root URL
+    ///
+    /// This wraps `svn_client_get_merging_summary`.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use subversion::client::Context;
+    /// # use subversion::Revision;
+    /// # let mut ctx = Context::new().unwrap();
+    /// let summary = ctx.get_merging_summary(
+    ///     "http://svn.example.com/repos/trunk",
+    ///     &Revision::Head,
+    ///     "/path/to/wc",
+    ///     &Revision::Working,
+    /// ).unwrap();
+    /// if summary.0 {
+    ///     println!("Reintegration merge needed!");
+    /// }
+    /// ```
+    pub fn get_merging_summary(
+        &mut self,
+        source_path_or_url: &str,
+        source_revision: &Revision,
+        target_path_or_url: &str,
+        target_revision: &Revision,
+    ) -> Result<
+        (
+            bool,
+            String,
+            i64,
+            String,
+            i64,
+            String,
+            i64,
+            String,
+            i64,
+            String,
+        ),
+        Error,
+    > {
+        let result_pool = apr::Pool::new();
+        let scratch_pool = apr::Pool::new();
+
+        let source_c = std::ffi::CString::new(source_path_or_url)?;
+        let target_c = std::ffi::CString::new(target_path_or_url)?;
+
+        let source_rev: subversion_sys::svn_opt_revision_t = (*source_revision).into();
+        let target_rev: subversion_sys::svn_opt_revision_t = (*target_revision).into();
+
+        let mut needs_reintegration: i32 = 0;
+        let mut yca_url: *const i8 = std::ptr::null();
+        let mut yca_rev: subversion_sys::svn_revnum_t = 0;
+        let mut base_url: *const i8 = std::ptr::null();
+        let mut base_rev: subversion_sys::svn_revnum_t = 0;
+        let mut right_url: *const i8 = std::ptr::null();
+        let mut right_rev: subversion_sys::svn_revnum_t = 0;
+        let mut target_url: *const i8 = std::ptr::null();
+        let mut target_rev_out: subversion_sys::svn_revnum_t = 0;
+        let mut repos_root_url: *const i8 = std::ptr::null();
+
+        let err = unsafe {
+            subversion_sys::svn_client_get_merging_summary(
+                &mut needs_reintegration,
+                &mut yca_url,
+                &mut yca_rev,
+                &mut base_url,
+                &mut base_rev,
+                &mut right_url,
+                &mut right_rev,
+                &mut target_url,
+                &mut target_rev_out,
+                &mut repos_root_url,
+                source_c.as_ptr(),
+                &source_rev,
+                target_c.as_ptr(),
+                &target_rev,
+                self.ptr,
+                result_pool.as_mut_ptr(),
+                scratch_pool.as_mut_ptr(),
+            )
+        };
+
+        Error::from_raw(err)?;
+
+        unsafe {
+            let yca_url_str = if yca_url.is_null() {
+                String::new()
+            } else {
+                std::ffi::CStr::from_ptr(yca_url)
+                    .to_string_lossy()
+                    .into_owned()
+            };
+
+            let base_url_str = if base_url.is_null() {
+                String::new()
+            } else {
+                std::ffi::CStr::from_ptr(base_url)
+                    .to_string_lossy()
+                    .into_owned()
+            };
+
+            let right_url_str = if right_url.is_null() {
+                String::new()
+            } else {
+                std::ffi::CStr::from_ptr(right_url)
+                    .to_string_lossy()
+                    .into_owned()
+            };
+
+            let target_url_str = if target_url.is_null() {
+                String::new()
+            } else {
+                std::ffi::CStr::from_ptr(target_url)
+                    .to_string_lossy()
+                    .into_owned()
+            };
+
+            let repos_root_url_str = if repos_root_url.is_null() {
+                String::new()
+            } else {
+                std::ffi::CStr::from_ptr(repos_root_url)
+                    .to_string_lossy()
+                    .into_owned()
+            };
+
+            Ok((
+                needs_reintegration != 0,
+                yca_url_str,
+                yca_rev,
+                base_url_str,
+                base_rev,
+                right_url_str,
+                right_rev,
+                target_url_str,
+                target_rev_out,
+                repos_root_url_str,
+            ))
+        }
+    }
+
     /// Move (rename) a file or directory
     ///
     /// This wraps svn_client_move7 to perform a versioned move operation.
@@ -11515,5 +11673,147 @@ mod tests {
             // If merge fails, at least we tested the API
             eprintln!("Merge failed (this can happen): {:?}", merge_result.err());
         }
+    }
+
+    #[test]
+    fn test_get_merging_summary() {
+        let td = tempfile::tempdir().unwrap();
+        let base_path = td.path().canonicalize().unwrap();
+        let repo_path = base_path.join("repo");
+        let trunk_wc = base_path.join("trunk");
+        let branch_wc = base_path.join("branch");
+
+        crate::repos::Repos::create(&repo_path).unwrap();
+
+        let mut ctx = Context::new().unwrap();
+        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        let url = crate::uri::Uri::new(&url_str).unwrap();
+
+        // Checkout trunk
+        ctx.checkout(
+            url.clone(),
+            &trunk_wc,
+            &CheckoutOptions {
+                peg_revision: Revision::Head,
+                revision: Revision::Head,
+                depth: Depth::Infinity,
+                ignore_externals: false,
+                allow_unver_obstructions: false,
+            },
+        )
+        .unwrap();
+
+        // Create a file in trunk
+        let test_file = trunk_wc.join("test.txt");
+        std::fs::write(&test_file, "line 1\n").unwrap();
+        ctx.add(
+            &test_file,
+            &AddOptions {
+                depth: Depth::Empty,
+                force: false,
+                no_ignore: false,
+                no_autoprops: false,
+                add_parents: false,
+            },
+        )
+        .unwrap();
+
+        ctx.commit(
+            &[trunk_wc.to_str().unwrap()],
+            &CommitOptions::default(),
+            std::collections::HashMap::new(),
+            &|_| Ok(()),
+        )
+        .unwrap();
+
+        // Create a branch
+        let branch_url = format!("{}/branch", url_str);
+        let mut copy_opts = CopyOptions::new();
+        ctx.copy(
+            &[(url.as_str(), Some(Revision::Head))],
+            &branch_url,
+            &mut copy_opts,
+        )
+        .unwrap();
+
+        // Checkout the branch
+        ctx.checkout(
+            branch_url.as_str(),
+            &branch_wc,
+            &CheckoutOptions {
+                peg_revision: Revision::Head,
+                revision: Revision::Head,
+                depth: Depth::Infinity,
+                ignore_externals: false,
+                allow_unver_obstructions: false,
+            },
+        )
+        .unwrap();
+
+        // Make a change in the branch
+        let branch_file = branch_wc.join("test.txt");
+        std::fs::write(&branch_file, "line 1\nline 2 from branch\n").unwrap();
+
+        ctx.commit(
+            &[branch_wc.to_str().unwrap()],
+            &CommitOptions::default(),
+            std::collections::HashMap::new(),
+            &|_| Ok(()),
+        )
+        .unwrap();
+
+        // Test get_merging_summary
+        let (
+            needs_reintegration,
+            yca_url,
+            yca_rev,
+            base_url,
+            base_rev,
+            right_url,
+            right_rev,
+            target_url,
+            target_rev,
+            repos_root,
+        ) = ctx
+            .get_merging_summary(
+                &branch_url,
+                &Revision::Head,
+                trunk_wc.to_str().unwrap(),
+                &Revision::Working,
+            )
+            .unwrap();
+
+        // Verify we got valid data
+        assert!(!repos_root.is_empty(), "Should have repository root URL");
+        assert!(
+            repos_root.starts_with("file://"),
+            "Repository root should be a file:// URL"
+        );
+
+        // YCA URL should be valid
+        assert!(!yca_url.is_empty(), "Should have YCA URL");
+        assert!(
+            yca_url.contains(&repo_path.to_str().unwrap()),
+            "YCA URL should reference the repository"
+        );
+
+        // Right URL should reference the branch
+        assert!(!right_url.is_empty(), "Should have right URL");
+        assert!(
+            right_url.contains("branch"),
+            "Right URL should reference the branch"
+        );
+
+        // Revisions should be valid
+        assert!(yca_rev >= 0, "YCA revision should be valid");
+        assert!(base_rev >= 0, "Base revision should be valid");
+        assert!(right_rev > 0, "Right revision should be > 0");
+        assert!(target_rev >= 0, "Target revision should be valid");
+
+        // For a fresh branch that hasn't been merged yet, needs_reintegration should be false
+        assert!(
+            !needs_reintegration,
+            "Fresh branch should not need reintegration"
+        );
     }
 }
