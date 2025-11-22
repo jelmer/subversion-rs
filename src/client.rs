@@ -5911,11 +5911,12 @@ impl Context {
             .as_ref()
             .map_or(std::ptr::null(), |(arr, _)| unsafe { arr.as_ptr() });
 
+        let peg_rev_c: subversion_sys::svn_opt_revision_t = (*peg_revision).into();
         let err = unsafe {
             subversion_sys::svn_client_merge_peg5(
                 source.as_ptr(),
                 ranges_array,
-                &(*peg_revision).into(),
+                &peg_rev_c,
                 target_wcpath.as_ptr(),
                 depth.into(),
                 options.ignore_mergeinfo as i32,
@@ -8661,7 +8662,7 @@ mod tests {
             },
         )
         .unwrap();
-        let commit_result = ctx.commit(
+        ctx.commit(
             &[wc_path.to_str().unwrap()],
             &CommitOptions {
                 depth: Depth::Infinity,
@@ -8674,16 +8675,8 @@ mod tests {
             },
             std::collections::HashMap::new(), // Empty revprops - svn:log is set through other means
             &|_info| Ok(()),
-        );
-
-        // Check if commit succeeded - if not, skip the log test
-        if commit_result.is_err() {
-            eprintln!(
-                "Commit failed, skipping log test: {:?}",
-                commit_result.err()
-            );
-            return;
-        }
+        )
+        .unwrap();
 
         // Test log using builder pattern
         let mut log_entries = Vec::new();
@@ -8812,12 +8805,8 @@ mod tests {
         let _ = std::fs::remove_file(&patch_file);
         let _ = std::fs::remove_dir_all(&wc_dir);
 
-        // Patch should succeed in dry run mode or return expected error
-        // Note: patch might fail with directory not being a working copy, which is expected
-        match result {
-            Ok(()) => println!("Patch succeeded in dry run"),
-            Err(e) => println!("Patch failed as expected: {}", e),
-        }
+        // Patch should fail since the directory is not a working copy
+        assert!(result.is_err(), "Patch should fail for non-working-copy directory");
     }
 
     #[test]
@@ -10955,83 +10944,65 @@ mod tests {
         let wc2_str = wc2_path.to_str().unwrap();
         let _ = ctx.update(&[wc2_str], Revision::Head, &UpdateOptions::default());
 
-        // Get conflict for the file
-        let conflict_result = ctx.conflict_get(&file2);
-
-        if conflict_result.is_err() {
-            // Some SVN versions might not create a tree conflict in this scenario
-            // or might handle it differently. Skip the test if no conflict is created.
-            eprintln!("Note: Tree conflict was not created, skipping test");
-            return;
-        }
-
-        let mut conflict = conflict_result.unwrap();
+        // Get conflict for the file - this should exist after update with local mods
+        let mut conflict = ctx.conflict_get(&file2).unwrap();
 
         // Check for tree conflict
         let (_text, _props, tree) = conflict.get_conflicted().unwrap();
-        if !tree {
-            eprintln!("Note: No tree conflict detected, skipping test");
-            return;
-        }
+        assert!(tree, "Should have tree conflict after deleting file with local modifications");
 
         // Get tree conflict resolution options
         let options = conflict.tree_get_resolution_options(&mut ctx).unwrap();
-        if options.is_empty() {
-            eprintln!("Note: No tree conflict resolution options available, skipping test");
-            return;
-        }
+        assert!(!options.is_empty(), "Should have tree conflict resolution options");
+
+        // Verify we can get tree conflict details (this contacts the repository for more info)
+        conflict.tree_get_details(&mut ctx).unwrap();
 
         // Try to find an option that supports move targets
-        let mut move_option = None;
+        let mut has_move_option = false;
         for opt in &options {
-            // Try to get move candidates - if this doesn't error, this option supports moves
+            // Try to get move candidates - if this succeeds and returns data, we can test further
             if let Ok(candidates) = opt.get_moved_to_abspath_candidates() {
                 if !candidates.is_empty() {
-                    move_option = Some(opt);
+                    has_move_option = true;
+
+                    // Test get_moved_to_repos_relpath_candidates
+                    let relpath_candidates = opt.get_moved_to_repos_relpath_candidates().unwrap();
+                    assert!(
+                        !relpath_candidates.is_empty(),
+                        "Should have repository relpath candidates"
+                    );
+
+                    // Create a mutable option to test set methods
+                    let mut mutable_opt = ConflictOption {
+                        ptr: opt.ptr,
+                        merged_value_pool: None,
+                    };
+
+                    // Test set_moved_to_abspath (use index 0)
+                    mutable_opt.set_moved_to_abspath(0, &mut ctx).unwrap();
+
+                    // Test set_moved_to_repos_relpath (use index 0)
+                    // Note: Create a fresh option since set_moved_to_abspath modified the previous one
+                    let mut mutable_opt2 = ConflictOption {
+                        ptr: opt.ptr,
+                        merged_value_pool: None,
+                    };
+                    mutable_opt2.set_moved_to_repos_relpath(0, &mut ctx).unwrap();
                     break;
                 }
             }
         }
 
-        if let Some(opt) = move_option {
-            // Test get_moved_to_abspath_candidates
-            let abspath_candidates = opt.get_moved_to_abspath_candidates().unwrap();
-            assert!(
-                !abspath_candidates.is_empty(),
-                "Should have move destination candidates"
-            );
+        // At minimum, we should be able to resolve the tree conflict with one of the options
+        // Even if move-specific options aren't available, we can use a basic resolution
+        let first_option = &options[0];
+        conflict.tree_resolve(first_option, &mut ctx).unwrap();
 
-            // Test get_moved_to_repos_relpath_candidates
-            let relpath_candidates = opt.get_moved_to_repos_relpath_candidates().unwrap();
-            assert!(
-                !relpath_candidates.is_empty(),
-                "Should have repository relpath candidates"
-            );
-
-            // Create a mutable option to test set methods
-            let mut mutable_opt = ConflictOption {
-                ptr: opt.ptr,
-                merged_value_pool: None,
-            };
-
-            // Test set_moved_to_abspath (use index 0)
-            let set_result = mutable_opt.set_moved_to_abspath(0, &mut ctx);
-            // This might fail if the option doesn't support this operation
-            if set_result.is_ok() {
-                // If successful, we can also try resolving
-                let resolve_result = conflict.tree_resolve(&mutable_opt, &mut ctx);
-                // Resolution might fail for various reasons, but at least we tested the API
-                let _ = resolve_result;
-            }
-
-            // Test set_moved_to_repos_relpath (use index 0)
-            let set_result = mutable_opt.set_moved_to_repos_relpath(0, &mut ctx);
-            // This is an alternative to set_moved_to_abspath, might succeed or fail
-            let _ = set_result;
-        } else {
-            eprintln!(
-                "Note: No move-supporting option found, but tree conflict APIs were exercised"
-            );
+        // If we found move options, verify that
+        if !has_move_option {
+            // The APIs were still tested, just not with move-specific options
+            // This is acceptable as long as basic tree conflict resolution works
         }
     }
 
@@ -11040,7 +11011,6 @@ mod tests {
         let td = tempfile::tempdir().unwrap();
         let repo_path = td.path().join("repo");
         let trunk_wc = td.path().join("trunk_wc");
-        let branch_wc = td.path().join("branch_wc");
 
         // Create repository
         crate::repos::Repos::create(&repo_path).unwrap();
@@ -11063,25 +11033,21 @@ mod tests {
         )
         .unwrap();
 
-        // Create a file in trunk
+        // Create a file in trunk and commit (r1)
         let trunk_file = trunk_wc.join("file.txt");
         std::fs::write(&trunk_file, "line 1\n").unwrap();
         ctx.add(&trunk_file, &AddOptions::default()).unwrap();
 
         let trunk_str = trunk_wc.to_str().unwrap();
-        let mut rev1 = crate::Revnum(0);
         ctx.commit(
             &[trunk_str],
             &CommitOptions::default(),
             std::collections::HashMap::new(),
-            &|commit_info| {
-                rev1 = commit_info.revision();
-                Ok(())
-            },
+            &|_| Ok(()),
         )
         .unwrap();
 
-        // Create a branch using copy
+        // Create a branch using copy (r2)
         let branch_url = format!("{}/branch", url_str);
         let mut copy_opts = CopyOptions::new();
         ctx.copy(
@@ -11091,40 +11057,40 @@ mod tests {
         )
         .unwrap();
 
-        // Checkout the branch
-        let branch_url_obj = crate::uri::Uri::new(&branch_url).unwrap();
-        ctx.checkout(
-            branch_url_obj,
-            &branch_wc,
-            &CheckoutOptions {
-                peg_revision: Revision::Head,
-                revision: Revision::Head,
+        // Update the working copy to get the branch
+        ctx.update(
+            &[trunk_str],
+            Revision::Head,
+            &UpdateOptions {
                 depth: Depth::Infinity,
+                depth_is_sticky: false,
                 ignore_externals: false,
                 allow_unver_obstructions: false,
+                adds_as_modifications: false,
+                make_parents: false,
             },
         )
         .unwrap();
 
-        // Make changes in the branch
-        let branch_file = branch_wc.join("file.txt");
-        std::fs::write(&branch_file, "line 1\nline 2 from branch\n").unwrap();
+        // Switch to the branch
+        ctx.switch(trunk_str, branch_url.as_str(), &SwitchOptions::default())
+            .unwrap();
 
-        let branch_str = branch_wc.to_str().unwrap();
-        let mut rev2 = crate::Revnum(0);
+        // Make changes in the branch and commit (r3)
+        std::fs::write(&trunk_file, "line 1\nline 2 from branch\n").unwrap();
         ctx.commit(
-            &[branch_str],
+            &[trunk_str],
             &CommitOptions::default(),
             std::collections::HashMap::new(),
-            &|commit_info| {
-                rev2 = commit_info.revision();
-                Ok(())
-            },
+            &|_| Ok(()),
         )
         .unwrap();
 
-        // Now merge from branch back to trunk using merge_peg
-        // Use empty ranges for automatic merge
+        // Switch back to trunk
+        ctx.switch(trunk_str, url.as_str(), &SwitchOptions::default())
+            .unwrap();
+
+        // Now merge from branch to trunk using merge_peg
         let merge_opts = MergeSourcesOptions {
             ignore_mergeinfo: false,
             diff_ignore_ancestry: false,
@@ -11135,56 +11101,23 @@ mod tests {
             merge_options: None,
         };
 
-        let merge_result = ctx.merge_peg(
+        // Empty ranges means automatic merge - SVN figures out what to merge based on mergeinfo
+        ctx.merge_peg(
             &branch_url,
-            &[], // Empty ranges for automatic merge
+            &[],
             &Revision::Head,
             trunk_str,
             Depth::Infinity,
             &merge_opts,
+        )
+        .unwrap();
+
+        // Verify the merge worked
+        let content = std::fs::read_to_string(&trunk_file).unwrap();
+        assert!(
+            content.contains("line 2 from branch"),
+            "Merge should have brought in branch changes"
         );
-
-        // Merge might succeed or fail depending on various factors
-        // If it succeeds, verify the file was updated
-        if merge_result.is_ok() {
-            let content = std::fs::read_to_string(&trunk_file).unwrap();
-            assert!(
-                content.contains("line 2 from branch"),
-                "Merge should have brought in branch changes"
-            );
-        } else {
-            // If merge fails, at least we tested the API
-            eprintln!("Merge failed (this can happen): {:?}", merge_result.err());
-        }
-
-        // Also test with explicit revision range
-        // First revert trunk to clean state
-        ctx.revert(&[trunk_str], &RevertOptions::default()).unwrap();
-
-        // Merge specific revision range
-        let ranges = vec![crate::mergeinfo::MergeRange::new(
-            crate::Revnum(rev1.0),
-            crate::Revnum(rev2.0),
-            true,
-        )];
-
-        let merge_result2 = ctx.merge_peg(
-            &branch_url,
-            &ranges,
-            &Revision::Number(rev2),
-            trunk_str,
-            Depth::Infinity,
-            &merge_opts,
-        );
-
-        // Again, merge might succeed or fail
-        if merge_result2.is_ok() {
-            let content = std::fs::read_to_string(&trunk_file).unwrap();
-            assert!(
-                content.contains("line 2 from branch"),
-                "Merge with explicit range should have brought in branch changes"
-            );
-        }
     }
 
     #[test]
@@ -11642,7 +11575,7 @@ mod tests {
 
         // Test merge() - merge changes between branch1 and trunk into branch2
         // This uses the non-peg variant which takes two sources
-        let merge_result = ctx.merge(
+        ctx.merge(
             url.as_str(),                 // source1 (trunk)
             &Revision::Head,              // revision1
             &branch1_url,                 // source2 (branch1)
@@ -11658,21 +11591,16 @@ mod tests {
                 allow_mixed_rev: true,
                 merge_options: None,
             },
-        );
+        )
+        .unwrap();
 
-        // Merge might succeed or fail depending on various factors
-        // If it succeeds, verify the file was updated
-        if merge_result.is_ok() {
-            let branch2_file = branch2_wc.join("test.txt");
-            let content = std::fs::read_to_string(&branch2_file).unwrap();
-            assert!(
-                content.contains("line 2 from branch1"),
-                "Merge should have brought in changes from branch1"
-            );
-        } else {
-            // If merge fails, at least we tested the API
-            eprintln!("Merge failed (this can happen): {:?}", merge_result.err());
-        }
+        // Verify the file was updated
+        let branch2_file = branch2_wc.join("test.txt");
+        let content = std::fs::read_to_string(&branch2_file).unwrap();
+        assert!(
+            content.contains("line 2 from branch1"),
+            "Merge should have brought in changes from branch1"
+        );
     }
 
     #[test]
@@ -11767,11 +11695,11 @@ mod tests {
             needs_reintegration,
             yca_url,
             yca_rev,
-            base_url,
+            _base_url,
             base_rev,
             right_url,
             right_rev,
-            target_url,
+            _target_url,
             target_rev,
             repos_root,
         ) = ctx
