@@ -692,10 +692,6 @@ unsafe extern "C" fn wrap_editor_open_root(
     _pool: *mut apr_sys::apr_pool_t,
     root_baton: *mut *mut std::ffi::c_void,
 ) -> *mut subversion_sys::svn_error_t {
-    eprintln!(
-        "wrap_editor_open_root called with edit_baton={:p}, base_revision={}, root_baton={:p}",
-        edit_baton, base_revision, root_baton
-    );
     // Reconstruct the fat pointer from the baton
     let editor_ptr = unsafe { *(edit_baton as *mut *mut dyn Editor) };
     let editor = unsafe { &mut *editor_ptr };
@@ -704,14 +700,11 @@ unsafe extern "C" fn wrap_editor_open_root(
             // Leak the DirectoryEditor box - we'll reclaim it in close_directory
             // We need to box the fat pointer to store it through FFI
             let fat_ptr = Box::into_raw(root);
-            eprintln!("  Created fat_ptr: {:p}", fat_ptr);
             let boxed_fat_ptr = Box::new(fat_ptr);
             let boxed_ptr = Box::into_raw(boxed_fat_ptr);
-            eprintln!("  Storing boxed_ptr: {:p} in root_baton", boxed_ptr);
             unsafe {
                 *root_baton = boxed_ptr as *mut std::ffi::c_void;
             }
-            eprintln!("  Returning success from open_root");
             std::ptr::null_mut()
         }
         Err(err) => unsafe { err.into_raw() },
@@ -741,10 +734,6 @@ unsafe extern "C" fn wrap_editor_add_directory(
     _pool: *mut apr_sys::apr_pool_t,
     child_baton: *mut *mut std::ffi::c_void,
 ) -> *mut subversion_sys::svn_error_t {
-    eprintln!(
-        "wrap_editor_add_directory called with parent_baton={:p}",
-        parent_baton
-    );
     let path = unsafe { std::ffi::CStr::from_ptr(path) };
     let copyfrom_path = if copyfrom_path.is_null() {
         None
@@ -752,14 +741,9 @@ unsafe extern "C" fn wrap_editor_add_directory(
         Some(unsafe { std::ffi::CStr::from_ptr(copyfrom_path) })
     };
     // The parent_baton is a pointer to a Box<dyn DirectoryEditor>
-    eprintln!("  Casting parent_baton to *mut *mut dyn DirectoryEditor");
     let fat_ptr_ptr = parent_baton as *mut *mut dyn DirectoryEditor;
-    eprintln!("  Dereferencing to get fat pointer");
     let fat_ptr = unsafe { *fat_ptr_ptr };
-    eprintln!("  Got fat_ptr: {:p}", fat_ptr);
-    eprintln!("  Dereferencing fat pointer to get DirectoryEditor");
     let parent = unsafe { &mut *fat_ptr };
-    eprintln!("  Got parent reference, preparing copyfrom");
     let copyfrom = if let (Some(copyfrom_path), Some(copyfrom_revision)) =
         (copyfrom_path, Revnum::from_raw(copyfrom_revision))
     {
@@ -767,27 +751,15 @@ unsafe extern "C" fn wrap_editor_add_directory(
     } else {
         None
     };
-    eprintln!(
-        "  Calling parent.add_directory({:?}, {:?})",
-        path.to_str().unwrap(),
-        copyfrom
-    );
     match parent.add_directory(path.to_str().unwrap(), copyfrom) {
         Ok(child) => {
-            eprintln!("  parent.add_directory returned Ok");
             let fat_ptr = Box::into_raw(child);
-            eprintln!("  Created child fat_ptr: {:p}", fat_ptr);
             let boxed_fat_ptr = Box::new(fat_ptr);
             let boxed_ptr = Box::into_raw(boxed_fat_ptr);
-            eprintln!("  Storing child boxed_ptr: {:p} in child_baton", boxed_ptr);
             unsafe { *child_baton = boxed_ptr as *mut std::ffi::c_void };
-            eprintln!("  Returning success from add_directory");
             std::ptr::null_mut()
         }
-        Err(err) => {
-            eprintln!("  parent.add_directory returned Err");
-            unsafe { err.into_raw() }
-        }
+        Err(err) => unsafe { err.into_raw() },
     }
 }
 
@@ -831,7 +803,6 @@ unsafe extern "C" fn wrap_editor_close_directory(
     baton: *mut std::ffi::c_void,
     _pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
-    eprintln!("wrap_editor_close_directory called with baton={:p}", baton);
     // First recover the boxed fat pointer, then the actual DirectoryEditor
     let boxed_fat_ptr = unsafe { Box::from_raw(baton as *mut *mut dyn DirectoryEditor) };
     let mut boxed_editor = unsafe { Box::from_raw(*boxed_fat_ptr) };
@@ -867,11 +838,6 @@ unsafe extern "C" fn wrap_editor_add_file(
 
     file_baton: *mut *mut std::ffi::c_void,
 ) -> *mut subversion_sys::svn_error_t {
-    eprintln!(
-        "wrap_editor_add_file called with parent_baton={:p}, path={:?}",
-        parent_baton,
-        unsafe { std::ffi::CStr::from_ptr(path).to_str() }
-    );
     let path = unsafe { std::ffi::CStr::from_ptr(path) };
     let copyfrom_path = if copyfrom_path.is_null() {
         None
@@ -879,14 +845,9 @@ unsafe extern "C" fn wrap_editor_add_file(
         Some(unsafe { std::ffi::CStr::from_ptr(copyfrom_path) })
     };
     // The parent_baton is a pointer to a Box<dyn DirectoryEditor>
-    eprintln!("  Casting parent_baton to *mut *mut dyn DirectoryEditor");
     let fat_ptr_ptr = parent_baton as *mut *mut dyn DirectoryEditor;
-    eprintln!("  Dereferencing to get fat pointer");
     let fat_ptr = unsafe { *fat_ptr_ptr };
-    eprintln!("  Got fat_ptr: {:p}", fat_ptr);
-    eprintln!("  Dereferencing fat pointer to get DirectoryEditor");
     let parent = unsafe { &mut *fat_ptr };
-    eprintln!("  Got parent reference, preparing copyfrom");
     let copyfrom = if let (Some(copyfrom_path), Some(copyfrom_revision)) =
         (copyfrom_path, Revnum::from_raw(copyfrom_revision))
     {
@@ -894,27 +855,15 @@ unsafe extern "C" fn wrap_editor_add_file(
     } else {
         None
     };
-    eprintln!(
-        "  Calling parent.add_file({:?}, {:?})",
-        path.to_str().unwrap(),
-        copyfrom
-    );
     match parent.add_file(path.to_str().unwrap(), copyfrom) {
         Ok(file) => {
-            eprintln!("  parent.add_file returned Ok");
             let fat_ptr = Box::into_raw(file);
-            eprintln!("  Created file fat_ptr: {:p}", fat_ptr);
             let boxed_fat_ptr = Box::new(fat_ptr);
             let boxed_ptr = Box::into_raw(boxed_fat_ptr);
-            eprintln!("  Storing file boxed_ptr: {:p} in file_baton", boxed_ptr);
             unsafe { *file_baton = boxed_ptr as *mut std::ffi::c_void };
-            eprintln!("  Returning success from wrap_editor_add_file");
             std::ptr::null_mut()
         }
-        Err(err) => {
-            eprintln!("  parent.add_file returned Err");
-            unsafe { err.into_raw() }
-        }
+        Err(err) => unsafe { err.into_raw() },
     }
 }
 
@@ -956,14 +905,8 @@ extern "C" fn wrap_window_handler(
     window: *mut subversion_sys::svn_txdelta_window_t,
     baton: *mut std::ffi::c_void,
 ) -> *mut subversion_sys::svn_error_t {
-    eprintln!(
-        "wrap_window_handler called with window={:p}, baton={:p}",
-        window, baton
-    );
-
     // If window is null, this is the final call
     if window.is_null() {
-        eprintln!("  Final window handler call, cleaning up");
         // Clean up the handler function
         let handler_fn =
             baton as *mut Box<dyn for<'b> Fn(&'b mut TxDeltaWindowRef) -> Result<(), crate::Error>>;
@@ -995,22 +938,14 @@ unsafe extern "C" fn wrap_editor_apply_textdelta(
     handler: *mut subversion_sys::svn_txdelta_window_handler_t,
     handler_baton: *mut *mut std::ffi::c_void,
 ) -> *mut subversion_sys::svn_error_t {
-    eprintln!(
-        "wrap_editor_apply_textdelta called with file_baton={:p}",
-        file_baton
-    );
     let base_checksum = if base_checksum.is_null() {
         None
     } else {
         Some(unsafe { std::ffi::CStr::from_ptr(base_checksum) })
     };
     // The file_baton stores a boxed fat pointer to dyn FileEditor
-    eprintln!("  Casting file_baton to *mut *mut dyn FileEditor");
     let fat_ptr_ptr = file_baton as *mut *mut dyn FileEditor;
-    eprintln!("  Dereferencing to get fat pointer");
     let fat_ptr = unsafe { *fat_ptr_ptr };
-    eprintln!("  Got fat_ptr: {:p}", fat_ptr);
-    eprintln!("  Dereferencing fat pointer to get FileEditor");
     let file = unsafe { &mut *fat_ptr };
     match file.apply_textdelta(base_checksum.map(|c| c.to_str().unwrap())) {
         Ok(apply) => {

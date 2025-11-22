@@ -297,16 +297,10 @@ mod tests {
 
         // Since we're likely on a UTF-8 system, this should be a no-op
         let to_utf8_result = cstring_to_utf8(original);
-        if let Err(ref e) = to_utf8_result {
-            eprintln!("UTF-8 conversion failed: {}", e);
-        }
         assert!(to_utf8_result.is_ok());
 
         let utf8_string = to_utf8_result.unwrap();
         let from_utf8_result = cstring_from_utf8(&utf8_string);
-        if let Err(ref e) = from_utf8_result {
-            eprintln!("Native encoding conversion failed: {}", e);
-        }
         assert!(from_utf8_result.is_ok());
 
         // On UTF-8 systems, this should be identical

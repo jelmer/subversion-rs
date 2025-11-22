@@ -1271,7 +1271,6 @@ impl<'a> Session<'a> {
         };
 
         // Clean up the single-boxed callback like the commit function
-        eprintln!("get_log: cleaning up callback");
         let _ = unsafe {
             Box::from_raw(baton as *mut &dyn FnMut(&crate::LogEntry) -> Result<(), Error>)
         };
@@ -1860,14 +1859,14 @@ impl<'a> Session<'a> {
         };
 
         let mut result = Vec::new();
-        for (i, item_ptr) in array.iter().enumerate() {
+        for (_i, item_ptr) in array.iter().enumerate() {
             if item_ptr.is_null() {
                 continue;
             }
             let item = unsafe { &**item_ptr };
             // Debug: Check if the item has valid pointers
             if item.path_or_url.is_null() {
-                eprintln!("Warning: item {} has null path_or_url", i);
+                // Skip items with null path_or_url
                 continue;
             }
             let path_or_url = unsafe {
