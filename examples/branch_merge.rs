@@ -59,7 +59,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &[trunk_wc.to_str().unwrap()],
         &CommitOptions::default(),
         std::collections::HashMap::new(),
-        &|info| {
+        None,
+        &mut |info| {
             rev1 = info.revision().as_i64();
             println!("  Committed revision {}", rev1);
             Ok(())
@@ -112,7 +113,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &[branch_wc.to_str().unwrap()],
         &CommitOptions::default(),
         std::collections::HashMap::new(),
-        &|info| {
+        None,
+        &mut |info| {
             rev2 = info.revision().as_i64();
             println!("  Committed revision {} to branch", rev2);
             Ok(())
@@ -189,7 +191,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &[trunk_wc.to_str().unwrap()],
         &CommitOptions::default(),
         std::collections::HashMap::new(),
-        &|info| {
+        None,
+        &mut |info| {
             println!("  Merge committed as revision {}", info.revision().as_i64());
             Ok(())
         },

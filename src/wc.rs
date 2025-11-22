@@ -4192,7 +4192,8 @@ mod tests {
                 &[wc_path.to_str().unwrap()],
                 &commit_opts,
                 revprops,
-                &|_info| Ok(()),
+                None,
+                &mut |_info| Ok(()),
             )
             .unwrap();
 
@@ -4285,7 +4286,8 @@ mod tests {
                 &[wc_path.to_str().unwrap()],
                 &commit_opts,
                 revprops,
-                &|_info| Ok(()),
+                None,
+                &mut |_info| Ok(()),
             )
             .unwrap();
 
@@ -4345,7 +4347,8 @@ mod tests {
                 &[wc_path.to_str().unwrap()],
                 &commit_opts,
                 revprops,
-                &|_info| Ok(()),
+                None,
+                &mut |_info| Ok(()),
             )
             .unwrap();
 
@@ -4432,7 +4435,8 @@ mod tests {
                 &[wc_path.to_str().unwrap()],
                 &commit_opts,
                 revprops,
-                &|_info| Ok(()),
+                None,
+                &mut |_info| Ok(()),
             )
             .unwrap();
 
@@ -4574,7 +4578,8 @@ mod tests {
                 &[wc1_path.to_str().unwrap()],
                 &commit_opts,
                 revprops.clone(),
-                &|_info| Ok(()),
+                None,
+                &mut |_info| Ok(()),
             )
             .unwrap();
 
@@ -4591,7 +4596,8 @@ mod tests {
                 &[wc1_path.to_str().unwrap()],
                 &commit_opts,
                 revprops.clone(),
-                &|_info| Ok(()),
+                None,
+                &mut |_info| Ok(()),
             )
             .unwrap();
 
@@ -4642,7 +4648,8 @@ mod tests {
                 &[wc1_path.to_str().unwrap()],
                 &commit_opts,
                 revprops.clone(),
-                &|_info| Ok(()),
+                None,
+                &mut |_info| Ok(()),
             )
             .unwrap();
 
@@ -4677,7 +4684,8 @@ mod tests {
                 &[wc1_path.to_str().unwrap()],
                 &commit_opts,
                 revprops.clone(),
-                &|_info| Ok(()),
+                None,
+                &mut |_info| Ok(()),
             )
             .unwrap();
 

@@ -132,6 +132,55 @@ extern "C" fn cancel_trampoline(baton: *mut std::ffi::c_void) -> *mut subversion
     }
 }
 
+/// C trampoline for log message callbacks
+extern "C" fn log_msg_trampoline(
+    log_msg: *mut *const std::os::raw::c_char,
+    tmp_file: *mut *const std::os::raw::c_char,
+    commit_items: *const apr_sys::apr_array_header_t,
+    baton: *mut std::ffi::c_void,
+    pool: *mut apr_sys::apr_pool_t,
+) -> *mut subversion_sys::svn_error_t {
+    if baton.is_null() {
+        unsafe {
+            *log_msg = std::ptr::null();
+            *tmp_file = std::ptr::null();
+        }
+        return std::ptr::null_mut();
+    }
+
+    unsafe {
+        let callback = &mut *(baton as *mut &mut dyn FnMut(&[CommitItem]) -> Result<String, Error>);
+
+        // Convert the C array of commit items to a Rust slice
+        let items_vec = if commit_items.is_null() {
+            Vec::new()
+        } else {
+            let array = &*commit_items;
+            let count = array.nelts as usize;
+            let elts = array.elts as *const *const subversion_sys::svn_client_commit_item3_t;
+            (0..count)
+                .map(|i| CommitItem::from_raw(*elts.add(i)))
+                .collect::<Vec<_>>()
+        };
+
+        match callback(&items_vec) {
+            Ok(msg) => {
+                // Allocate the message in the provided pool
+                let pool_handle = apr::PoolHandle::from_borrowed_raw(pool);
+                let duplicated = apr::strings::pstrdup(&msg, &pool_handle).unwrap().as_ptr();
+                *log_msg = duplicated;
+                *tmp_file = std::ptr::null();
+                std::ptr::null_mut()
+            }
+            Err(err) => {
+                *log_msg = std::ptr::null();
+                *tmp_file = std::ptr::null();
+                err.into_raw()
+            }
+        }
+    }
+}
+
 extern "C" fn wrap_proplist_receiver2(
     baton: *mut std::ffi::c_void,
     path: *const i8,
@@ -2090,9 +2139,83 @@ impl InfoOptions {
     }
 }
 
-/// Options for commit
-#[derive(Debug, Clone)]
+/// Represents an item being committed.
+#[derive(Debug)]
+pub struct CommitItem<'a> {
+    ptr: *const subversion_sys::svn_client_commit_item3_t,
+    _marker: std::marker::PhantomData<&'a ()>,
+}
+
+impl<'a> CommitItem<'a> {
+    /// Creates a CommitItem from a raw pointer.
+    fn from_raw(ptr: *const subversion_sys::svn_client_commit_item3_t) -> Self {
+        Self {
+            ptr,
+            _marker: std::marker::PhantomData,
+        }
+    }
+
+    /// Returns the working copy path of the item.
+    pub fn path(&self) -> Option<&std::path::Path> {
+        unsafe {
+            if (*self.ptr).path.is_null() {
+                None
+            } else {
+                Some(
+                    std::ffi::CStr::from_ptr((*self.ptr).path)
+                        .to_str()
+                        .unwrap()
+                        .as_ref(),
+                )
+            }
+        }
+    }
+
+    /// Returns the URL of the item in the repository.
+    pub fn url(&self) -> Option<&str> {
+        unsafe {
+            if (*self.ptr).url.is_null() {
+                None
+            } else {
+                Some(std::ffi::CStr::from_ptr((*self.ptr).url).to_str().unwrap())
+            }
+        }
+    }
+
+    /// Returns the revision of the item's textbase.
+    pub fn revision(&self) -> Revnum {
+        unsafe { Revnum((*self.ptr).revision) }
+    }
+
+    /// Returns the copyfrom URL if this is a copied item.
+    pub fn copyfrom_url(&self) -> Option<&str> {
+        unsafe {
+            if (*self.ptr).copyfrom_url.is_null() {
+                None
+            } else {
+                Some(
+                    std::ffi::CStr::from_ptr((*self.ptr).copyfrom_url)
+                        .to_str()
+                        .unwrap(),
+                )
+            }
+        }
+    }
+
+    /// Returns the copyfrom revision if this is a copied item.
+    pub fn copyfrom_rev(&self) -> Option<Revnum> {
+        unsafe {
+            if (*self.ptr).copyfrom_url.is_null() {
+                None
+            } else {
+                Some(Revnum((*self.ptr).copyfrom_rev))
+            }
+        }
+    }
+}
+
 /// Options for committing changes to the repository.
+#[derive(Debug, Clone)]
 pub struct CommitOptions {
     /// Depth of the commit.
     pub depth: Depth,
@@ -2839,14 +2962,29 @@ impl Context {
     }
 
     /// Commits changes from a working copy to the repository.
+    ///
+    /// # Parameters
+    ///
+    /// * `targets` - Paths to commit
+    /// * `options` - Commit options
+    /// * `revprop_table` - Revision properties. If `log_msg_func` is None and this contains
+    ///   "svn:log", that will be used as the commit message and removed from the revprops
+    ///   passed to SVN.
+    /// * `log_msg_func` - Optional callback to get the log message for the commit. If None,
+    ///   the log message will be extracted from revprop_table["svn:log"] or default to empty.
+    /// * `commit_callback` - Callback called after the commit completes
     pub fn commit(
         &mut self,
         targets: &[&str],
         options: &CommitOptions,
-        revprop_table: std::collections::HashMap<&str, &str>,
-        commit_callback: &dyn FnMut(&crate::CommitInfo) -> Result<(), Error>,
+        mut revprop_table: std::collections::HashMap<&str, &str>,
+        log_msg_func: Option<&mut dyn FnMut(&[CommitItem]) -> Result<String, Error>>,
+        commit_callback: &mut dyn FnMut(&crate::CommitInfo) -> Result<(), Error>,
     ) -> Result<(), Error> {
         with_tmp_pool(|pool| {
+            // Extract svn:log from revprops if present (SVN doesn't allow it in revprop_table)
+            let log_message = revprop_table.remove("svn:log").map(|s| s.to_string());
+
             // Convert revprops to BStr objects that live in the pool
             let svn_strings: Vec<_> = revprop_table
                 .iter()
@@ -2861,6 +2999,25 @@ impl Context {
             );
 
             unsafe {
+                // Create the log message callback
+                // If user provided one, use it; otherwise use the extracted log message
+                let mut default_log_func;
+                let log_msg_callback: &mut dyn FnMut(&[CommitItem]) -> Result<String, Error> =
+                    if let Some(func) = log_msg_func {
+                        func
+                    } else {
+                        default_log_func =
+                            |_items: &[CommitItem]| Ok(log_message.clone().unwrap_or_default());
+                        &mut default_log_func
+                    };
+
+                // Set up the log message callback on the context
+                let log_msg_baton = Box::into_raw(Box::new(log_msg_callback));
+                let old_log_msg_func = (*self.ptr).log_msg_func3;
+                let old_log_msg_baton = (*self.ptr).log_msg_baton3;
+                (*self.ptr).log_msg_func3 = Some(log_msg_trampoline);
+                (*self.ptr).log_msg_baton3 = log_msg_baton as *mut std::ffi::c_void;
+
                 // Keep CStrings alive for the duration of the function
                 let target_cstrings: Vec<std::ffi::CString> = targets
                     .iter()
@@ -2884,7 +3041,7 @@ impl Context {
                 for changelist in &changelist_cstrings {
                     cl.push(changelist.as_ptr() as *mut std::ffi::c_void);
                 }
-                let commit_callback = Box::into_raw(Box::new(commit_callback));
+                let commit_callback_baton = Box::into_raw(Box::new(commit_callback));
                 let err = svn_client_commit6(
                     ps.as_ptr(),
                     options.depth.into(),
@@ -2896,12 +3053,19 @@ impl Context {
                     cl.as_ptr(),
                     rps.as_ptr(),
                     Some(crate::wrap_commit_callback2),
-                    commit_callback as *mut std::ffi::c_void,
+                    commit_callback_baton as *mut std::ffi::c_void,
                     self.ptr,
                     pool.as_mut_ptr(),
                 );
-                // Free the boxed callback to prevent memory leak
-                drop(Box::from_raw(commit_callback));
+
+                // Restore the old log message callback
+                (*self.ptr).log_msg_func3 = old_log_msg_func;
+                (*self.ptr).log_msg_baton3 = old_log_msg_baton;
+
+                // Free the boxed callbacks to prevent memory leak
+                drop(Box::from_raw(log_msg_baton));
+                drop(Box::from_raw(commit_callback_baton));
+
                 Error::from_raw(err)?;
                 Ok(())
             }
@@ -5211,9 +5375,16 @@ impl<'a> CommitBuilder<'a> {
     }
 
     /// Executes the commit operation.
+    ///
+    /// # Parameters
+    ///
+    /// * `log_msg_func` - Optional callback to get the log message for the commit. If None,
+    ///   the log message will be extracted from revprops["svn:log"] or default to empty.
+    /// * `commit_callback` - Callback called after the commit completes
     pub fn execute(
         self,
-        commit_callback: &dyn FnMut(&crate::CommitInfo) -> Result<(), Error>,
+        log_msg_func: Option<&mut dyn FnMut(&[CommitItem]) -> Result<String, Error>>,
+        commit_callback: &mut dyn FnMut(&crate::CommitInfo) -> Result<(), Error>,
     ) -> Result<(), Error> {
         let targets_ref: Vec<&str> = self.targets.iter().map(|s| s.as_str()).collect();
         let revprop_ref: std::collections::HashMap<&str, &str> = self
@@ -5236,8 +5407,13 @@ impl<'a> CommitBuilder<'a> {
             changelists: changelists_vec,
         };
 
-        self.ctx
-            .commit(&targets_ref, &options, revprop_ref, commit_callback)
+        self.ctx.commit(
+            &targets_ref,
+            &options,
+            revprop_ref,
+            log_msg_func,
+            commit_callback,
+        )
     }
 }
 
@@ -8100,6 +8276,7 @@ mod tests {
             &[wc_path.to_str().unwrap()],
             &CommitOptions::default(),
             std::collections::HashMap::new(),
+            Some(&mut |_items| Ok("test commit message".to_string())),
             &mut |_info: &crate::CommitInfo| Ok(()),
         )
         .unwrap();
@@ -8162,6 +8339,7 @@ mod tests {
             &[wc_path.to_str().unwrap()],
             &CommitOptions::default(),
             std::collections::HashMap::new(),
+            Some(&mut |_items| Ok("test commit message".to_string())),
             &mut |_info: &crate::CommitInfo| Ok(()),
         )
         .unwrap();
@@ -8221,6 +8399,7 @@ mod tests {
             &[wc_path.to_str().unwrap()],
             &CommitOptions::default(),
             std::collections::HashMap::new(),
+            Some(&mut |_items| Ok("test commit message".to_string())),
             &mut |_info: &crate::CommitInfo| Ok(()),
         )
         .unwrap();
@@ -8616,7 +8795,7 @@ mod tests {
             .depth(Depth::Infinity);
 
         // Execute the commit
-        let result = builder.execute(&mut |_info| Ok(()));
+        let result = builder.execute(None, &mut |_info| Ok(()));
 
         // Check that the commit succeeded
         assert!(result.is_ok(), "Commit failed: {:?}", result.err());
@@ -8674,7 +8853,8 @@ mod tests {
                 changelists: None,
             },
             std::collections::HashMap::new(), // Empty revprops - svn:log is set through other means
-            &|_info| Ok(()),
+            None,
+            &mut |_info| Ok(()),
         )
         .unwrap();
 
@@ -9227,6 +9407,7 @@ mod tests {
             &[wc_path.to_str().unwrap()],
             &CommitOptions::default(),
             std::collections::HashMap::new(),
+            Some(&mut |_items| Ok("test commit message".to_string())),
             &mut |_info: &crate::CommitInfo| Ok(()),
         )
         .unwrap();
@@ -9254,6 +9435,7 @@ mod tests {
             &[wc_path.to_str().unwrap()],
             &CommitOptions::default(),
             std::collections::HashMap::new(),
+            Some(&mut |_items| Ok("test commit message".to_string())),
             &mut |_info: &crate::CommitInfo| Ok(()),
         )
         .unwrap();
@@ -9269,6 +9451,62 @@ mod tests {
             "Delete without callback should succeed: {:?}",
             result
         );
+    }
+
+    #[test]
+    fn test_commit_with_log_message() {
+        use std::collections::HashMap;
+
+        let td = tempfile::tempdir().unwrap();
+        let repo_path = td.path().join("repo");
+        let wc_path = td.path().join("wc");
+
+        // Create repository
+        crate::repos::Repos::create(&repo_path).unwrap();
+        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        let url = crate::uri::Uri::new(&url_str).unwrap();
+
+        // Checkout
+        let mut ctx = Context::new().unwrap();
+        ctx.checkout(
+            url,
+            &wc_path,
+            &CheckoutOptions {
+                peg_revision: Revision::Head,
+                revision: Revision::Head,
+                depth: Depth::Infinity,
+                ignore_externals: false,
+                allow_unver_obstructions: false,
+            },
+        )
+        .unwrap();
+
+        // Create and add a file
+        let filepath = wc_path.join("test.txt");
+        std::fs::write(&filepath, "content").unwrap();
+        ctx.add(&filepath, &AddOptions::new()).unwrap();
+
+        // Test backward compatibility: commit with svn:log in revprops
+        let mut revprops = HashMap::new();
+        revprops.insert("svn:log", "test message");
+
+        let result = ctx.commit(
+            &[filepath.to_str().unwrap()],
+            &CommitOptions::default(),
+            revprops,
+            None, // No callback, use svn:log from revprops
+            &mut |_info| Ok(()),
+        );
+
+        match &result {
+            Ok(()) => println!("Success with svn:log in revprops!"),
+            Err(e) => {
+                println!("Error: {:?}", e);
+                println!("Error code: {}", e.apr_err());
+            }
+        }
+
+        result.unwrap();
     }
 
     #[test]
@@ -9304,6 +9542,7 @@ mod tests {
             &[wc_path.to_str().unwrap()],
             &CommitOptions::default(),
             std::collections::HashMap::new(),
+            Some(&mut |_items| Ok("test commit message".to_string())),
             &mut |_info: &crate::CommitInfo| Ok(()),
         )
         .unwrap();
@@ -9365,6 +9604,7 @@ mod tests {
             &[wc_path.to_str().unwrap()],
             &CommitOptions::default(),
             std::collections::HashMap::new(),
+            Some(&mut |_items| Ok("test commit message".to_string())),
             &mut |_info: &crate::CommitInfo| Ok(()),
         )
         .unwrap();
@@ -9388,6 +9628,7 @@ mod tests {
             &[wc_path.to_str().unwrap()],
             &CommitOptions::default(),
             std::collections::HashMap::new(),
+            Some(&mut |_items| Ok("test commit message".to_string())),
             &mut |_info: &crate::CommitInfo| Ok(()),
         )
         .unwrap();
@@ -9439,6 +9680,7 @@ mod tests {
             &[wc_path.to_str().unwrap()],
             &CommitOptions::default(),
             std::collections::HashMap::new(),
+            Some(&mut |_items| Ok("test commit message".to_string())),
             &mut |_info: &crate::CommitInfo| Ok(()),
         )
         .unwrap();
@@ -9449,6 +9691,7 @@ mod tests {
             &[wc_path.to_str().unwrap()],
             &CommitOptions::default(),
             std::collections::HashMap::new(),
+            Some(&mut |_items| Ok("test commit message".to_string())),
             &mut |_info: &crate::CommitInfo| Ok(()),
         )
         .unwrap();
@@ -9526,6 +9769,7 @@ mod tests {
             &[wc_path.to_str().unwrap()],
             &CommitOptions::default(),
             std::collections::HashMap::new(),
+            None,
             &mut |info: &crate::CommitInfo| {
                 trunk_rev = info.revision();
                 Ok(())
@@ -9564,6 +9808,7 @@ mod tests {
             &[wc_path.to_str().unwrap()],
             &CommitOptions::default(),
             std::collections::HashMap::new(),
+            Some(&mut |_items| Ok("test commit message".to_string())),
             &mut |_info: &crate::CommitInfo| Ok(()),
         )
         .unwrap();
@@ -9585,6 +9830,7 @@ mod tests {
             &[branch_path.to_str().unwrap()],
             &CommitOptions::default(),
             std::collections::HashMap::new(),
+            Some(&mut |_items| Ok("test commit message".to_string())),
             &mut |_info: &crate::CommitInfo| Ok(()),
         )
         .unwrap();
@@ -9641,6 +9887,7 @@ mod tests {
             &[wc_path.to_str().unwrap()],
             &CommitOptions::default(),
             std::collections::HashMap::new(),
+            Some(&mut |_items| Ok("test commit message".to_string())),
             &mut |_info: &crate::CommitInfo| Ok(()),
         )
         .unwrap();
@@ -9714,7 +9961,8 @@ mod tests {
             &[wc_path.to_str().unwrap()],
             &CommitOptions::default(),
             std::collections::HashMap::new(),
-            &|info| {
+            None,
+            &mut |info| {
                 committed_rev = info.revision();
                 Ok(())
             },
@@ -9920,7 +10168,8 @@ mod tests {
                 &[wc_path.to_str().unwrap()],
                 &commit_opts,
                 revprops,
-                &|_info| Ok(()),
+                None,
+                &mut |_info| Ok(()),
             )
             .unwrap();
 
@@ -10187,7 +10436,8 @@ mod tests {
                 &[wc_path.to_str().unwrap()],
                 &commit_opts,
                 revprops,
-                &|_info| Ok(()),
+                None,
+                &mut |_info| Ok(()),
             )
             .unwrap();
 
@@ -10431,7 +10681,8 @@ mod tests {
                 changelists: None,
             },
             std::collections::HashMap::new(),
-            &|_| Ok(()),
+            None,
+            &mut |_| Ok(()),
         )
         .unwrap();
 
@@ -10463,7 +10714,8 @@ mod tests {
                 changelists: None,
             },
             std::collections::HashMap::new(),
-            &|_| Ok(()),
+            None,
+            &mut |_| Ok(()),
         )
         .unwrap();
 
@@ -10561,7 +10813,8 @@ mod tests {
             &[wc1_str],
             &CommitOptions::default(),
             std::collections::HashMap::new(),
-            &|_| Ok(()),
+            None,
+            &mut |_| Ok(()),
         )
         .unwrap();
 
@@ -10585,7 +10838,8 @@ mod tests {
             &[wc1_str],
             &CommitOptions::default(),
             std::collections::HashMap::new(),
-            &|_| Ok(()),
+            None,
+            &mut |_| Ok(()),
         )
         .unwrap();
 
@@ -10675,7 +10929,8 @@ mod tests {
             &[wc1_str],
             &CommitOptions::default(),
             std::collections::HashMap::new(),
-            &|_| Ok(()),
+            None,
+            &mut |_| Ok(()),
         )
         .unwrap();
 
@@ -10705,7 +10960,8 @@ mod tests {
             &[wc1_str],
             &CommitOptions::default(),
             std::collections::HashMap::new(),
-            &|_| Ok(()),
+            None,
+            &mut |_| Ok(()),
         )
         .unwrap();
 
@@ -10791,7 +11047,8 @@ mod tests {
             &[wc1_str],
             &CommitOptions::default(),
             std::collections::HashMap::new(),
-            &|_| Ok(()),
+            None,
+            &mut |_| Ok(()),
         )
         .unwrap();
 
@@ -10821,7 +11078,8 @@ mod tests {
             &[wc1_str],
             &CommitOptions::default(),
             std::collections::HashMap::new(),
-            &|_| Ok(()),
+            None,
+            &mut |_| Ok(()),
         )
         .unwrap();
 
@@ -10904,7 +11162,8 @@ mod tests {
             &[wc1_str],
             &CommitOptions::default(),
             std::collections::HashMap::new(),
-            &|_| Ok(()),
+            None,
+            &mut |_| Ok(()),
         )
         .unwrap();
 
@@ -10935,7 +11194,8 @@ mod tests {
             &[wc1_str],
             &CommitOptions::default(),
             std::collections::HashMap::new(),
-            &|_| Ok(()),
+            None,
+            &mut |_| Ok(()),
         )
         .unwrap();
 
@@ -11054,7 +11314,8 @@ mod tests {
             &[trunk_str],
             &CommitOptions::default(),
             std::collections::HashMap::new(),
-            &|_| Ok(()),
+            None,
+            &mut |_| Ok(()),
         )
         .unwrap();
 
@@ -11093,7 +11354,8 @@ mod tests {
             &[trunk_str],
             &CommitOptions::default(),
             std::collections::HashMap::new(),
-            &|_| Ok(()),
+            None,
+            &mut |_| Ok(()),
         )
         .unwrap();
 
@@ -11187,7 +11449,8 @@ mod tests {
             &[wc1_str],
             &CommitOptions::default(),
             std::collections::HashMap::new(),
-            &|_| Ok(()),
+            None,
+            &mut |_| Ok(()),
         )
         .unwrap();
 
@@ -11217,7 +11480,8 @@ mod tests {
             &[wc1_str],
             &CommitOptions::default(),
             std::collections::HashMap::new(),
-            &|_| Ok(()),
+            None,
+            &mut |_| Ok(()),
         )
         .unwrap();
 
@@ -11344,7 +11608,8 @@ mod tests {
             &[trunk_wc.to_str().unwrap()],
             &CommitOptions::default(),
             std::collections::HashMap::new(),
-            &|_| Ok(()),
+            None,
+            &mut |_| Ok(()),
         )
         .unwrap();
 
@@ -11394,7 +11659,8 @@ mod tests {
             &[branch_wc.to_str().unwrap()],
             &CommitOptions::default(),
             std::collections::HashMap::new(),
-            &|_| Ok(()),
+            None,
+            &mut |_| Ok(()),
         )
         .unwrap();
 
@@ -11437,7 +11703,8 @@ mod tests {
             &[trunk_wc.to_str().unwrap()],
             &CommitOptions::default(),
             std::collections::HashMap::new(),
-            &|_| Ok(()),
+            None,
+            &mut |_| Ok(()),
         )
         .unwrap();
 
@@ -11519,7 +11786,8 @@ mod tests {
             &[trunk_wc.to_str().unwrap()],
             &CommitOptions::default(),
             std::collections::HashMap::new(),
-            &|_| Ok(()),
+            None,
+            &mut |_| Ok(()),
         )
         .unwrap();
 
@@ -11556,7 +11824,8 @@ mod tests {
             &[branch1_wc.to_str().unwrap()],
             &CommitOptions::default(),
             std::collections::HashMap::new(),
-            &|_| Ok(()),
+            None,
+            &mut |_| Ok(()),
         )
         .unwrap();
 
@@ -11661,7 +11930,8 @@ mod tests {
             &[trunk_wc.to_str().unwrap()],
             &CommitOptions::default(),
             std::collections::HashMap::new(),
-            &|_| Ok(()),
+            None,
+            &mut |_| Ok(()),
         )
         .unwrap();
 
@@ -11697,7 +11967,8 @@ mod tests {
             &[branch_wc.to_str().unwrap()],
             &CommitOptions::default(),
             std::collections::HashMap::new(),
-            &|_| Ok(()),
+            None,
+            &mut |_| Ok(()),
         )
         .unwrap();
 

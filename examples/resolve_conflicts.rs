@@ -60,7 +60,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &[wc1_path.to_str().unwrap()],
         &CommitOptions::default(),
         std::collections::HashMap::new(),
-        &|_| Ok(()),
+        None,
+        &mut |_| Ok(()),
     )?;
 
     // Checkout second working copy
@@ -84,7 +85,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &[wc1_path.to_str().unwrap()],
         &CommitOptions::default(),
         std::collections::HashMap::new(),
-        &|_| Ok(()),
+        None,
+        &mut |_| Ok(()),
     )?;
 
     // Modify same file in wc2 (different change)
@@ -186,7 +188,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &[wc1_path.to_str().unwrap()],
         &CommitOptions::default(),
         std::collections::HashMap::new(),
-        &|_| Ok(()),
+        None,
+        &mut |_| Ok(()),
     )?;
 
     // Set different value in wc2
