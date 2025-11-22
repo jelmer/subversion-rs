@@ -5795,6 +5795,91 @@ impl Context {
         Ok(())
     }
 
+    /// Merge changes from a source into a working copy
+    ///
+    /// This wraps svn_client_merge_peg5 for the common case of merging from a branch.
+    /// Use this for typical merge operations like merging a branch into trunk.
+    ///
+    /// # Arguments
+    /// * `source` - URL or path to merge from
+    /// * `ranges_to_merge` - Revision ranges to merge (empty for automatic merge)
+    /// * `peg_revision` - Peg revision for the source
+    /// * `target_wcpath` - Working copy path to merge into
+    /// * `depth` - Depth for the merge operation
+    /// * `options` - Merge options
+    pub fn merge_peg(
+        &mut self,
+        source: &str,
+        ranges_to_merge: &[crate::mergeinfo::MergeRange],
+        peg_revision: &Revision,
+        target_wcpath: &str,
+        depth: Depth,
+        options: &MergeSourcesOptions,
+    ) -> Result<(), Error> {
+        let pool = Pool::new();
+        let source = std::ffi::CString::new(source)?;
+        let target_wcpath = std::ffi::CString::new(target_wcpath)?;
+
+        // Convert revision ranges to APR array
+        let ranges_array = if ranges_to_merge.is_empty() {
+            std::ptr::null()
+        } else {
+            unsafe {
+                let mut array =
+                    apr::tables::TypedArray::<*mut subversion_sys::svn_merge_range_t>::new(
+                        &pool,
+                        ranges_to_merge.len() as i32,
+                    );
+                for range in ranges_to_merge {
+                    let range_ptr: *mut subversion_sys::svn_merge_range_t = pool.calloc();
+                    (*range_ptr).start = range.start.0;
+                    (*range_ptr).end = range.end.0;
+                    (*range_ptr).inheritable = range.inheritable as i32;
+                    array.push(range_ptr);
+                }
+                array.as_ptr() as *const apr_sys::apr_array_header_t
+            }
+        };
+
+        // Convert merge_options to APR array if provided
+        let merge_opts_array = options.merge_options.as_ref().map(|opts| {
+            let mut array = apr::tables::TypedArray::<*const i8>::new(&pool, opts.len() as i32);
+            let cstrings: Vec<_> = opts
+                .iter()
+                .map(|opt| std::ffi::CString::new(opt.as_str()).unwrap())
+                .collect();
+            for cstring in &cstrings {
+                array.push(cstring.as_ptr());
+            }
+            (array, cstrings)
+        });
+
+        let merge_opts_ptr = merge_opts_array
+            .as_ref()
+            .map_or(std::ptr::null(), |(arr, _)| unsafe { arr.as_ptr() });
+
+        let err = unsafe {
+            subversion_sys::svn_client_merge_peg5(
+                source.as_ptr(),
+                ranges_array,
+                &(*peg_revision).into(),
+                target_wcpath.as_ptr(),
+                depth.into(),
+                options.ignore_mergeinfo as i32,
+                options.diff_ignore_ancestry as i32,
+                options.force_delete as i32,
+                options.record_only as i32,
+                options.dry_run as i32,
+                options.allow_mixed_rev as i32,
+                merge_opts_ptr,
+                self.ptr,
+                pool.as_mut_ptr(),
+            )
+        };
+
+        svn_result(err)
+    }
+
     /// Move (rename) a file or directory
     ///
     /// This wraps svn_client_move7 to perform a versioned move operation.
