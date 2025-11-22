@@ -27,7 +27,13 @@ pub fn initialize() -> Result<(), Error> {
     INIT.call_once(|| {
         // We need a root pool that lives for the duration of the program
         // APR is already initialized by the apr crate
-        let pool = apr::pool::Pool::new();
+        // IMPORTANT: Use Box::leak() to heap-allocate the pool, not std::mem::forget()!
+        // The pool must be on the heap because svn_fs_initialize and svn_ra_initialize
+        // store internal pointers to data allocated within this pool. If the pool wrapper
+        // is on the stack, std::mem::forget() only prevents the destructor from running,
+        // but the stack memory can still be reused, causing use-after-free corruption.
+        let pool = Box::new(apr::pool::Pool::new());
+        let pool = Box::leak(pool);
 
         unsafe {
             // Initialize DSO first (required for dynamic library loading)
@@ -60,8 +66,7 @@ pub fn initialize() -> Result<(), Error> {
                 }
             }
 
-            // Leak the pool so it lives for the duration of the program
-            std::mem::forget(pool);
+            // Pool is already leaked via Box::leak() - it will live for program lifetime
         }
     });
 
