@@ -1364,7 +1364,7 @@ pub(crate) extern "C" fn wrap_commit_callback2(
         let commit_info = crate::CommitInfo::from_raw(commit_info);
         match callback(&commit_info) {
             Ok(()) => std::ptr::null_mut(),
-            Err(mut err) => err.as_mut_ptr(),
+            Err(err) => err.into_raw(),
         }
     }
 }
@@ -1376,12 +1376,12 @@ pub(crate) extern "C" fn wrap_log_entry_receiver(
     _pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
     unsafe {
-        // Use single dereference pattern like commit callback: &mut *(baton as *mut &mut dyn FnMut(...))
+        // Use single dereference pattern like commit callback
         let callback = &mut *(baton as *mut &mut dyn FnMut(&LogEntry) -> Result<(), Error>);
         let log_entry = LogEntry::from_raw(log_entry);
         let ret = callback(&log_entry);
-        if let Err(mut err) = ret {
-            err.as_mut_ptr()
+        if let Err(err) = ret {
+            err.into_raw()
         } else {
             std::ptr::null_mut()
         }

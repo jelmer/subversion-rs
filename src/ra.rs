@@ -1221,7 +1221,7 @@ impl<'a> Session<'a> {
         start: Revnum,
         end: Revnum,
         options: &GetLogOptions,
-        log_receiver: &dyn FnMut(&crate::LogEntry) -> Result<(), Error>,
+        log_receiver: &mut dyn FnMut(&crate::LogEntry) -> Result<(), Error>,
     ) -> Result<(), Error> {
         let pool = Pool::new();
 
@@ -1250,7 +1250,7 @@ impl<'a> Session<'a> {
             revprops_array.push(cstr.as_ptr());
         }
 
-        // Box the reference like commit callback
+        // Box the reference like the original code
         let baton = Box::into_raw(Box::new(log_receiver)) as *mut std::ffi::c_void;
 
         let err = unsafe {
@@ -1270,9 +1270,9 @@ impl<'a> Session<'a> {
             )
         };
 
-        // Clean up the single-boxed callback like the commit function
+        // Clean up the boxed callback
         let _ = unsafe {
-            Box::from_raw(baton as *mut &dyn FnMut(&crate::LogEntry) -> Result<(), Error>)
+            Box::from_raw(baton as *mut &mut dyn FnMut(&crate::LogEntry) -> Result<(), Error>)
         };
 
         Error::from_raw(err)?;
@@ -2493,21 +2493,41 @@ mod tests {
 
         // Try a very simple get_log call without any complex setup
         let mut call_count = 0;
+        let mut log_receiver = |_log_entry: &crate::LogEntry| -> Result<(), Error> {
+            call_count += 1;
+            Ok(())
+        };
         let result = session.get_log(
             &[""],
             crate::Revnum::from(0u32),
             crate::Revnum::from(0u32),
             &GetLogOptions::default(),
-            &|_log_entry| {
-                call_count += 1;
-                Ok(())
-            },
+            &mut log_receiver,
         );
         println!(
             "get_log result: {:?}, calls: {}",
             result.is_ok(),
             call_count
         );
+    }
+
+    #[test]
+    fn test_get_log_with_error() {
+        let (_temp_dir, _repo, mut session, _callbacks) = create_test_repo_with_session();
+
+        // Test callback that returns an error
+        let mut log_receiver = |_log_entry: &crate::LogEntry| -> Result<(), Error> {
+            Err(Error::from_str("Test error from callback"))
+        };
+        let result = session.get_log(
+            &[""],
+            crate::Revnum::from(0u32),
+            crate::Revnum::from(0u32),
+            &GetLogOptions::default(),
+            &mut log_receiver,
+        );
+        println!("get_log with error result: {:?}", result);
+        assert!(result.is_err());
     }
 
     #[test]

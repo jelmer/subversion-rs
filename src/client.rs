@@ -104,8 +104,8 @@ extern "C" fn wrap_status_func(
             _pool: pool_handle,
         };
         let ret = callback(path_str, &status_wrapper);
-        if let Err(mut err) = ret {
-            err.as_mut_ptr()
+        if let Err(err) = ret {
+            err.into_raw()
         } else {
             std::ptr::null_mut()
         }
@@ -166,8 +166,8 @@ extern "C" fn wrap_proplist_receiver2(
             )
         };
         let ret = callback(path, &props, inherited_props.as_deref());
-        if let Err(mut err) = ret {
-            err.as_mut_ptr()
+        if let Err(err) = ret {
+            err.into_raw()
         } else {
             std::ptr::null_mut()
         }
@@ -291,8 +291,8 @@ extern "C" fn wrap_info_receiver2(
             .unwrap()
             .as_ref();
         let ret = callback(abspath_or_url, &Info(info));
-        if let Err(mut err) = ret {
-            err.as_mut_ptr()
+        if let Err(err) = ret {
+            err.into_raw()
         } else {
             std::ptr::null_mut()
         }
@@ -6315,7 +6315,7 @@ impl Context {
                         *filtered = filtered_bool as i32;
                         std::ptr::null_mut()
                     }
-                    Err(mut err) => err.as_mut_ptr(),
+                    Err(err) => err.into_raw(),
                 }
             }
         }
@@ -8806,7 +8806,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&wc_dir);
 
         // Patch should fail since the directory is not a working copy
-        assert!(result.is_err(), "Patch should fail for non-working-copy directory");
+        assert!(
+            result.is_err(),
+            "Patch should fail for non-working-copy directory"
+        );
     }
 
     #[test]
@@ -10949,11 +10952,17 @@ mod tests {
 
         // Check for tree conflict
         let (_text, _props, tree) = conflict.get_conflicted().unwrap();
-        assert!(tree, "Should have tree conflict after deleting file with local modifications");
+        assert!(
+            tree,
+            "Should have tree conflict after deleting file with local modifications"
+        );
 
         // Get tree conflict resolution options
         let options = conflict.tree_get_resolution_options(&mut ctx).unwrap();
-        assert!(!options.is_empty(), "Should have tree conflict resolution options");
+        assert!(
+            !options.is_empty(),
+            "Should have tree conflict resolution options"
+        );
 
         // Verify we can get tree conflict details (this contacts the repository for more info)
         conflict.tree_get_details(&mut ctx).unwrap();
@@ -10988,7 +10997,9 @@ mod tests {
                         ptr: opt.ptr,
                         merged_value_pool: None,
                     };
-                    mutable_opt2.set_moved_to_repos_relpath(0, &mut ctx).unwrap();
+                    mutable_opt2
+                        .set_moved_to_repos_relpath(0, &mut ctx)
+                        .unwrap();
                     break;
                 }
             }
