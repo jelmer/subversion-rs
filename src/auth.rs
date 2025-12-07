@@ -1159,24 +1159,22 @@ pub fn get_username_prompt_provider_boxed(
         baton: *mut std::ffi::c_void,
         realmstring: *const std::ffi::c_char,
         may_save: subversion_sys::svn_boolean_t,
-        _pool: *mut apr_sys::apr_pool_t,
+        pool: *mut apr_sys::apr_pool_t,
     ) -> *mut subversion_sys::svn_error_t {
         let f = unsafe {
             &*(baton as *const Box<dyn Fn(&str, bool) -> Result<String, crate::Error> + Send>)
         };
         let realm = unsafe { std::ffi::CStr::from_ptr(realmstring).to_str().unwrap() };
-        let pool = apr::Pool::new();
+        // SAFETY: SVN provides the pool pointer and owns it. We create a borrowed
+        // handle so the pool is NOT destroyed when it goes out of scope.
+        let svn_pool = unsafe { apr::PoolHandle::from_borrowed_raw(pool) };
 
         f(realm, may_save != 0)
             .map(|username| {
-                unsafe {
-                    let cred = pool.calloc::<subversion_sys::svn_auth_cred_username_t>();
-                    let username_cstr = std::ffi::CString::new(username).unwrap();
-                    (*cred).username =
-                        apr_sys::apr_pstrdup(pool.as_mut_ptr(), username_cstr.as_ptr());
-                    (*cred).may_save = may_save;
-                    *credentials = cred;
-                }
+                // Create credentials in the SVN-provided pool
+                let creds = UsernameCredentials::new(username, may_save != 0, &svn_pool);
+                unsafe { *credentials = creds.ptr as *mut _ };
+                // creds is just a wrapper with a pointer - dropping it is fine
                 std::ptr::null_mut()
             })
             .unwrap_or_else(|e| unsafe { e.into_raw() })

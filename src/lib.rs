@@ -230,6 +230,12 @@ impl Revnum {
         }
     }
 
+    /// Creates an invalid revision number (SVN_INVALID_REVNUM).
+    /// This is used to indicate "no specific revision" in various SVN operations.
+    pub fn invalid() -> Self {
+        Self(-1)
+    }
+
     /// Get the revision number as u64 (for Python compatibility)
     pub fn as_u64(&self) -> u64 {
         self.0 as u64

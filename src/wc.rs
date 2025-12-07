@@ -3448,6 +3448,21 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    /// Ensures the filesystem timestamp will differ from the current time.
+    ///
+    /// Subversion uses APR timestamps (apr_time_t) which have microsecond precision,
+    /// not nanosecond. When files are modified very rapidly (within the same microsecond),
+    /// SVN won't detect the change because the stored timestamp hasn't changed.
+    ///
+    /// This function sleeps for 2 milliseconds to guarantee the next file operation
+    /// will have a different timestamp when truncated to microsecond precision.
+    ///
+    /// Use this in tests after creating/checking out a file and before modifying it
+    /// when you need SVN to detect the modification.
+    fn ensure_timestamp_rollover() {
+        std::thread::sleep(std::time::Duration::from_micros(2000));
+    }
+
     #[test]
     fn test_context_creation() {
         let context = Context::new();
@@ -4604,6 +4619,9 @@ mod tests {
         // In WC2: modify the same line differently
         let file_path2 = wc2_path.join("test.txt");
         std::fs::write(&file_path2, "line1 modified in wc2\nline2\nline3\n").unwrap();
+
+        // Ensure SVN will detect the modification by waiting for timestamp rollover
+        ensure_timestamp_rollover();
 
         // Try to update WC2 - this should create a text conflict
         let update_opts = crate::client::UpdateOptions::default();

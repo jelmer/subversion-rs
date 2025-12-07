@@ -324,6 +324,13 @@ impl Info {
             std::ffi::CStr::from_ptr(author).to_str().unwrap()
         }
     }
+
+    /// Returns the size of the file.
+    /// Only applicable for files, not directories.
+    /// Returns -1 (SVN_INVALID_FILESIZE) for working copy paths.
+    pub fn size(&self) -> i64 {
+        unsafe { (*self.0).size }
+    }
 }
 
 extern "C" fn wrap_info_receiver2(
@@ -3744,7 +3751,7 @@ impl Context {
         &mut self,
         abspath_or_url: &str,
         options: &InfoOptions,
-        receiver: &dyn FnMut(&Info) -> Result<(), Error>,
+        receiver: &dyn FnMut(&std::path::Path, &Info) -> Result<(), Error>,
     ) -> Result<(), Error> {
         with_tmp_pool(|pool| {
             let abspath_or_url = std::ffi::CString::new(abspath_or_url).unwrap();
@@ -4032,8 +4039,28 @@ impl Context {
         actual_revnum: Option<&mut Revnum>,
     ) -> Result<std::collections::HashMap<String, Vec<u8>>, Error> {
         with_tmp_pool(|pool| {
+            // Convert to absolute path if needed (SVN C API requires absolute paths for local files)
+            let target_path = if target.starts_with("http://")
+                || target.starts_with("https://")
+                || target.starts_with("svn://")
+                || target.starts_with("file://")
+            {
+                target.to_string()
+            } else if std::path::Path::new(target).is_absolute() {
+                target.to_string()
+            } else {
+                std::env::current_dir()
+                    .map_err(|e| {
+                        Error::from_str(&format!("Failed to get current directory: {}", e))
+                    })?
+                    .join(target)
+                    .to_str()
+                    .ok_or_else(|| Error::from_str("Path contains invalid UTF-8"))?
+                    .to_string()
+            };
+
             let propname_c = std::ffi::CString::new(propname).unwrap();
-            let target_c = std::ffi::CString::new(target).unwrap();
+            let target_c = std::ffi::CString::new(target_path).unwrap();
 
             // Convert changelists if provided
             let (changelists_array, list_cstrings) = if let Some(lists) = &options.changelists {
@@ -5261,7 +5288,10 @@ impl<'a> InfoBuilder<'a> {
     }
 
     /// Executes the info operation.
-    pub fn execute(self, receiver: &dyn FnMut(&Info) -> Result<(), Error>) -> Result<(), Error> {
+    pub fn execute(
+        self,
+        receiver: &dyn FnMut(&std::path::Path, &Info) -> Result<(), Error>,
+    ) -> Result<(), Error> {
         let options = InfoOptions {
             peg_revision: self.peg_revision,
             revision: self.revision,
@@ -8687,7 +8717,7 @@ mod tests {
             .info_builder(&url_str)
             .depth(Depth::Empty)
             .fetch_excluded(true)
-            .execute(&|_info| {
+            .execute(&|_path, _info| {
                 info_count += 1;
                 Ok(())
             });
