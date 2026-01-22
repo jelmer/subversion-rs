@@ -16,7 +16,7 @@ documentation = "https://docs.rs/subversion"
 doctest = false
 
 [dependencies]
-apr = "0.3"
+apr = "0.4"
 bitflags = "2.10.0"
 apr-sys = "0.2.1"
 atty = "0.2"

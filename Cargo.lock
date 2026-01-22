@@ -13,9 +13,9 @@ dependencies = [
 
 [[package]]
 name = "apr"
-version = "0.3.4"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "064b8fd32de572fda53e9d8e20aa287951d98c000569a5e876df1996dacaa546"
+checksum = "714494283c123b7d73c7c6fe5b71d0f714c701b78e9fb21074c773b53cc3af5e"
 dependencies = [
  "apr-sys",
  "ctor",
