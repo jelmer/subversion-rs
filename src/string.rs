@@ -4,7 +4,7 @@ use subversion_sys::svn_string_t;
 /// Borrowed view of an SVN string tied to pool lifetime
 pub struct BStr<'pool> {
     ptr: *const svn_string_t,
-    _pool: PhantomData<&'pool apr::Pool>,
+    _pool: PhantomData<&'pool apr::Pool<'static>>,
 }
 
 impl<'pool> BStr<'pool> {
@@ -17,7 +17,7 @@ impl<'pool> BStr<'pool> {
     }
 
     /// Create SVN string in pool from bytes
-    pub fn from_bytes(data: &[u8], pool: &'pool apr::Pool) -> Self {
+    pub fn from_bytes(data: &[u8], pool: &'pool apr::Pool<'pool>) -> Self {
         let ptr = unsafe {
             subversion_sys::svn_string_ncreate(
                 data.as_ptr() as *const i8,
@@ -29,14 +29,16 @@ impl<'pool> BStr<'pool> {
     }
 
     /// Create SVN string in pool from str
-    pub fn from_str(s: &str, pool: &'pool apr::Pool) -> Self {
+    pub fn from_str(s: &str, pool: &'pool apr::Pool<'pool>) -> Self {
         Self::from_bytes(s.as_bytes(), pool)
     }
 
+    /// Gets the raw pointer to the SVN string.
     pub fn as_ptr(&self) -> *const svn_string_t {
         self.ptr
     }
 
+    /// Gets a mutable raw pointer to the SVN string.
     pub fn as_mut_ptr(&mut self) -> *mut svn_string_t {
         self.ptr as *mut svn_string_t
     }
@@ -48,7 +50,7 @@ impl<'pool> BStr<'pool> {
         unsafe { std::slice::from_raw_parts(ptr as *const u8, len) }
     }
 
-    /// Convert to owned Vec<u8>
+    /// Convert to owned `Vec<u8>`
     pub fn to_bytes(&self) -> Vec<u8> {
         self.as_bytes().to_vec()
     }
@@ -64,22 +66,13 @@ impl<'pool> BStr<'pool> {
     }
 }
 
-impl<'pool> From<&[u8]> for BStr<'pool> {
-    fn from(data: &[u8]) -> Self {
-        // This is a bit tricky - we need a pool to create the SVN string
-        // For now, create a global pool (not ideal, but works for compatibility)
-        let pool = Box::leak(Box::new(apr::Pool::new()));
-        Self::from_bytes(data, pool)
-    }
-}
-
-impl<'pool> From<&str> for BStr<'pool> {
-    fn from(s: &str) -> Self {
-        Self::from(s.as_bytes())
-    }
-}
+// Note: From implementations were removed to prevent memory leaks.
+// Previously, these implementations used Box::leak() to create a permanent pool,
+// causing unbounded memory growth. Users should use BStr::from_bytes(data, &pool)
+// or BStr::from_str(s, &pool) explicitly to ensure proper pool management.
 
 // For backwards compatibility, keep the old String name as an alias
+/// Type alias for BStr for backwards compatibility.
 pub type String<'pool> = BStr<'pool>;
 
 // BStr can be used directly as values in the new APR hash API

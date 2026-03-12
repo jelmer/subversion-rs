@@ -42,7 +42,7 @@ impl<B: StreamBackend> StreamBuilder<B> {
     }
 
     /// Build the stream with the configured options
-    pub fn build(self) -> Result<Stream, Error> {
+    pub fn build(self) -> Result<Stream, Error<'static>> {
         let stream = Stream::from_backend(self.backend)?;
 
         // Apply configurations
@@ -62,24 +62,27 @@ impl<B: StreamBackend> StreamBuilder<B> {
 /// Extension trait for creating streams from various types
 pub trait IntoStream {
     /// Convert this type into a Stream
-    fn into_stream(self) -> Result<Stream, Error>;
+    fn into_stream(self) -> Result<Stream, Error<'static>>;
 }
 
 impl<T> IntoStream for T
 where
     T: StreamBackend,
 {
-    fn into_stream(self) -> Result<Stream, Error> {
+    fn into_stream(self) -> Result<Stream, Error<'static>> {
         Stream::from_backend(self)
     }
 }
 
 /// Helper to create a buffered stream
-pub fn buffered_stream<B: StreamBackend>(backend: B, buffer_size: usize) -> Result<Stream, Error> {
+pub fn buffered_stream<B: StreamBackend>(
+    backend: B,
+    buffer_size: usize,
+) -> Result<Stream, Error<'static>> {
     StreamBuilder::new(backend).buffer_size(buffer_size).build()
 }
 
 /// Helper to create a lazy stream that opens on first use
-pub fn lazy_stream<B: StreamBackend>(backend: B) -> Result<Stream, Error> {
+pub fn lazy_stream<B: StreamBackend>(backend: B) -> Result<Stream, Error<'static>> {
     StreamBuilder::new(backend).lazy_open().build()
 }

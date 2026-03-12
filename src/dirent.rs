@@ -6,7 +6,7 @@ pub struct Dirent(std::path::PathBuf);
 
 impl Dirent {
     /// Create a new Dirent from a path, canonicalizing it
-    pub fn new(path: impl AsRef<std::path::Path>) -> Result<Self, crate::Error> {
+    pub fn new(path: impl AsRef<std::path::Path>) -> Result<Self, crate::Error<'static>> {
         let canonical = canonicalize_dirent(path.as_ref())?;
         Ok(Dirent(canonical))
     }
@@ -28,22 +28,22 @@ impl Dirent {
     }
 
     /// Join this dirent with another path component using SVN's rules
-    pub fn join(&self, component: impl AsRef<std::path::Path>) -> Result<Dirent, crate::Error> {
+    pub fn join(&self, component: impl AsRef<std::path::Path>) -> Result<Dirent, crate::Error<'_>> {
         join_dirents(self, component)
     }
 
     /// Get the basename (final component) of this dirent
-    pub fn basename(&self) -> Result<Dirent, crate::Error> {
+    pub fn basename(&self) -> Result<Dirent, crate::Error<'_>> {
         basename_dirent(self)
     }
 
     /// Get the dirname (directory component) of this dirent
-    pub fn dirname(&self) -> Result<Dirent, crate::Error> {
+    pub fn dirname(&self) -> Result<Dirent, crate::Error<'_>> {
         dirname_dirent(self)
     }
 
     /// Split this dirent into dirname and basename components
-    pub fn split(&self) -> Result<(Dirent, Dirent), crate::Error> {
+    pub fn split(&self) -> Result<(Dirent, Dirent), crate::Error<'_>> {
         split_dirent(self)
     }
 
@@ -66,8 +66,25 @@ impl Dirent {
     }
 
     /// Get the absolute path from this dirent
-    pub fn get_absolute(&self) -> Result<Dirent, crate::Error> {
+    pub fn get_absolute(&self) -> Result<Dirent, crate::Error<'_>> {
         get_absolute_dirent(self)
+    }
+
+    /// Convert this dirent (local filesystem path) to a file:// URL.
+    pub fn to_file_url(&self) -> Result<crate::uri::Uri, crate::Error<'static>> {
+        with_tmp_pool(|pool| unsafe {
+            let path_cstr = std::ffi::CString::new(self.as_str())?;
+            let mut url_ptr: *const std::ffi::c_char = std::ptr::null();
+            let err = subversion_sys::svn_uri_get_file_url_from_dirent(
+                &mut url_ptr,
+                path_cstr.as_ptr(),
+                pool.as_mut_ptr(),
+            );
+            crate::Error::from_raw(err)?;
+            let url_cstr = std::ffi::CStr::from_ptr(url_ptr);
+            let url_str = url_cstr.to_str()?;
+            crate::uri::Uri::new(url_str)
+        })
     }
 }
 
@@ -90,93 +107,74 @@ impl From<std::path::PathBuf> for Dirent {
     }
 }
 
-/// Validate that a path string is safe for SVN operations
-fn validate_path_string(path_str: &str) -> Result<(), crate::Error> {
-    // Check for null bytes which would cause C string conversion to fail
-    if path_str.contains('\0') {
-        return Err(crate::Error::from_str("Path contains null bytes"));
-    }
-
-    // Check for extremely long paths that might cause issues
-    if path_str.len() > 4096 {
-        return Err(crate::Error::from_str("Path too long"));
-    }
-
-    // Check for some obviously problematic patterns
-    if path_str.contains("\x7f") || path_str.contains("\r") || path_str.contains("\n") {
-        return Err(crate::Error::from_str(
-            "Path contains invalid control characters",
-        ));
-    }
-
-    Ok(())
-}
-
 /// Canonicalize a directory path using SVN's canonicalization rules
-pub fn canonicalize_dirent(path: &std::path::Path) -> Result<std::path::PathBuf, crate::Error> {
-    with_tmp_pool(|pool| unsafe {
-        let path_str = path
-            .to_str()
-            .ok_or_else(|| crate::Error::from_str("Invalid path encoding"))?;
+pub fn canonicalize_dirent(
+    path: &std::path::Path,
+) -> Result<std::path::PathBuf, crate::Error<'static>> {
+    with_tmp_pool(
+        |pool| -> Result<std::path::PathBuf, crate::Error<'static>> {
+            unsafe {
+                let path_str = path
+                    .to_str()
+                    .ok_or_else(|| crate::Error::from_message("Invalid path encoding"))?;
 
-        // Validate the path string before passing to SVN C functions
-        validate_path_string(path_str)?;
-
-        let path_cstr = std::ffi::CString::new(path_str)?;
-        let canonical =
-            subversion_sys::svn_dirent_canonicalize(path_cstr.as_ptr(), pool.as_mut_ptr());
-        let canonical_cstr = std::ffi::CStr::from_ptr(canonical);
-        let canonical_str = canonical_cstr.to_str()?;
-        Ok(std::path::PathBuf::from(canonical_str))
-    })
+                let path_cstr = std::ffi::CString::new(path_str)?;
+                let canonical =
+                    subversion_sys::svn_dirent_canonicalize(path_cstr.as_ptr(), pool.as_mut_ptr());
+                let canonical_cstr = std::ffi::CStr::from_ptr(canonical);
+                let canonical_str = canonical_cstr.to_str()?;
+                Ok(std::path::PathBuf::from(canonical_str))
+            }
+        },
+    )
 }
 
 /// Trait for types that can be converted to canonical directory paths
 pub trait AsCanonicalDirent {
     /// Convert to a canonical Dirent
-    fn as_canonical_dirent(&self) -> Result<Canonical<Dirent>, crate::Error>;
+    fn as_canonical_dirent(&self) -> Result<Canonical<Dirent>, crate::Error<'static>>;
 }
 
 impl AsCanonicalDirent for Dirent {
-    fn as_canonical_dirent(&self) -> Result<Canonical<Dirent>, crate::Error> {
+    fn as_canonical_dirent(&self) -> Result<Canonical<Dirent>, crate::Error<'static>> {
         Ok(self.canonical())
     }
 }
 
 impl AsCanonicalDirent for Canonical<Dirent> {
-    fn as_canonical_dirent(&self) -> Result<Canonical<Dirent>, crate::Error> {
+    fn as_canonical_dirent(&self) -> Result<Canonical<Dirent>, crate::Error<'static>> {
         Ok(self.clone())
     }
 }
 
 impl AsCanonicalDirent for &str {
-    fn as_canonical_dirent(&self) -> Result<Canonical<Dirent>, crate::Error> {
+    fn as_canonical_dirent(&self) -> Result<Canonical<Dirent>, crate::Error<'static>> {
         let dirent = Dirent::new(std::path::Path::new(self))?;
         Ok(dirent.canonical())
     }
 }
 
 impl AsCanonicalDirent for String {
-    fn as_canonical_dirent(&self) -> Result<Canonical<Dirent>, crate::Error> {
+    fn as_canonical_dirent(&self) -> Result<Canonical<Dirent>, crate::Error<'static>> {
         self.as_str().as_canonical_dirent()
     }
 }
 
 impl AsCanonicalDirent for &std::path::Path {
-    fn as_canonical_dirent(&self) -> Result<Canonical<Dirent>, crate::Error> {
+    fn as_canonical_dirent(&self) -> Result<Canonical<Dirent>, crate::Error<'static>> {
         let dirent = Dirent::new(self)?;
         Ok(dirent.canonical())
     }
 }
 
 impl AsCanonicalDirent for std::path::PathBuf {
-    fn as_canonical_dirent(&self) -> Result<Canonical<Dirent>, crate::Error> {
+    fn as_canonical_dirent(&self) -> Result<Canonical<Dirent>, crate::Error<'static>> {
         self.as_path().as_canonical_dirent()
     }
 }
 
 impl AsCanonicalDirent for &std::path::PathBuf {
-    fn as_canonical_dirent(&self) -> Result<Canonical<Dirent>, crate::Error> {
+    fn as_canonical_dirent(&self) -> Result<Canonical<Dirent>, crate::Error<'static>> {
         self.as_path().as_canonical_dirent()
     }
 }
@@ -185,14 +183,12 @@ impl AsCanonicalDirent for &std::path::PathBuf {
 pub fn join_dirents(
     base: &Dirent,
     component: impl AsRef<std::path::Path>,
-) -> Result<Dirent, crate::Error> {
+) -> Result<Dirent, crate::Error<'static>> {
     with_tmp_pool(|pool| unsafe {
         let component_str = component
             .as_ref()
             .to_str()
-            .ok_or_else(|| crate::Error::from_str("Invalid component path"))?;
-        validate_path_string(component_str)?;
-
+            .ok_or_else(|| crate::Error::from_message("Invalid component path"))?;
         // base is already canonical since it's a Dirent
         let base_cstr = std::ffi::CString::new(base.as_str())?;
         let component_cstr = std::ffi::CString::new(component_str)?;
@@ -210,7 +206,7 @@ pub fn join_dirents(
 }
 
 /// Get the basename (final component) of a directory path (type-safe version)
-pub fn basename_dirent(dirent: &Dirent) -> Result<Dirent, crate::Error> {
+pub fn basename_dirent(dirent: &Dirent) -> Result<Dirent, crate::Error<'_>> {
     with_tmp_pool(|pool| unsafe {
         // dirent is already canonical
         let path_cstr = std::ffi::CString::new(dirent.as_str())?;
@@ -223,7 +219,7 @@ pub fn basename_dirent(dirent: &Dirent) -> Result<Dirent, crate::Error> {
 }
 
 /// Get the dirname (directory component) of a directory path (type-safe version)
-pub fn dirname_dirent(dirent: &Dirent) -> Result<Dirent, crate::Error> {
+pub fn dirname_dirent(dirent: &Dirent) -> Result<Dirent, crate::Error<'_>> {
     with_tmp_pool(|pool| unsafe {
         // dirent is already canonical
         let path_cstr = std::ffi::CString::new(dirent.as_str())?;
@@ -236,7 +232,7 @@ pub fn dirname_dirent(dirent: &Dirent) -> Result<Dirent, crate::Error> {
 }
 
 /// Split a directory path into dirname and basename components (type-safe version)
-pub fn split_dirent(dirent: &Dirent) -> Result<(Dirent, Dirent), crate::Error> {
+pub fn split_dirent(dirent: &Dirent) -> Result<(Dirent, Dirent), crate::Error<'_>> {
     with_tmp_pool(|pool| unsafe {
         // dirent is already canonical
         let path_cstr = std::ffi::CString::new(dirent.as_str())?;
@@ -262,7 +258,7 @@ pub fn split_dirent(dirent: &Dirent) -> Result<(Dirent, Dirent), crate::Error> {
 }
 
 /// Check if a directory path is absolute (type-safe version)
-pub fn is_absolute_dirent(dirent: &Dirent) -> Result<bool, crate::Error> {
+pub fn is_absolute_dirent(dirent: &Dirent) -> Result<bool, crate::Error<'_>> {
     let path_cstr = std::ffi::CString::new(dirent.as_str())?;
 
     unsafe {
@@ -272,7 +268,7 @@ pub fn is_absolute_dirent(dirent: &Dirent) -> Result<bool, crate::Error> {
 }
 
 /// Check if a directory path is a root path (type-safe version)
-pub fn is_root_dirent(dirent: &Dirent) -> Result<bool, crate::Error> {
+pub fn is_root_dirent(dirent: &Dirent) -> Result<bool, crate::Error<'_>> {
     let path_str = dirent.as_str();
     let path_cstr = std::ffi::CString::new(path_str)?;
 
@@ -283,7 +279,7 @@ pub fn is_root_dirent(dirent: &Dirent) -> Result<bool, crate::Error> {
 }
 
 /// Check if a directory path is canonical (type-safe version)
-pub fn is_canonical_dirent(dirent: &Dirent) -> Result<bool, crate::Error> {
+pub fn is_canonical_dirent(dirent: &Dirent) -> Result<bool, crate::Error<'_>> {
     with_tmp_pool(|pool| unsafe {
         let path_cstr = std::ffi::CString::new(dirent.as_str())?;
 
@@ -293,7 +289,7 @@ pub fn is_canonical_dirent(dirent: &Dirent) -> Result<bool, crate::Error> {
 }
 
 /// Get the absolute path from a relative path (type-safe version)
-pub fn get_absolute_dirent(dirent: &Dirent) -> Result<Dirent, crate::Error> {
+pub fn get_absolute_dirent(dirent: &Dirent) -> Result<Dirent, crate::Error<'_>> {
     with_tmp_pool(|pool| unsafe {
         let path_cstr = std::ffi::CString::new(dirent.as_str())?;
         let mut absolute_ptr: *const std::ffi::c_char = std::ptr::null();
@@ -313,7 +309,10 @@ pub fn get_absolute_dirent(dirent: &Dirent) -> Result<Dirent, crate::Error> {
 }
 
 /// Get the longest common ancestor of two directory paths
-pub fn get_longest_ancestor(dirent1: &Dirent, dirent2: &Dirent) -> Result<Dirent, crate::Error> {
+pub fn get_longest_ancestor(
+    dirent1: &Dirent,
+    dirent2: &Dirent,
+) -> Result<Dirent, crate::Error<'static>> {
     with_tmp_pool(|pool| unsafe {
         let path1_cstr = std::ffi::CString::new(dirent1.as_str())?;
         let path2_cstr = std::ffi::CString::new(dirent2.as_str())?;
@@ -331,7 +330,7 @@ pub fn get_longest_ancestor(dirent1: &Dirent, dirent2: &Dirent) -> Result<Dirent
 }
 
 /// Check if the child path is a child of the parent path
-pub fn is_child(parent: &Dirent, child: &Dirent) -> Result<Option<Dirent>, crate::Error> {
+pub fn is_child(parent: &Dirent, child: &Dirent) -> Result<Option<Dirent>, crate::Error<'static>> {
     with_tmp_pool(|pool| unsafe {
         let parent_cstr = std::ffi::CString::new(parent.as_str())?;
         let child_cstr = std::ffi::CString::new(child.as_str())?;
@@ -353,7 +352,7 @@ pub fn is_child(parent: &Dirent, child: &Dirent) -> Result<Option<Dirent>, crate
 }
 
 /// Check if one path is an ancestor of another path
-pub fn is_ancestor(ancestor: &Dirent, path: &Dirent) -> Result<bool, crate::Error> {
+pub fn is_ancestor(ancestor: &Dirent, path: &Dirent) -> Result<bool, crate::Error<'static>> {
     let ancestor_cstr = std::ffi::CString::new(ancestor.as_str())?;
     let path_cstr = std::ffi::CString::new(path.as_str())?;
 
@@ -365,7 +364,10 @@ pub fn is_ancestor(ancestor: &Dirent, path: &Dirent) -> Result<bool, crate::Erro
 }
 
 /// Skip the ancestor part of a path, returning the remaining child portion
-pub fn skip_ancestor(ancestor: &Dirent, path: &Dirent) -> Result<Option<Dirent>, crate::Error> {
+pub fn skip_ancestor(
+    ancestor: &Dirent,
+    path: &Dirent,
+) -> Result<Option<Dirent>, crate::Error<'static>> {
     let ancestor_cstr = std::ffi::CString::new(ancestor.as_str())?;
     let path_cstr = std::ffi::CString::new(path.as_str())?;
 
@@ -618,19 +620,10 @@ mod tests {
     }
 
     #[test]
-    fn test_crash_resistance_problematic_inputs() {
-        // Test null bytes - should be rejected, not crash
+    fn test_invalid_inputs() {
+        // Test null bytes - should be rejected by CString::new
         let result = Dirent::new("path\0with\0nulls");
         assert!(result.is_err(), "Should reject null bytes");
-
-        // Test control characters - should be rejected, not crash
-        let result = Dirent::new("path\x7fwith\rcontrol\nchars");
-        assert!(result.is_err(), "Should reject control characters");
-
-        // Test extremely long path - should be rejected, not crash
-        let long_path = "a".repeat(5000);
-        let result = Dirent::new(&long_path);
-        assert!(result.is_err(), "Should reject overly long paths");
 
         // Test empty path - should work
         let dirent = Dirent::new("").unwrap();
@@ -642,7 +635,7 @@ mod tests {
     }
 
     #[test]
-    fn test_relative_absolute_mixed_paths() {
+    fn test_absolute_and_relative() {
         // Absolute paths
         let abs_dirent = Dirent::new("/home/user/project").unwrap();
         assert!(abs_dirent.is_absolute());
@@ -725,35 +718,76 @@ mod tests {
     }
 
     #[test]
-    fn test_edge_cases_all_functions() {
-        // Test with various path types
-        let test_paths = vec![
-            "/",          // Root
-            "",           // Empty
-            "single",     // Single component
-            "/single",    // Absolute single
-            "a/b/c/d/e",  // Deep relative
-            "/a/b/c/d/e", // Deep absolute
-        ];
+    fn test_special_paths() {
+        // Root path
+        let dirent = Dirent::new("/").unwrap();
+        assert_eq!(dirent.basename().unwrap().as_str(), "");
+        assert_eq!(dirent.dirname().unwrap().as_str(), "/");
+        let (dir, base) = dirent.split().unwrap();
+        assert_eq!(dir.as_str(), "/");
+        assert_eq!(base.as_str(), "");
+        assert!(dirent.is_absolute());
+        assert!(dirent.is_root());
+        assert!(dirent.is_canonical());
 
-        for path in test_paths {
-            let dirent = Dirent::new(path).unwrap();
+        // Empty path
+        let dirent = Dirent::new("").unwrap();
+        assert_eq!(dirent.basename().unwrap().as_str(), "");
+        assert_eq!(dirent.dirname().unwrap().as_str(), "");
+        let (dir, base) = dirent.split().unwrap();
+        assert_eq!(dir.as_str(), "");
+        assert_eq!(base.as_str(), "");
+        assert!(!dirent.is_absolute());
+        assert!(!dirent.is_root());
+        assert!(dirent.is_canonical());
 
-            // All these should not crash, even if they return errors
-            let _ = dirent.basename();
-            let _ = dirent.dirname();
-            let _ = dirent.split();
-            let _ = dirent.join("test");
+        // Single relative component
+        let dirent = Dirent::new("single").unwrap();
+        assert_eq!(dirent.basename().unwrap().as_str(), "single");
+        assert_eq!(dirent.dirname().unwrap().as_str(), "");
+        let (dir, base) = dirent.split().unwrap();
+        assert_eq!(dir.as_str(), "");
+        assert_eq!(base.as_str(), "single");
+        assert!(!dirent.is_absolute());
+        assert!(!dirent.is_root());
+        assert!(dirent.is_canonical());
 
-            // These should never crash since dirent is validated
-            let _ = dirent.is_absolute();
-            let _ = dirent.is_root();
-            let _ = dirent.is_canonical();
-        }
+        // Absolute single component
+        let dirent = Dirent::new("/single").unwrap();
+        assert_eq!(dirent.basename().unwrap().as_str(), "single");
+        assert_eq!(dirent.dirname().unwrap().as_str(), "/");
+        let (dir, base) = dirent.split().unwrap();
+        assert_eq!(dir.as_str(), "/");
+        assert_eq!(base.as_str(), "single");
+        assert!(dirent.is_absolute());
+        assert!(!dirent.is_root());
+        assert!(dirent.is_canonical());
+
+        // Deep relative path
+        let dirent = Dirent::new("a/b/c/d/e").unwrap();
+        assert_eq!(dirent.basename().unwrap().as_str(), "e");
+        assert_eq!(dirent.dirname().unwrap().as_str(), "a/b/c/d");
+        let (dir, base) = dirent.split().unwrap();
+        assert_eq!(dir.as_str(), "a/b/c/d");
+        assert_eq!(base.as_str(), "e");
+        assert!(!dirent.is_absolute());
+        assert!(!dirent.is_root());
+        assert!(dirent.is_canonical());
+
+        // Deep absolute path
+        let dirent = Dirent::new("/a/b/c/d/e").unwrap();
+        assert_eq!(dirent.basename().unwrap().as_str(), "e");
+        assert_eq!(dirent.dirname().unwrap().as_str(), "/a/b/c/d");
+        let (dir, base) = dirent.split().unwrap();
+        assert_eq!(dir.as_str(), "/a/b/c/d");
+        assert_eq!(base.as_str(), "e");
+        assert!(dirent.is_absolute());
+        assert!(!dirent.is_root());
+        assert!(dirent.is_canonical());
     }
 
     #[test]
-    fn test_function_pairs_consistency() {
+    fn test_split_matches_basename_dirname() {
         let test_cases = vec!["/home/user/project", "relative/path", "/", "", "single"];
 
         for path in test_cases {
@@ -784,5 +818,26 @@ mod tests {
                 "Join should include component"
             );
         }
+    }
+
+    #[test]
+    fn test_to_file_url() {
+        let dirent = Dirent::new("/tmp").unwrap();
+        let url = dirent.to_file_url().unwrap();
+        assert_eq!(url.as_str(), "file:///tmp");
+    }
+
+    #[test]
+    fn test_to_file_url_root() {
+        let dirent = Dirent::new("/").unwrap();
+        let url = dirent.to_file_url().unwrap();
+        assert_eq!(url.as_str(), "file://");
+    }
+
+    #[test]
+    fn test_to_file_url_nested() {
+        let dirent = Dirent::new("/home/user/project").unwrap();
+        let url = dirent.to_file_url().unwrap();
+        assert_eq!(url.as_str(), "file:///home/user/project");
     }
 }

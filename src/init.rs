@@ -23,14 +23,20 @@ static mut INIT_RESULT: Result<(), String> = Ok(());
 ///
 /// This function uses `std::sync::Once` to ensure thread-safe initialization
 /// even when called concurrently from multiple threads.
-pub fn initialize() -> Result<(), Error> {
+pub fn initialize() -> Result<(), Error<'static>> {
     INIT.call_once(|| {
         // We need a root pool that lives for the duration of the program
         // APR is already initialized by the apr crate
-        let pool = apr::pool::Pool::new();
+        // IMPORTANT: Use Box::leak() to heap-allocate the pool, not std::mem::forget()!
+        // The pool must be on the heap because svn_fs_initialize and svn_ra_initialize
+        // store internal pointers to data allocated within this pool. If the pool wrapper
+        // is on the stack, std::mem::forget() only prevents the destructor from running,
+        // but the stack memory can still be reused, causing use-after-free corruption.
+        let pool = Box::new(apr::pool::Pool::new());
+        let pool = Box::leak(pool);
 
         unsafe {
-            // Initialize DSO first (required for dynamic library loading)
+            // Required for dynamic library loading
             // Note: svn_dso_initialize2 requires APR to be initialized first
             let err = subversion_sys::svn_dso_initialize2();
             if !err.is_null() {
@@ -39,7 +45,6 @@ pub fn initialize() -> Result<(), Error> {
                 return;
             }
 
-            // Initialize filesystem library
             let err = subversion_sys::svn_fs_initialize(pool.as_mut_ptr());
             if !err.is_null() {
                 let error = Error::from_raw(err);
@@ -47,7 +52,6 @@ pub fn initialize() -> Result<(), Error> {
                 return;
             }
 
-            // Initialize repository access library
             // Note: The client library depends on RA, so we need to initialize it
             // whenever either ra or client features are enabled
             #[cfg(any(feature = "ra", feature = "client"))]
@@ -56,12 +60,10 @@ pub fn initialize() -> Result<(), Error> {
                 if !err.is_null() {
                     let error = Error::from_raw(err);
                     INIT_RESULT = Err(format!("Failed to initialize RA: {:?}", error));
-                    return;
                 }
             }
 
-            // Leak the pool so it lives for the duration of the program
-            std::mem::forget(pool);
+            // Pool is already leaked via Box::leak() - it will live for program lifetime
         }
     });
 
@@ -70,7 +72,7 @@ pub fn initialize() -> Result<(), Error> {
         let result_ptr = &raw const INIT_RESULT;
         match &*result_ptr {
             Ok(()) => Ok(()),
-            Err(msg) => Err(Error::from_str(msg)),
+            Err(msg) => Err(Error::from_message(msg)),
         }
     }
 }
@@ -93,7 +95,7 @@ mod tests {
     fn test_initialize_multiple_times() {
         // Should be safe to call multiple times
         for _ in 0..5 {
-            assert!(initialize().is_ok());
+            initialize().unwrap();
         }
     }
 

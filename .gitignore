@@ -1,2 +1,10 @@
 /target
 *~
+.testrepository
+improvements.md
+
+mutants.out/
+mutants.out.old/
+mutants-output.txt
+mutants-results.json/
+mutants-*.txt

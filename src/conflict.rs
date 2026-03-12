@@ -1,16 +1,16 @@
-use crate::{Error, Revnum};
-use apr::pool::Pool;
-use std::ffi::{CStr, CString};
-use std::os::raw::c_void;
+//! Conflict resolution for working copy operations.
 
-/// Type of conflict that occurred
+use crate::{Error, Revnum};
+use std::ffi::CStr;
+
+/// What sort of conflict occurred.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConflictKind {
-    /// Text or content conflict
+    /// Text or content conflict.
     Text,
-    /// Property conflict
+    /// Property conflict.
     Property,
-    /// Tree conflict (structural changes)
+    /// Tree conflict (structural changes like add/delete/move).
     Tree,
 }
 
@@ -20,17 +20,21 @@ impl From<subversion_sys::svn_wc_conflict_kind_t> for ConflictKind {
             0 => ConflictKind::Text,     // svn_wc_conflict_kind_text
             1 => ConflictKind::Property, // svn_wc_conflict_kind_property
             2 => ConflictKind::Tree,     // svn_wc_conflict_kind_tree
-            _ => ConflictKind::Text,     // Default fallback
+            _ => unreachable!("unknown svn_wc_conflict_kind_t value: {}", kind),
         }
     }
 }
 
-/// The action that caused a conflict
+/// The incoming action that caused a conflict.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConflictAction {
+    /// Edit.
     Edit,
+    /// Add.
     Add,
+    /// Delete.
     Delete,
+    /// Replace.
     Replace,
 }
 
@@ -41,22 +45,31 @@ impl From<subversion_sys::svn_wc_conflict_action_t> for ConflictAction {
             1 => ConflictAction::Add,     // svn_wc_conflict_action_add
             2 => ConflictAction::Delete,  // svn_wc_conflict_action_delete
             3 => ConflictAction::Replace, // svn_wc_conflict_action_replace
-            _ => ConflictAction::Edit,
+            _ => unreachable!("unknown svn_wc_conflict_action_t value: {}", action),
         }
     }
 }
 
-/// The reason for a conflict
+/// The local reason for a conflict.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConflictReason {
+    /// Local edit.
     Edited,
+    /// Local obstruction.
     Obstructed,
+    /// Locally deleted.
     Deleted,
+    /// Locally missing.
     Missing,
+    /// Locally unversioned.
     Unversioned,
+    /// Locally added.
     Added,
+    /// Locally replaced.
     Replaced,
+    /// Locally moved away.
     MovedAway,
+    /// Locally moved here.
     MovedHere,
 }
 
@@ -72,21 +85,21 @@ impl From<subversion_sys::svn_wc_conflict_reason_t> for ConflictReason {
             6 => ConflictReason::Replaced,    // svn_wc_conflict_reason_replaced
             7 => ConflictReason::MovedAway,   // svn_wc_conflict_reason_moved_away
             8 => ConflictReason::MovedHere,   // svn_wc_conflict_reason_moved_here
-            _ => ConflictReason::Edited,
+            _ => unreachable!("unknown svn_wc_conflict_reason_t value: {}", reason),
         }
     }
 }
 
-/// Information about one side of a conflict
+/// Information about one side of a conflict.
 #[derive(Debug, Clone)]
 pub struct ConflictVersion {
-    /// Repository root URL
+    /// Repository root URL.
     pub repos_url: String,
-    /// Peg revision
+    /// Peg revision.
     pub peg_revision: Revnum,
-    /// Path in repository
+    /// Path in repository.
     pub path_in_repos: String,
-    /// Node kind
+    /// Node kind.
     pub node_kind: crate::NodeKind,
 }
 
@@ -110,45 +123,50 @@ impl ConflictVersion {
     }
 }
 
-/// Description of a conflict that occurred
+/// Description of a conflict, wrapping `svn_wc_conflict_description2_t`.
 #[derive(Debug, Clone)]
 pub struct ConflictDescription {
-    /// The local path that is in conflict
+    /// Absolute path of the conflicted node.
     pub local_abspath: String,
-    /// The node type involved in this conflict
+    /// Node kind.
     pub node_kind: crate::NodeKind,
-    /// What sort of conflict
+    /// What sort of conflict this is.
     pub kind: ConflictKind,
-    /// Property name (if property conflict)
+    /// Property name, for property conflicts.
     pub property_name: Option<String>,
-    /// Whether the file is binary
+    /// Whether the file is binary.
     pub is_binary: bool,
-    /// MIME type of the file
+    /// MIME type of the file.
     pub mime_type: Option<String>,
-    /// The action that caused the conflict
+    /// The incoming action.
     pub action: ConflictAction,
-    /// The reason for the conflict
+    /// The local reason.
     pub reason: ConflictReason,
-    /// Base file (common ancestor)
+    /// Base file (common ancestor).
     pub base_file: Option<String>,
-    /// Their file (repository version)
+    /// Their file (incoming version).
     pub their_file: Option<String>,
-    /// My file (local version)
+    /// My file (local version).
     pub my_file: Option<String>,
-    /// Merged file (if already merged)
+    /// Merged file, if already merged.
     pub merged_file: Option<String>,
-    /// Left version of the conflict
+    /// Left source version.
     pub src_left_version: Option<ConflictVersion>,
-    /// Right version of the conflict
+    /// Right source version.
     pub src_right_version: Option<ConflictVersion>,
 }
 
 impl ConflictDescription {
-    /// Create from raw SVN conflict description
-    pub unsafe fn from_raw(desc: *const subversion_sys::svn_wc_conflict_description2_t) -> Self {
+    pub(crate) unsafe fn from_raw(
+        desc: *const subversion_sys::svn_wc_conflict_description2_t,
+    ) -> Result<Self, Error<'static>> {
+        if desc.is_null() {
+            return Err(Error::from_message("Null conflict description"));
+        }
+
         let d = &*desc;
 
-        Self {
+        Ok(Self {
             local_abspath: CStr::from_ptr(d.local_abspath)
                 .to_string_lossy()
                 .into_owned(),
@@ -201,32 +219,33 @@ impl ConflictDescription {
             },
             src_left_version: ConflictVersion::from_raw(d.src_left_version),
             src_right_version: ConflictVersion::from_raw(d.src_right_version),
-        }
+        })
     }
 }
 
-/// Resolution choice for a conflict
+/// Resolution choice for a conflict.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConflictChoice {
-    /// Postpone resolution for later
+    /// Postpone resolution.
     Postpone,
-    /// Use base version (original)
+    /// Use base version.
     Base,
-    /// Use their version (incoming changes)
+    /// Accept theirs completely.
     TheirsFull,
-    /// Use my version (local changes)
+    /// Accept mine completely.
     MineFull,
-    /// Use their version for conflicts only
+    /// Use their version for conflict regions only.
     TheirsConflict,
-    /// Use my version for conflicts only
+    /// Use my version for conflict regions only.
     MineConflict,
-    /// Use a merged version
+    /// Use a merged version.
     Merged,
-    /// Undefined (for internal use)
+    /// Undefined / not yet decided.
     Undefined,
 }
 
 impl ConflictChoice {
+    /// Converts the conflict choice to its raw SVN representation.
     pub fn to_raw(&self) -> subversion_sys::svn_wc_conflict_choice_t {
         match self {
             ConflictChoice::Undefined => -1, // svn_wc_conflict_choose_undefined
@@ -240,7 +259,8 @@ impl ConflictChoice {
         }
     }
 
-    /// Convert to client conflict option ID for text conflicts
+    /// Convert to client conflict option ID for text conflicts.
+    #[cfg(feature = "client")]
     pub fn to_text_option_id(&self) -> subversion_sys::svn_client_conflict_option_id_t {
         match self {
             ConflictChoice::Undefined => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_undefined,
@@ -254,27 +274,30 @@ impl ConflictChoice {
         }
     }
 
-    /// Convert to client conflict option ID for tree conflicts
+    /// Convert to client conflict option ID for tree conflicts.
+    #[cfg(feature = "client")]
     pub fn to_tree_option_id(&self) -> subversion_sys::svn_client_conflict_option_id_t {
         match self {
             ConflictChoice::Postpone => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_postpone,
             ConflictChoice::Base => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_accept_current_wc_state,
             ConflictChoice::TheirsFull => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_delete_accept,
             ConflictChoice::MineFull => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_delete_ignore,
-            // For unsupported tree conflict choices, default to postpone
-            _ => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_postpone,
+            ConflictChoice::Undefined
+            | ConflictChoice::TheirsConflict
+            | ConflictChoice::MineConflict
+            | ConflictChoice::Merged => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_postpone,
         }
     }
 }
 
-/// Result of conflict resolution
+/// Result of conflict resolution.
 #[derive(Debug, Clone)]
 pub struct ConflictResult {
-    /// The choice made to resolve the conflict
+    /// The choice made to resolve the conflict.
     pub choice: ConflictChoice,
-    /// Path to merged file (if choice is Merged)
+    /// Path to merged file (if choice is Merged).
     pub merged_file: Option<String>,
-    /// Whether to save the resolution to the working copy
+    /// Whether to save the resolution to the working copy.
     pub save_merged: bool,
 }
 
@@ -288,118 +311,54 @@ impl Default for ConflictResult {
     }
 }
 
-/// Trait for implementing conflict resolution
-pub trait ConflictResolver: Send + Sync {
-    /// Resolve a conflict
-    ///
-    /// This method is called when a conflict is encountered during a merge
-    /// or update operation. The implementation should examine the conflict
-    /// description and return a resolution choice.
-    fn resolve(&mut self, conflict: &ConflictDescription) -> Result<ConflictResult, Error>;
-}
+impl ConflictResult {
+    pub(crate) unsafe fn to_raw(
+        &self,
+        pool: *mut apr_sys::apr_pool_t,
+    ) -> *mut subversion_sys::svn_wc_conflict_result_t {
+        let merged_file_cstr;
+        let merged_file_ptr = if let Some(ref merged_file) = self.merged_file {
+            merged_file_cstr = std::ffi::CString::new(merged_file.as_str()).unwrap();
+            merged_file_cstr.as_ptr()
+        } else {
+            std::ptr::null()
+        };
 
-/// A simple conflict resolver that always makes the same choice
-pub struct SimpleConflictResolver {
-    choice: ConflictChoice,
-}
-
-impl SimpleConflictResolver {
-    /// Create a resolver that always chooses the same resolution
-    pub fn new(choice: ConflictChoice) -> Self {
-        Self { choice }
-    }
-
-    /// Create a resolver that always postpones
-    pub fn postpone() -> Self {
-        Self::new(ConflictChoice::Postpone)
-    }
-
-    /// Create a resolver that always chooses theirs
-    pub fn theirs() -> Self {
-        Self::new(ConflictChoice::TheirsFull)
-    }
-
-    /// Create a resolver that always chooses mine
-    pub fn mine() -> Self {
-        Self::new(ConflictChoice::MineFull)
-    }
-}
-
-impl ConflictResolver for SimpleConflictResolver {
-    fn resolve(&mut self, _conflict: &ConflictDescription) -> Result<ConflictResult, Error> {
-        Ok(ConflictResult {
-            choice: self.choice,
-            merged_file: None,
-            save_merged: false,
-        })
-    }
-}
-
-/// Interactive conflict resolver that prompts the user
-pub struct InteractiveConflictResolver;
-
-impl ConflictResolver for InteractiveConflictResolver {
-    fn resolve(&mut self, conflict: &ConflictDescription) -> Result<ConflictResult, Error> {
-        use std::io::{self, Write};
-
-        println!("\n=== Conflict in {} ===", conflict.local_abspath);
-        println!("Kind: {:?}", conflict.kind);
-        println!(
-            "Action: {:?} vs Reason: {:?}",
-            conflict.action, conflict.reason
+        let result = subversion_sys::svn_wc_create_conflict_result(
+            self.choice.to_raw(),
+            merged_file_ptr,
+            pool,
         );
 
-        if let Some(ref prop) = conflict.property_name {
-            println!("Property: {}", prop);
-        }
+        (*result).save_merged = if self.save_merged { 1 } else { 0 };
 
-        println!("\nOptions:");
-        println!("  (p) Postpone");
-        println!("  (b) Use base/original");
-        println!("  (t) Use theirs (incoming)");
-        println!("  (m) Use mine (local)");
-        println!("  (tc) Use theirs for conflict regions only");
-        println!("  (mc) Use mine for conflict regions only");
-
-        loop {
-            print!("Choice: ");
-            io::stdout().flush().unwrap();
-
-            let mut input = String::new();
-            io::stdin().read_line(&mut input).unwrap();
-
-            let choice = match input.trim() {
-                "p" => ConflictChoice::Postpone,
-                "b" => ConflictChoice::Base,
-                "t" => ConflictChoice::TheirsFull,
-                "m" => ConflictChoice::MineFull,
-                "tc" => ConflictChoice::TheirsConflict,
-                "mc" => ConflictChoice::MineConflict,
-                _ => {
-                    println!("Invalid choice, please try again");
-                    continue;
-                }
-            };
-
-            return Ok(ConflictResult {
-                choice,
-                merged_file: None,
-                save_merged: false,
-            });
-        }
+        result
     }
+}
+
+/// Trait for implementing conflict resolution.
+///
+/// Called when a conflict is encountered during a merge or update operation.
+/// The implementation should examine the conflict description and return a
+/// resolution choice.
+pub trait ConflictResolver: Send + Sync {
+    /// Resolve a conflict, returning the chosen resolution.
+    fn resolve(&mut self, conflict: &ConflictDescription)
+        -> Result<ConflictResult, Error<'static>>;
 }
 
 /// Storage for conflict resolver in client context
+#[cfg(feature = "client")]
 pub(crate) struct ConflictResolverBaton {
     pub resolver: Box<dyn ConflictResolver>,
 }
 
 /// C callback function for conflict resolution
+#[cfg(feature = "client")]
 pub(crate) unsafe extern "C" fn conflict_resolver_callback(
     result: *mut *mut subversion_sys::svn_wc_conflict_result_t,
     description: *const subversion_sys::svn_wc_conflict_description2_t,
-    baton: *mut c_void,
+    baton: *mut std::ffi::c_void,
     result_pool: *mut apr_sys::apr_pool_t,
     _scratch_pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
@@ -408,18 +367,23 @@ pub(crate) unsafe extern "C" fn conflict_resolver_callback(
     }
 
     let resolver_baton = &mut *(baton as *mut ConflictResolverBaton);
-    let conflict_desc = ConflictDescription::from_raw(description);
+    let conflict_desc = match ConflictDescription::from_raw(description) {
+        Ok(desc) => desc,
+        Err(mut e) => {
+            *result = std::ptr::null_mut();
+            return e.detach();
+        }
+    };
 
     match resolver_baton.resolver.resolve(&conflict_desc) {
         Ok(resolution) => {
-            // Allocate result structure in the result pool
-            let pool = Pool::from_raw(result_pool);
+            let pool = unsafe { apr::PoolHandle::from_borrowed_raw(result_pool) };
             let conflict_result: *mut subversion_sys::svn_wc_conflict_result_t = pool.calloc();
 
             (*conflict_result).choice = resolution.choice.to_raw();
 
             if let Some(ref merged_path) = resolution.merged_file {
-                let merged_cstr = CString::new(merged_path.as_str()).unwrap();
+                let merged_cstr = std::ffi::CString::new(merged_path.as_str()).unwrap();
                 (*conflict_result).merged_file =
                     apr::strings::pstrdup_raw(merged_cstr.to_str().unwrap(), &pool).unwrap()
                         as *const _;
@@ -439,30 +403,6 @@ pub(crate) unsafe extern "C" fn conflict_resolver_callback(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_simple_resolver() {
-        let mut resolver = SimpleConflictResolver::theirs();
-        let conflict = ConflictDescription {
-            local_abspath: "/path/to/file".to_string(),
-            node_kind: crate::NodeKind::File,
-            kind: ConflictKind::Text,
-            property_name: None,
-            is_binary: false,
-            mime_type: None,
-            action: ConflictAction::Edit,
-            reason: ConflictReason::Edited,
-            base_file: None,
-            their_file: None,
-            my_file: None,
-            merged_file: None,
-            src_left_version: None,
-            src_right_version: None,
-        };
-
-        let result = resolver.resolve(&conflict).unwrap();
-        assert_eq!(result.choice, ConflictChoice::TheirsFull);
-    }
 
     #[test]
     fn test_conflict_choice_conversion() {

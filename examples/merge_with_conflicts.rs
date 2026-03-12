@@ -1,15 +1,28 @@
 use std::path::Path;
 use subversion::{
     client::{CheckoutOptions, Context},
-    conflict::{
-        ConflictChoice, ConflictDescription, ConflictResolver, ConflictResult,
-        InteractiveConflictResolver, SimpleConflictResolver,
-    },
+    conflict::{ConflictChoice, ConflictDescription, ConflictResolver, ConflictResult},
     merge::{merge_peg, MergeOptions},
     Depth, Error, Revision,
 };
 
-/// A custom conflict resolver that logs conflicts and makes decisions based on file type
+/// A conflict resolver that always picks the same choice.
+struct FixedChoiceResolver(ConflictChoice);
+
+impl ConflictResolver for FixedChoiceResolver {
+    fn resolve(
+        &mut self,
+        _conflict: &ConflictDescription,
+    ) -> Result<ConflictResult, Error<'static>> {
+        Ok(ConflictResult {
+            choice: self.0,
+            merged_file: None,
+            save_merged: false,
+        })
+    }
+}
+
+/// A custom conflict resolver that logs conflicts and makes decisions based on file type.
 struct SmartConflictResolver {
     log_file: std::fs::File,
 }
@@ -26,7 +39,10 @@ impl SmartConflictResolver {
 }
 
 impl ConflictResolver for SmartConflictResolver {
-    fn resolve(&mut self, conflict: &ConflictDescription) -> Result<ConflictResult, Error> {
+    fn resolve(
+        &mut self,
+        conflict: &ConflictDescription,
+    ) -> Result<ConflictResult, Error<'static>> {
         use std::io::Write;
 
         // Log the conflict
@@ -71,7 +87,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Parse command line arguments
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 3 {
-        eprintln!("Usage: {} <repository_url> <working_copy_path> [--interactive|--theirs|--mine|--smart]", args[0]);
+        eprintln!(
+            "Usage: {} <repository_url> <working_copy_path> [--theirs|--mine|--smart]",
+            args[0]
+        );
         std::process::exit(1);
     }
 
@@ -87,17 +106,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Set up conflict resolver based on command line option
     match resolver_type {
-        "--interactive" => {
-            println!("Using interactive conflict resolver");
-            ctx.set_conflict_resolver(InteractiveConflictResolver);
-        }
         "--theirs" => {
             println!("Using automatic resolver: always choose theirs");
-            ctx.set_conflict_resolver(SimpleConflictResolver::theirs());
+            ctx.set_conflict_resolver(FixedChoiceResolver(ConflictChoice::TheirsFull));
         }
         "--mine" => {
             println!("Using automatic resolver: always choose mine");
-            ctx.set_conflict_resolver(SimpleConflictResolver::mine());
+            ctx.set_conflict_resolver(FixedChoiceResolver(ConflictChoice::MineFull));
         }
         "--smart" => {
             println!("Using smart conflict resolver");
@@ -105,7 +120,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         _ => {
             println!("Using default resolver: postpone all conflicts");
-            ctx.set_conflict_resolver(SimpleConflictResolver::postpone());
+            ctx.set_conflict_resolver(FixedChoiceResolver(ConflictChoice::Postpone));
         }
     }
 

@@ -35,7 +35,7 @@ impl From<subversion_sys::svn_hash_diff_key_status> for DiffKeyStatus {
 pub fn read(
     stream: &mut Stream,
     terminator: Option<&str>,
-) -> Result<HashMap<String, String>, Error> {
+) -> Result<HashMap<String, String>, Error<'static>> {
     let pool = apr::Pool::new();
 
     // Create empty APR hash
@@ -44,7 +44,7 @@ pub fn read(
     let terminator_cstr = terminator
         .map(std::ffi::CString::new)
         .transpose()
-        .map_err(|_| Error::from_str("Invalid terminator string"))?;
+        .map_err(|_| Error::from_message("Invalid terminator string"))?;
 
     unsafe {
         let err = subversion_sys::svn_hash_read2(
@@ -113,7 +113,7 @@ pub fn write(
     hash: &HashMap<String, String>,
     stream: &mut Stream,
     terminator: Option<&str>,
-) -> Result<(), Error> {
+) -> Result<(), Error<'static>> {
     let pool = apr::Pool::new();
     let mut apr_hash = apr::hash::Hash::new(&pool);
 
@@ -145,7 +145,7 @@ pub fn write(
     let terminator_cstr = terminator
         .map(std::ffi::CString::new)
         .transpose()
-        .map_err(|_| Error::from_str("Invalid terminator string"))?;
+        .map_err(|_| Error::from_message("Invalid terminator string"))?;
 
     unsafe {
         let err = subversion_sys::svn_hash_write2(
@@ -169,7 +169,7 @@ pub fn write(
 pub fn read_incremental(
     stream: &mut Stream,
     terminator: Option<&str>,
-) -> Result<HashMap<String, String>, Error> {
+) -> Result<HashMap<String, String>, Error<'static>> {
     let pool = apr::Pool::new();
 
     // Create empty APR hash
@@ -178,7 +178,7 @@ pub fn read_incremental(
     let terminator_cstr = terminator
         .map(std::ffi::CString::new)
         .transpose()
-        .map_err(|_| Error::from_str("Invalid terminator string"))?;
+        .map_err(|_| Error::from_message("Invalid terminator string"))?;
 
     unsafe {
         let err = subversion_sys::svn_hash_read_incremental(
@@ -250,7 +250,7 @@ pub fn write_incremental(
     oldhash: &HashMap<String, String>,
     stream: &mut Stream,
     terminator: Option<&str>,
-) -> Result<(), Error> {
+) -> Result<(), Error<'static>> {
     let pool = apr::Pool::new();
 
     // Convert new hash to APR hash
@@ -304,7 +304,7 @@ pub fn write_incremental(
     let terminator_cstr = terminator
         .map(std::ffi::CString::new)
         .transpose()
-        .map_err(|_| Error::from_str("Invalid terminator string"))?;
+        .map_err(|_| Error::from_message("Invalid terminator string"))?;
 
     unsafe {
         let err = subversion_sys::svn_hash_write_incremental(
@@ -330,9 +330,9 @@ pub fn diff<F>(
     hash_a: &HashMap<String, String>,
     hash_b: &HashMap<String, String>,
     diff_func: F,
-) -> Result<(), Error>
+) -> Result<(), Error<'static>>
 where
-    F: FnMut(&str, DiffKeyStatus) -> Result<(), Error>,
+    F: FnMut(&str, DiffKeyStatus) -> Result<(), Error<'static>>,
 {
     let pool = apr::Pool::new();
 
@@ -392,7 +392,7 @@ where
         baton: *mut std::ffi::c_void,
     ) -> *mut subversion_sys::svn_error_t {
         let callback = unsafe {
-            &mut **(baton as *mut Box<dyn FnMut(&str, DiffKeyStatus) -> Result<(), Error>>)
+            &mut **(baton as *mut Box<dyn FnMut(&str, DiffKeyStatus) -> Result<(), Error<'static>>>)
         };
 
         // Convert key to string
@@ -412,7 +412,7 @@ where
         }
     }
 
-    let boxed_callback: Box<Box<dyn FnMut(&str, DiffKeyStatus) -> Result<(), Error>>> =
+    let boxed_callback: Box<Box<dyn FnMut(&str, DiffKeyStatus) -> Result<(), Error<'static>>>> =
         Box::new(Box::new(diff_func));
     let baton = Box::into_raw(boxed_callback) as *mut std::ffi::c_void;
 
@@ -426,7 +426,7 @@ where
         );
         // Free the boxed callback to prevent memory leak
         drop(Box::from_raw(
-            baton as *mut Box<dyn FnMut(&str, DiffKeyStatus) -> Result<(), Error>>,
+            baton as *mut Box<dyn FnMut(&str, DiffKeyStatus) -> Result<(), Error<'static>>>,
         ));
         Error::from_raw(err)?;
     }
@@ -437,7 +437,7 @@ where
 /// Create a hash table from an array of C string keys
 ///
 /// Creates a hash table using the provided keys, with all values set to empty strings.
-pub fn from_cstring_keys(keys: &[&str]) -> Result<HashMap<String, String>, Error> {
+pub fn from_cstring_keys(keys: &[&str]) -> Result<HashMap<String, String>, Error<'static>> {
     let pool = apr::Pool::new();
     let mut keys_array = apr::tables::TypedArray::<*const i8>::new(&pool, keys.len() as i32);
 
@@ -445,7 +445,7 @@ pub fn from_cstring_keys(keys: &[&str]) -> Result<HashMap<String, String>, Error
         .iter()
         .map(|&s| std::ffi::CString::new(s))
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| Error::from_str("Invalid key string"))?;
+        .map_err(|_| Error::from_message("Invalid key string"))?;
 
     for cstring in key_cstrings.iter() {
         keys_array.push(cstring.as_ptr());
@@ -601,24 +601,22 @@ impl<'a> DirentHash<'a> {
     }
 
     /// Convert the dirents to a HashMap<String, crate::Dirent>
-    #[cfg(feature = "ra")]
-    pub fn to_hashmap(&self) -> HashMap<String, crate::ra::Dirent> {
+    pub fn to_hashmap(&self) -> HashMap<String, crate::DirEntry> {
         self.inner
             .iter()
             .map(|(k, v)| {
                 let key = String::from_utf8_lossy(k).into_owned();
-                let dirent = crate::ra::Dirent::from_raw(v as *const _ as *mut _);
+                let dirent = crate::DirEntry::from_raw(v as *const _ as *mut _);
                 (key, dirent)
             })
             .collect()
     }
 
-    /// Iterate over the dirents as (path: &str, dirent: crate::ra::Dirent) pairs
-    #[cfg(feature = "ra")]
-    pub fn iter(&self) -> impl Iterator<Item = (&str, crate::ra::Dirent)> + '_ {
+    /// Iterate over the dirents as (path: &str, dirent: crate::DirEntry) pairs
+    pub fn iter(&self) -> impl Iterator<Item = (&str, crate::DirEntry)> + '_ {
         self.inner.iter().map(|(k, v)| {
             let path = std::str::from_utf8(k).unwrap_or("");
-            let dirent = crate::ra::Dirent::from_raw(v as *const _ as *mut _);
+            let dirent = crate::DirEntry::from_raw(v as *const _ as *mut _);
             (path, dirent)
         })
     }
@@ -700,11 +698,17 @@ impl<'a> FsDirentHash<'a> {
     }
 
     /// Convert the dirents to a HashMap<String, FsDirEntry>
-    pub fn to_hashmap(&self) -> HashMap<String, crate::fs::FsDirEntry> {
+    pub fn to_hashmap(
+        &self,
+        pool: apr::SharedPool<'static>,
+    ) -> HashMap<String, crate::fs::FsDirEntry> {
         let mut result = HashMap::new();
         for (k, v) in self.inner.iter() {
             let name = String::from_utf8_lossy(k).into_owned();
-            let entry = crate::fs::FsDirEntry::from_raw(v as *mut subversion_sys::svn_fs_dirent_t);
+            let entry = crate::fs::FsDirEntry::from_raw(
+                v as *mut subversion_sys::svn_fs_dirent_t,
+                pool.clone(),
+            );
             result.insert(name, entry);
         }
         result

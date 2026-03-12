@@ -1,5 +1,88 @@
+//! Rust bindings for the Subversion version control system.
+//!
+//! This crate provides idiomatic Rust bindings for the Subversion C libraries,
+//! enabling Rust applications to interact with Subversion repositories and working copies.
+//!
+//! # Overview
+//!
+//! The `subversion` crate provides bindings to Subversion's functionality through
+//! several modules, each corresponding to a major component of the Subversion API:
+//!
+//! - **`client`** - High-level client operations (checkout, commit, update, diff, merge, etc.)
+//! - **`wc`** - Working copy management and status operations
+//! - **`ra`** - Repository access layer for network operations
+//! - **`repos`** - Repository administration (create, load, dump, verify)
+//! - **`fs`** - Filesystem layer for direct repository access
+//! - **`delta`** - Editor interface for efficient tree transformations
+//!
+//! # Features
+//!
+//! Enable specific functionality via Cargo features:
+//!
+//! - `client` - Client operations
+//! - `wc` - Working copy management
+//! - `ra` - Repository access layer
+//! - `delta` - Delta/editor operations
+//! - `repos` - Repository administration
+//! - `url` - URL parsing utilities
+//!
+//! Default features: `["ra", "wc", "client", "delta", "repos"]`
+//!
+//! # Error Handling
+//!
+//! All operations return a [`Result<T, Error<'static>>`](Error) where [`Error`] wraps Subversion's
+//! error chain. Errors can be inspected for detailed information:
+//!
+//! ```no_run
+//! use subversion::client::Context;
+//!
+//! let mut ctx = Context::new().unwrap();
+//! match ctx.checkout("https://svn.example.com/repo", "/tmp/wc", None, true) {
+//!     Ok(_) => println!("Checkout succeeded"),
+//!     Err(e) => {
+//!         eprintln!("Error: {}", e.full_message());
+//!         eprintln!("At: {:?}", e.location());
+//!     }
+//! }
+//! ```
+//!
+//! # Thread Safety
+//!
+//! The Subversion libraries are not thread-safe. Each thread should have its own
+//! [`client::Context`] or other Subversion objects.
+
+#![deny(missing_docs)]
+#![allow(clippy::type_complexity)]
+#![allow(clippy::too_many_arguments)]
+
 // Re-export apr_sys for internal use
 extern crate apr_sys;
+
+/// Internal trait for converting Rust strings to C strings.
+pub(crate) trait ToCString {
+    /// Convert to a C string, returning an error if the string contains null bytes.
+    fn to_cstring(&self) -> Result<std::ffi::CString, Error<'static>>;
+}
+
+impl ToCString for str {
+    fn to_cstring(&self) -> Result<std::ffi::CString, Error<'static>> {
+        std::ffi::CString::new(self).map_err(Error::from)
+    }
+}
+
+impl ToCString for std::path::Path {
+    fn to_cstring(&self) -> Result<std::ffi::CString, Error<'static>> {
+        self.to_str()
+            .ok_or_else(|| Error::from_message("Invalid UTF-8 in path"))?
+            .to_cstring()
+    }
+}
+
+impl ToCString for String {
+    fn to_cstring(&self) -> Result<std::ffi::CString, Error<'static>> {
+        self.as_str().to_cstring()
+    }
+}
 
 /// Helper to create temporary pools for FFI calls
 pub(crate) fn with_tmp_pool<R>(f: impl FnOnce(&apr::Pool) -> R) -> R {
@@ -8,47 +91,86 @@ pub(crate) fn with_tmp_pool<R>(f: impl FnOnce(&apr::Pool) -> R) -> R {
 }
 
 /// Convert SVN error to Rust Result
-pub(crate) fn svn_result(code: *mut subversion_sys::svn_error_t) -> Result<(), Error> {
+pub(crate) fn svn_result(code: *mut subversion_sys::svn_error_t) -> Result<(), Error<'static>> {
     Error::from_raw(code)
 }
 
+/// Authentication and credential management.
 pub mod auth;
+/// Base64 encoding and decoding.
+pub mod base64;
+/// Cache configuration and management.
+#[cfg(feature = "cache")]
 pub mod cache;
+/// Subversion client operations.
 #[cfg(feature = "client")]
 pub mod client;
+/// Command-line utilities and helpers.
+#[cfg(feature = "cmdline")]
 pub mod cmdline;
+/// Configuration file handling.
 pub mod config;
-#[cfg(feature = "client")]
+/// Conflict resolution for working copy operations.
+#[cfg(feature = "wc")]
 pub mod conflict;
+/// Delta editor for tree modifications.
 #[cfg(feature = "delta")]
 pub mod delta;
+/// Diff generation and processing.
 pub mod diff;
+/// Directory entry operations.
 pub mod dirent;
+/// Error handling types and utilities.
 pub mod error;
+/// Filesystem backend for repositories.
 pub mod fs;
+/// Hash table utilities.
 pub mod hash;
+/// Initialization utilities.
 pub mod init;
+/// Input/output stream handling.
 pub mod io;
+/// Iterator utilities for Subversion data structures.
 pub mod iter;
+/// Merge operations for branches.
 #[cfg(feature = "client")]
 pub mod merge;
+/// Merge tracking information.
 pub mod mergeinfo;
+/// Native language support and internationalization.
+#[cfg(feature = "nls")]
+pub mod nls;
+/// Option parsing and command-line argument handling.
 pub mod opt;
+/// Path manipulation utilities for local paths and URLs.
+pub mod path;
+/// Property management for versioned items.
 pub mod props;
+/// Repository access layer for remote operations.
 #[cfg(feature = "ra")]
 pub mod ra;
+/// Repository administration and management.
+#[cfg(feature = "repos")]
 pub mod repos;
-pub mod sorts;
+/// String manipulation utilities.
 pub mod string;
+/// Keyword and EOL substitution.
 pub mod subst;
+/// Time and date utilities.
 pub mod time;
+/// URI manipulation and validation.
 pub mod uri;
+/// UTF-8 string validation and conversion.
+#[cfg(feature = "utf")]
+pub mod utf;
+/// Version information and compatibility checking.
 pub mod version;
+/// Working copy management and operations.
 #[cfg(feature = "wc")]
 pub mod wc;
+/// X.509 certificate handling.
+#[cfg(feature = "x509")]
 pub mod x509;
-pub mod xml;
-
 use bitflags::bitflags;
 use std::str::FromStr;
 use subversion_sys::{svn_opt_revision_t, svn_opt_revision_value_t};
@@ -56,19 +178,90 @@ use subversion_sys::{svn_opt_revision_t, svn_opt_revision_value_t};
 pub use version::Version;
 
 // Re-export important types for API consumers
+#[cfg(feature = "repos")]
 pub use repos::{LoadUUID, Notify};
 
 bitflags! {
+    /// Flags indicating which fields are present in a directory entry.
     pub struct DirentField: u32 {
+        /// Node kind field is present.
         const Kind = subversion_sys::SVN_DIRENT_KIND;
+        /// File size field is present.
         const Size = subversion_sys::SVN_DIRENT_SIZE;
+        /// Has properties field is present.
         const HasProps = subversion_sys::SVN_DIRENT_HAS_PROPS;
+        /// Created revision field is present.
         const CreatedRevision = subversion_sys::SVN_DIRENT_CREATED_REV;
+        /// Modification time field is present.
         const Time = subversion_sys::SVN_DIRENT_TIME;
+        /// Last author field is present.
         const LastAuthor = subversion_sys::SVN_DIRENT_LAST_AUTHOR;
     }
 }
 
+/// Directory entry information from the repository.
+///
+/// Wraps `svn_dirent_t`, which describes a directory entry with metadata
+/// such as node kind, size, properties, revision, time, and author.
+#[allow(dead_code)]
+pub struct DirEntry {
+    ptr: *mut subversion_sys::svn_dirent_t,
+    _phantom: std::marker::PhantomData<*mut ()>,
+}
+
+impl DirEntry {
+    /// Creates a DirEntry from a raw pointer.
+    pub fn from_raw(ptr: *mut subversion_sys::svn_dirent_t) -> Self {
+        Self {
+            ptr,
+            _phantom: std::marker::PhantomData,
+        }
+    }
+
+    /// Get the node kind (file, directory, etc.)
+    pub fn kind(&self) -> NodeKind {
+        unsafe { (*self.ptr).kind.into() }
+    }
+
+    /// Get the size of the file (SVN_INVALID_FILESIZE for directories)
+    pub fn size(&self) -> i64 {
+        unsafe { (*self.ptr).size }
+    }
+
+    /// Check if the node has properties
+    pub fn has_props(&self) -> bool {
+        unsafe { (*self.ptr).has_props != 0 }
+    }
+
+    /// Get the revision in which this node was created/last changed
+    pub fn created_rev(&self) -> Option<Revnum> {
+        unsafe {
+            let rev = (*self.ptr).created_rev;
+            Revnum::from_raw(rev)
+        }
+    }
+
+    /// Get the time of created_rev (modification time)
+    pub fn time(&self) -> apr::time::Time {
+        unsafe { apr::time::Time::from((*self.ptr).time) }
+    }
+
+    /// Get the author of created_rev
+    pub fn last_author(&self) -> Option<&str> {
+        unsafe {
+            let author_ptr = (*self.ptr).last_author;
+            if author_ptr.is_null() {
+                None
+            } else {
+                Some(std::ffi::CStr::from_ptr(author_ptr).to_str().unwrap())
+            }
+        }
+    }
+}
+
+unsafe impl Send for DirEntry {}
+
+/// A Subversion revision number.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
 pub struct Revnum(subversion_sys::svn_revnum_t);
 
@@ -115,12 +308,20 @@ impl From<Revnum> for u64 {
 }
 
 impl Revnum {
+    /// Creates a Revnum from a raw svn_revnum_t value.
+    /// Returns None if the value is negative (invalid revision).
     pub fn from_raw(raw: subversion_sys::svn_revnum_t) -> Option<Self> {
         if raw < 0 {
             None
         } else {
             Some(Self(raw))
         }
+    }
+
+    /// Creates an invalid revision number (SVN_INVALID_REVNUM).
+    /// This is used to indicate "no specific revision" in various SVN operations.
+    pub fn invalid() -> Self {
+        Self(-1)
     }
 
     /// Get the revision number as u64 (for Python compatibility)
@@ -329,18 +530,78 @@ mod tests {
         assert!(fnv.has_known_size(4));
         assert!(!fnv.has_known_size(16));
     }
+
+    #[test]
+    fn test_checksum_from_digest_md5() {
+        let pool = apr::Pool::new();
+        let data = b"Hello, World!";
+
+        // Create a checksum the normal way
+        let expected = checksum(ChecksumKind::MD5, data, &pool).unwrap();
+        let digest = expected.digest().to_vec();
+
+        // Create from raw digest bytes
+        let reconstructed = Checksum::from_digest(ChecksumKind::MD5, &digest, &pool).unwrap();
+
+        assert!(expected.matches(&reconstructed));
+        assert_eq!(reconstructed.kind(), ChecksumKind::MD5);
+        assert_eq!(reconstructed.size(), 16);
+    }
+
+    #[test]
+    fn test_checksum_from_digest_sha1() {
+        let pool = apr::Pool::new();
+        let data = b"Hello, World!";
+
+        let expected = checksum(ChecksumKind::SHA1, data, &pool).unwrap();
+        let digest = expected.digest().to_vec();
+
+        let reconstructed = Checksum::from_digest(ChecksumKind::SHA1, &digest, &pool).unwrap();
+
+        assert!(expected.matches(&reconstructed));
+        assert_eq!(reconstructed.kind(), ChecksumKind::SHA1);
+        assert_eq!(reconstructed.size(), 20);
+    }
+
+    #[test]
+    fn test_checksum_from_digest_wrong_length() {
+        let pool = apr::Pool::new();
+
+        let result = Checksum::from_digest(ChecksumKind::MD5, &[0u8; 10], &pool);
+        assert!(result.is_err());
+
+        let result = Checksum::from_digest(ChecksumKind::SHA1, &[0u8; 10], &pool);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_checksum_from_digest_unsupported_kind() {
+        let pool = apr::Pool::new();
+
+        let result = Checksum::from_digest(ChecksumKind::Fnv1a32, &[0u8; 4], &pool);
+        assert!(result.is_err());
+    }
 }
 
+/// A revision specification.
 #[derive(Debug, Default, Clone, Copy)]
 pub enum Revision {
+    /// No revision specified.
     #[default]
     Unspecified,
+    /// A specific revision number.
     Number(Revnum),
+    /// A revision at a specific date/time.
     Date(i64),
+    /// The last committed revision.
     Committed,
+    /// The revision before the last committed revision.
     Previous,
+    /// The base revision of the working copy.
     Base,
+    /// The working copy revision.
     Working,
+    /// The latest revision in the repository.
     Head,
 }
 
@@ -375,29 +636,6 @@ impl FromStr for Revision {
     }
 }
 
-#[cfg(feature = "pyo3")]
-impl pyo3::FromPyObject<'_, '_> for Revision {
-    type Error = pyo3::PyErr;
-
-    fn extract(ob: pyo3::Borrowed<'_, '_, pyo3::PyAny>) -> pyo3::PyResult<Self> {
-        use pyo3::prelude::*;
-        if ob.is_instance_of::<pyo3::types::PyString>() {
-            let rev = ob.extract::<String>()?;
-            return Revision::from_str(&rev).map_err(|e| {
-                pyo3::exceptions::PyValueError::new_err(format!("Invalid revision: {}", e))
-            });
-        } else if ob.is_instance_of::<pyo3::types::PyInt>() {
-            let rev = ob.extract::<i64>()?;
-            return Ok(Revision::Number(Revnum::from_raw(rev).unwrap()));
-        } else {
-            Err(pyo3::exceptions::PyTypeError::new_err(format!(
-                "Invalid revision: {:?}",
-                ob
-            )))
-        }
-    }
-}
-
 impl From<Revnum> for Revision {
     fn from(revnum: Revnum) -> Self {
         Revision::Number(revnum)
@@ -411,35 +649,22 @@ impl From<Revision> for svn_opt_revision_t {
                 kind: subversion_sys::svn_opt_revision_kind_svn_opt_revision_unspecified,
                 value: svn_opt_revision_value_t::default(),
             },
-            Revision::Number(revnum) => {
-                let mut uf = subversion_sys::__BindgenUnionField::<i64>::new();
-                unsafe {
-                    *uf.as_mut() = revnum.0;
-                }
-
-                svn_opt_revision_t {
-                    kind: subversion_sys::svn_opt_revision_kind_svn_opt_revision_number,
-                    value: svn_opt_revision_value_t {
-                        number: uf,
-                        ..Default::default()
-                    },
-                }
-            }
-            Revision::Date(date) => {
-                let mut uf = subversion_sys::__BindgenUnionField::<i64>::new();
-
-                unsafe {
-                    *uf.as_mut() = date;
-                }
-
-                svn_opt_revision_t {
-                    kind: subversion_sys::svn_opt_revision_kind_svn_opt_revision_date,
-                    value: svn_opt_revision_value_t {
-                        date: uf,
-                        ..Default::default()
-                    },
-                }
-            }
+            Revision::Number(revnum) => svn_opt_revision_t {
+                kind: subversion_sys::svn_opt_revision_kind_svn_opt_revision_number,
+                value: svn_opt_revision_value_t {
+                    number: Default::default(),
+                    date: Default::default(),
+                    bindgen_union_field: revnum.0 as u64,
+                },
+            },
+            Revision::Date(date) => svn_opt_revision_t {
+                kind: subversion_sys::svn_opt_revision_kind_svn_opt_revision_date,
+                value: svn_opt_revision_value_t {
+                    number: Default::default(),
+                    date: Default::default(),
+                    bindgen_union_field: date as u64,
+                },
+            },
             Revision::Committed => svn_opt_revision_t {
                 kind: subversion_sys::svn_opt_revision_kind_svn_opt_revision_committed,
                 value: svn_opt_revision_value_t::default(),
@@ -481,19 +706,26 @@ impl From<svn_opt_revision_t> for Revision {
             subversion_sys::svn_opt_revision_kind_svn_opt_revision_base => Revision::Base,
             subversion_sys::svn_opt_revision_kind_svn_opt_revision_working => Revision::Working,
             subversion_sys::svn_opt_revision_kind_svn_opt_revision_head => Revision::Head,
-            _ => Revision::Unspecified,
+            _ => unreachable!("unknown svn_opt_revision_kind value: {}", revision.kind),
         }
     }
 }
 
+/// The depth of a Subversion operation.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Depth {
+    /// Depth not specified or unknown.
     #[default]
     Unknown,
+    /// Exclude the item.
     Exclude,
+    /// Just the item itself.
     Empty,
+    /// The item and its file children.
     Files,
+    /// The item and its immediate children.
     Immediates,
+    /// The item and all descendants.
     Infinity,
 }
 
@@ -540,36 +772,15 @@ impl std::str::FromStr for Depth {
     }
 }
 
-#[cfg(feature = "pyo3")]
-impl pyo3::FromPyObject<'_, '_> for Depth {
-    type Error = pyo3::PyErr;
-
-    fn extract(ob: pyo3::Borrowed<'_, '_, pyo3::PyAny>) -> pyo3::PyResult<Self> {
-        use pyo3::prelude::*;
-        if ob.is_instance_of::<pyo3::types::PyString>() {
-            let depth = ob.extract::<String>()?;
-            return Depth::from_str(&depth).map_err(|e| {
-                pyo3::exceptions::PyValueError::new_err(format!("Invalid depth: {}", e))
-            });
-        } else if ob.is_instance_of::<pyo3::types::PyBool>() {
-            let depth = ob.extract::<bool>()?;
-            return Ok(if depth { Depth::Infinity } else { Depth::Empty });
-        } else {
-            Err(pyo3::exceptions::PyTypeError::new_err(format!(
-                "Invalid depth: {:?}",
-                ob
-            )))
-        }
-    }
-}
-
+/// Information about a committed revision.
 pub struct CommitInfo<'pool> {
     ptr: *const subversion_sys::svn_commit_info_t,
-    _pool: std::marker::PhantomData<&'pool apr::Pool>,
+    _pool: std::marker::PhantomData<&'pool apr::Pool<'static>>,
 }
 unsafe impl Send for CommitInfo<'_> {}
 
 impl<'pool> CommitInfo<'pool> {
+    /// Creates a CommitInfo from a raw pointer.
     pub fn from_raw(ptr: *const subversion_sys::svn_commit_info_t) -> Self {
         Self {
             ptr,
@@ -577,23 +788,35 @@ impl<'pool> CommitInfo<'pool> {
         }
     }
 
+    /// Returns the revision number of the commit.
     pub fn revision(&self) -> Revnum {
         Revnum::from_raw(unsafe { (*self.ptr).revision }).unwrap()
     }
 
-    pub fn date(&self) -> &str {
+    /// Returns the date of the commit.
+    pub fn date(&self) -> Option<&str> {
         unsafe {
             let date = (*self.ptr).date;
-            std::ffi::CStr::from_ptr(date).to_str().unwrap()
+            if date.is_null() {
+                None
+            } else {
+                std::ffi::CStr::from_ptr(date).to_str().ok()
+            }
         }
     }
 
-    pub fn author(&self) -> &str {
+    /// Returns the author of the commit.
+    pub fn author(&self) -> Option<&str> {
         unsafe {
             let author = (*self.ptr).author;
-            std::ffi::CStr::from_ptr(author).to_str().unwrap()
+            if author.is_null() {
+                None
+            } else {
+                std::ffi::CStr::from_ptr(author).to_str().ok()
+            }
         }
     }
+    /// Returns any post-commit error message.
     pub fn post_commit_err(&self) -> Option<&str> {
         unsafe {
             let err = (*self.ptr).post_commit_err;
@@ -604,6 +827,7 @@ impl<'pool> CommitInfo<'pool> {
             }
         }
     }
+    /// Returns the repository root URL.
     pub fn repos_root(&self) -> &str {
         unsafe {
             let repos_root = (*self.ptr).repos_root;
@@ -611,7 +835,8 @@ impl<'pool> CommitInfo<'pool> {
         }
     }
 
-    pub fn dup(&self, pool: &'pool apr::Pool) -> Result<CommitInfo<'pool>, Error> {
+    /// Duplicates the commit info in the given pool.
+    pub fn dup(&self, pool: &'pool apr::Pool<'pool>) -> Result<CommitInfo<'pool>, Error<'_>> {
         unsafe {
             let duplicated = subversion_sys::svn_commit_info_dup(self.ptr, pool.as_mut_ptr());
             Ok(CommitInfo::from_raw(duplicated))
@@ -619,13 +844,17 @@ impl<'pool> CommitInfo<'pool> {
     }
 }
 
+/// A range of revisions.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct RevisionRange {
+    /// Starting revision of the range.
     pub start: Revision,
+    /// Ending revision of the range.
     pub end: Revision,
 }
 
 impl RevisionRange {
+    /// Creates a new revision range.
     pub fn new(start: Revision, end: Revision) -> Self {
         Self { start, end }
     }
@@ -633,14 +862,24 @@ impl RevisionRange {
 
 impl From<&RevisionRange> for subversion_sys::svn_opt_revision_range_t {
     fn from(range: &RevisionRange) -> Self {
+        // Store converted revisions to avoid use-after-free
+        let start_c: svn_opt_revision_t = range.start.into();
+        let end_c: svn_opt_revision_t = range.end.into();
         Self {
-            start: range.start.into(),
-            end: range.end.into(),
+            start: start_c,
+            end: end_c,
         }
     }
 }
 
 impl RevisionRange {
+    /// Converts to a C revision range structure.
+    ///
+    /// # Safety
+    ///
+    /// The returned pointer is allocated in the provided pool and will be valid
+    /// for the lifetime of that pool. The caller must ensure the pool outlives
+    /// any use of the returned pointer.
     pub unsafe fn to_c(&self, pool: &apr::Pool) -> *mut subversion_sys::svn_opt_revision_range_t {
         let range = pool.calloc::<subversion_sys::svn_opt_revision_range_t>();
         *range = self.into();
@@ -648,13 +887,15 @@ impl RevisionRange {
     }
 }
 
+/// A log entry from the repository history.
 pub struct LogEntry<'pool> {
     ptr: *const subversion_sys::svn_log_entry_t,
-    _pool: std::marker::PhantomData<&'pool apr::Pool>,
+    _pool: std::marker::PhantomData<&'pool apr::Pool<'static>>,
 }
 unsafe impl Send for LogEntry<'_> {}
 
 impl<'pool> LogEntry<'pool> {
+    /// Creates a LogEntry from a raw pointer.
     pub fn from_raw(ptr: *const subversion_sys::svn_log_entry_t) -> Self {
         Self {
             ptr,
@@ -662,13 +903,15 @@ impl<'pool> LogEntry<'pool> {
         }
     }
 
-    pub fn dup(&self, pool: &'pool apr::Pool) -> Result<LogEntry<'pool>, Error> {
+    /// Duplicates the log entry in the given pool.
+    pub fn dup(&self, pool: &'pool apr::Pool<'pool>) -> Result<LogEntry<'pool>, Error<'_>> {
         unsafe {
             let duplicated = subversion_sys::svn_log_entry_dup(self.ptr, pool.as_mut_ptr());
             Ok(LogEntry::from_raw(duplicated))
         }
     }
 
+    /// Returns the raw pointer to the log entry.
     pub fn as_ptr(&self) -> *const subversion_sys::svn_log_entry_t {
         self.ptr
     }
@@ -704,24 +947,16 @@ impl<'pool> LogEntry<'pool> {
                 return None;
             }
 
-            let prop_key = std::ffi::CString::new(prop_name).ok()?;
-            let value_ptr = apr_sys::apr_hash_get(
-                revprops,
-                prop_key.as_ptr() as *const std::ffi::c_void,
-                apr_sys::APR_HASH_KEY_STRING as apr_sys::apr_ssize_t,
-            );
+            // Use TypedHash directly to get a reference with the correct lifetime
+            let hash = apr::hash::TypedHash::<subversion_sys::svn_string_t>::from_ptr(revprops);
+            let svn_string = hash.get_ref(prop_name)?;
 
-            if value_ptr.is_null() {
-                return None;
-            }
-
-            let svn_string = value_ptr as *const subversion_sys::svn_string_t;
-            if svn_string.is_null() || (*svn_string).data.is_null() {
+            if svn_string.data.is_null() {
                 return None;
             }
 
             let data_slice =
-                std::slice::from_raw_parts((*svn_string).data as *const u8, (*svn_string).len);
+                std::slice::from_raw_parts(svn_string.data as *const u8, svn_string.len);
             std::str::from_utf8(data_slice).ok()
         }
     }
@@ -730,21 +965,173 @@ impl<'pool> LogEntry<'pool> {
     pub fn has_children(&self) -> bool {
         unsafe { (*self.ptr).has_children != 0 }
     }
+
+    /// Whether this revision should be interpreted as non-inheritable
+    ///
+    /// Only set when this log entry is returned by the mergeinfo APIs.
+    pub fn non_inheritable(&self) -> bool {
+        unsafe { (*self.ptr).non_inheritable != 0 }
+    }
+
+    /// Whether this revision is a merged revision resulting from a reverse merge
+    pub fn subtractive_merge(&self) -> bool {
+        unsafe { (*self.ptr).subtractive_merge != 0 }
+    }
+
+    /// Get all revision properties as a HashMap
+    pub fn revprops(&self) -> std::collections::HashMap<String, Vec<u8>> {
+        unsafe {
+            let revprops = (*self.ptr).revprops;
+            if revprops.is_null() {
+                return std::collections::HashMap::new();
+            }
+
+            let hash = apr::hash::TypedHash::<subversion_sys::svn_string_t>::from_ptr(revprops);
+            let mut result = std::collections::HashMap::new();
+            for (key, svn_string) in hash.iter() {
+                if !svn_string.data.is_null() {
+                    let data_slice =
+                        std::slice::from_raw_parts(svn_string.data as *const u8, svn_string.len);
+                    let key_str = std::str::from_utf8(key)
+                        .expect("revprop key is not valid UTF-8")
+                        .to_string();
+                    result.insert(key_str, data_slice.to_vec());
+                }
+            }
+            result
+        }
+    }
+
+    /// Get the changed paths for this log entry
+    ///
+    /// Returns None if changed paths were not requested in the log operation.
+    pub fn changed_paths(&self) -> Option<std::collections::HashMap<String, LogChangedPath>> {
+        unsafe {
+            let changed_paths2 = (*self.ptr).changed_paths2;
+            if changed_paths2.is_null() {
+                return None;
+            }
+
+            let hash = apr::hash::TypedHash::<subversion_sys::svn_log_changed_path2_t>::from_ptr(
+                changed_paths2,
+            );
+            let mut result = std::collections::HashMap::new();
+            for (key, changed_path) in hash.iter() {
+                let key_str = std::str::from_utf8(key)
+                    .expect("changed path key is not valid UTF-8")
+                    .to_string();
+                result.insert(key_str, LogChangedPath::from_raw(changed_path));
+            }
+            Some(result)
+        }
+    }
 }
 
+/// A log entry that owns its backing memory pool.
+///
+/// Created by log iterator APIs to allow log entries to be sent across threads
+/// and outlive the callback scope they were created in.
+pub struct OwnedLogEntry {
+    entry: LogEntry<'static>,
+    _pool: apr::Pool<'static>,
+}
+
+impl OwnedLogEntry {
+    /// Create an owned copy of a log entry by duplicating it into a new pool.
+    pub fn from_log_entry(entry: &LogEntry) -> Self {
+        let pool = apr::Pool::new();
+        let duped_ptr =
+            unsafe { subversion_sys::svn_log_entry_dup(entry.as_ptr(), pool.as_mut_ptr()) };
+        Self {
+            entry: LogEntry::from_raw(duped_ptr),
+            _pool: pool,
+        }
+    }
+}
+
+// Safety: the pool and entry are co-owned; the entry's pointers reference
+// memory allocated in the pool, and the pool is only dropped when the
+// OwnedLogEntry is dropped.
+unsafe impl Send for OwnedLogEntry {}
+
+impl std::ops::Deref for OwnedLogEntry {
+    type Target = LogEntry<'static>;
+    fn deref(&self) -> &Self::Target {
+        &self.entry
+    }
+}
+
+/// A changed path entry from a log entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LogChangedPath {
+    /// The action: 'A'dd, 'D'elete, 'R'eplace, 'M'odify
+    pub action: char,
+    /// Source path of copy (if any)
+    pub copyfrom_path: Option<String>,
+    /// Source revision of copy (if any)
+    pub copyfrom_rev: Option<Revnum>,
+    /// The type of the node
+    pub node_kind: NodeKind,
+    /// Whether text was modified (None if unknown)
+    pub text_modified: Option<bool>,
+    /// Whether properties were modified (None if unknown)
+    pub props_modified: Option<bool>,
+}
+
+impl LogChangedPath {
+    fn from_raw(raw: &subversion_sys::svn_log_changed_path2_t) -> Self {
+        let copyfrom_path = if raw.copyfrom_path.is_null() {
+            None
+        } else {
+            unsafe {
+                Some(
+                    std::ffi::CStr::from_ptr(raw.copyfrom_path)
+                        .to_string_lossy()
+                        .into_owned(),
+                )
+            }
+        };
+
+        let copyfrom_rev = Revnum::from_raw(raw.copyfrom_rev);
+
+        fn tristate_to_option(ts: subversion_sys::svn_tristate_t) -> Option<bool> {
+            match ts {
+                subversion_sys::svn_tristate_t_svn_tristate_false => Some(false),
+                subversion_sys::svn_tristate_t_svn_tristate_true => Some(true),
+                _ => None, // svn_tristate_unknown
+            }
+        }
+
+        Self {
+            action: raw.action as u8 as char,
+            copyfrom_path,
+            copyfrom_rev,
+            node_kind: raw.node_kind.into(),
+            text_modified: tristate_to_option(raw.text_modified),
+            props_modified: tristate_to_option(raw.props_modified),
+        }
+    }
+}
+
+/// File size type.
 pub type FileSize = subversion_sys::svn_filesize_t;
 
+/// Native end-of-line style.
 #[derive(Debug, Clone, Copy, Default)]
 pub enum NativeEOL {
+    /// Use the standard EOL for the platform.
     #[default]
     Standard,
+    /// Unix-style line feed.
     LF,
+    /// Windows-style carriage return + line feed.
     CRLF,
+    /// Mac-style carriage return.
     CR,
 }
 
 impl TryFrom<Option<&str>> for NativeEOL {
-    type Error = crate::Error;
+    type Error = crate::Error<'static>;
 
     fn try_from(eol: Option<&str>) -> Result<Self, Self::Error> {
         match eol {
@@ -772,12 +1159,14 @@ impl From<NativeEOL> for Option<&str> {
     }
 }
 
+/// An inherited property item.
 pub struct InheritedItem<'pool> {
     ptr: *const subversion_sys::svn_prop_inherited_item_t,
-    _pool: std::marker::PhantomData<&'pool apr::Pool>,
+    _pool: std::marker::PhantomData<&'pool apr::Pool<'static>>,
 }
 
 impl<'pool> InheritedItem<'pool> {
+    /// Creates an InheritedItem from a raw pointer.
     pub fn from_raw(ptr: *const subversion_sys::svn_prop_inherited_item_t) -> Self {
         Self {
             ptr,
@@ -785,6 +1174,7 @@ impl<'pool> InheritedItem<'pool> {
         }
     }
 
+    /// Returns the path or URL of the item.
     pub fn path_or_url(&self) -> &str {
         unsafe {
             let path_or_url = (*self.ptr).path_or_url;
@@ -793,6 +1183,7 @@ impl<'pool> InheritedItem<'pool> {
     }
 }
 
+/// A canonicalized path or URL.
 #[derive(Clone)]
 pub struct Canonical<T>(T);
 
@@ -821,20 +1212,31 @@ where
 
 impl<T> Eq for Canonical<T> where T: Eq {}
 
+/// The kind of a node in the repository.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NodeKind {
+    /// Not a node.
     None,
+    /// Regular file.
     File,
+    /// Directory.
     Dir,
+    /// Unknown node kind.
     Unknown,
+    /// Symbolic link.
     Symlink,
 }
 
+/// The kind of change made to a path in the filesystem.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FsPathChangeKind {
+    /// Path was modified.
     Modify,
+    /// Path was added.
     Add,
+    /// Path was deleted.
     Delete,
+    /// Path was replaced.
     Replace,
 }
 
@@ -853,7 +1255,34 @@ impl From<subversion_sys::svn_fs_path_change_kind_t> for FsPathChangeKind {
             subversion_sys::svn_fs_path_change_kind_t_svn_fs_path_change_replace => {
                 FsPathChangeKind::Replace
             }
-            _ => FsPathChangeKind::Modify, // Default case
+            _ => unreachable!("unknown svn_fs_path_change_kind_t value: {}", kind),
+        }
+    }
+}
+
+/// The relationship between two nodes in the filesystem.
+///
+/// Returned by [`fs::Root::node_relation`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NodeRelation {
+    /// The nodes share no common ancestor; they are completely unrelated.
+    Unrelated,
+    /// The nodes are identical: same content, same properties, same sub-tree
+    /// structure.  They have a common ancestor.
+    Unchanged,
+    /// The nodes have a common ancestor but differ from each other.
+    CommonAncestor,
+}
+
+impl From<subversion_sys::svn_fs_node_relation_t> for NodeRelation {
+    fn from(r: subversion_sys::svn_fs_node_relation_t) -> Self {
+        match r {
+            subversion_sys::svn_fs_node_relation_t_svn_fs_node_unrelated => NodeRelation::Unrelated,
+            subversion_sys::svn_fs_node_relation_t_svn_fs_node_unchanged => NodeRelation::Unchanged,
+            subversion_sys::svn_fs_node_relation_t_svn_fs_node_common_ancestor => {
+                NodeRelation::CommonAncestor
+            }
+            _ => unreachable!("unknown svn_fs_node_relation_t value: {}", r),
         }
     }
 }
@@ -883,21 +1312,36 @@ impl From<NodeKind> for subversion_sys::svn_node_kind_t {
     }
 }
 
+/// The status of a working copy item.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StatusKind {
+    /// No status.
     None,
+    /// Not under version control.
     Unversioned,
+    /// Normal status.
     Normal,
+    /// Scheduled for addition.
     Added,
+    /// Missing from working copy.
     Missing,
+    /// Scheduled for deletion.
     Deleted,
+    /// Replaced in the working copy.
     Replaced,
+    /// Modified in the working copy.
     Modified,
+    /// Merged from another branch.
     Merged,
+    /// Has conflicts.
     Conflicted,
+    /// Ignored by version control.
     Ignored,
+    /// Obstructed by an unversioned item.
     Obstructed,
+    /// External definition.
     External,
+    /// Incomplete status.
     Incomplete,
 }
 
@@ -946,20 +1390,34 @@ impl From<StatusKind> for subversion_sys::svn_wc_status_kind {
     }
 }
 
-pub struct Lock<'pool> {
+/// A lock on a path in the repository.
+///
+/// The lock data is allocated in a pool. The lifetime parameter ensures
+/// the lock doesn't outlive the object it was obtained from (e.g., Session or Fs).
+pub struct Lock<'a> {
     ptr: *const subversion_sys::svn_lock_t,
-    _pool: std::marker::PhantomData<&'pool apr::Pool>,
+    _pool: apr::PoolHandle<'static>,
+    _lifetime: std::marker::PhantomData<&'a ()>,
 }
+
 unsafe impl Send for Lock<'_> {}
 
-impl<'pool> Lock<'pool> {
-    pub fn from_raw(ptr: *const subversion_sys::svn_lock_t) -> Self {
+impl<'a> Lock<'a> {
+    /// Creates a Lock from a raw pointer with a pool.
+    ///
+    /// The lock data must be allocated in the provided pool.
+    pub fn from_raw(
+        ptr: *const subversion_sys::svn_lock_t,
+        pool: apr::PoolHandle<'static>,
+    ) -> Self {
         Self {
             ptr,
-            _pool: std::marker::PhantomData,
+            _pool: pool,
+            _lifetime: std::marker::PhantomData,
         }
     }
 
+    /// Returns the path that is locked.
     pub fn path(&self) -> &str {
         unsafe {
             let path = (*self.ptr).path;
@@ -967,13 +1425,17 @@ impl<'pool> Lock<'pool> {
         }
     }
 
-    pub fn dup(&self, pool: &'pool apr::Pool) -> Result<Lock<'pool>, Error> {
+    /// Duplicates the lock in a new pool.
+    pub fn dup(&self) -> Result<Lock<'static>, Error<'_>> {
+        let pool = apr::Pool::new();
         unsafe {
             let duplicated = subversion_sys::svn_lock_dup(self.ptr, pool.as_mut_ptr());
-            Ok(Lock::from_raw(duplicated))
+            let pool_handle = apr::PoolHandle::owned(pool);
+            Ok(Lock::from_raw(duplicated, pool_handle))
         }
     }
 
+    /// Returns the lock token.
     pub fn token(&self) -> &str {
         unsafe {
             let token = (*self.ptr).token;
@@ -981,6 +1443,7 @@ impl<'pool> Lock<'pool> {
         }
     }
 
+    /// Returns the owner of the lock.
     pub fn owner(&self) -> &str {
         unsafe {
             let owner = (*self.ptr).owner;
@@ -988,6 +1451,7 @@ impl<'pool> Lock<'pool> {
         }
     }
 
+    /// Returns the lock comment.
     pub fn comment(&self) -> &str {
         unsafe {
             let comment = (*self.ptr).comment;
@@ -995,31 +1459,42 @@ impl<'pool> Lock<'pool> {
         }
     }
 
+    /// Returns true if the comment is a DAV comment.
     pub fn is_dav_comment(&self) -> bool {
         unsafe { (*self.ptr).is_dav_comment == 1 }
     }
 
+    /// Returns the creation date of the lock.
     pub fn creation_date(&self) -> i64 {
         unsafe { (*self.ptr).creation_date }
     }
 
+    /// Returns the expiration date of the lock.
     pub fn expiration_date(&self) -> apr::time::Time {
         apr::time::Time::from(unsafe { (*self.ptr).expiration_date })
     }
 
-    pub fn create(pool: &'pool apr::Pool) -> Result<Lock<'pool>, Error> {
+    /// Creates a new lock in a new pool.
+    pub fn create() -> Result<Lock<'static>, Error<'static>> {
+        let pool = apr::Pool::new();
         unsafe {
             let lock_ptr = subversion_sys::svn_lock_create(pool.as_mut_ptr());
-            Ok(Lock::from_raw(lock_ptr))
+            let pool_handle = apr::PoolHandle::owned(pool);
+            Ok(Lock::from_raw(lock_ptr, pool_handle))
         }
     }
 }
 
+/// The kind of checksum algorithm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChecksumKind {
+    /// MD5 checksum.
     MD5,
+    /// SHA1 checksum.
     SHA1,
+    /// FNV-1a 32-bit checksum.
     Fnv1a32,
+    /// FNV-1a 32-bit x4 checksum.
     Fnv1a32x4,
 }
 
@@ -1046,13 +1521,15 @@ impl From<ChecksumKind> for subversion_sys::svn_checksum_kind_t {
     }
 }
 
+/// A segment of a location in the repository history.
 pub struct LocationSegment<'pool> {
     ptr: *const subversion_sys::svn_location_segment_t,
-    _pool: std::marker::PhantomData<&'pool apr::Pool>,
+    _pool: std::marker::PhantomData<&'pool apr::Pool<'static>>,
 }
 unsafe impl Send for LocationSegment<'_> {}
 
 impl<'pool> LocationSegment<'pool> {
+    /// Creates a LocationSegment from a raw pointer.
     pub fn from_raw(ptr: *const subversion_sys::svn_location_segment_t) -> Self {
         Self {
             ptr,
@@ -1060,13 +1537,15 @@ impl<'pool> LocationSegment<'pool> {
         }
     }
 
-    pub fn dup(&self, pool: &'pool apr::Pool) -> Result<LocationSegment<'pool>, Error> {
+    /// Duplicates the location segment in the given pool.
+    pub fn dup(&self, pool: &'pool apr::Pool<'pool>) -> Result<LocationSegment<'pool>, Error<'_>> {
         unsafe {
             let duplicated = subversion_sys::svn_location_segment_dup(self.ptr, pool.as_mut_ptr());
             Ok(LocationSegment::from_raw(duplicated))
         }
     }
 
+    /// Returns the revision range for this segment.
     pub fn range(&self) -> std::ops::Range<Revnum> {
         unsafe {
             Revnum::from_raw((*self.ptr).range_end).unwrap()
@@ -1074,6 +1553,7 @@ impl<'pool> LocationSegment<'pool> {
         }
     }
 
+    /// Returns the path for this segment.
     pub fn path(&self) -> &str {
         unsafe {
             let path = (*self.ptr).path;
@@ -1090,36 +1570,29 @@ pub(crate) extern "C" fn wrap_commit_callback2(
 ) -> *mut subversion_sys::svn_error_t {
     unsafe {
         let callback =
-            &mut *(baton as *mut &mut dyn FnMut(&crate::CommitInfo) -> Result<(), Error>);
+            &mut *(baton as *mut &mut dyn FnMut(&crate::CommitInfo) -> Result<(), Error<'static>>);
         let commit_info = crate::CommitInfo::from_raw(commit_info);
         match callback(&commit_info) {
             Ok(()) => std::ptr::null_mut(),
-            Err(mut err) => err.as_mut_ptr(),
+            Err(err) => err.into_raw(),
         }
     }
 }
 
-#[cfg(any(feature = "ra", feature = "client"))]
+#[cfg(any(feature = "ra", feature = "client", feature = "repos"))]
 pub(crate) extern "C" fn wrap_log_entry_receiver(
     baton: *mut std::ffi::c_void,
     log_entry: *mut subversion_sys::svn_log_entry_t,
     _pool: *mut apr_sys::apr_pool_t,
 ) -> *mut subversion_sys::svn_error_t {
-    eprintln!(
-        "wrap_log_entry_receiver called with baton={:p}, log_entry={:p}",
-        baton, log_entry
-    );
     unsafe {
-        // Use single dereference pattern like commit callback: &mut *(baton as *mut &mut dyn FnMut(...))
-        eprintln!("  Casting baton to single-boxed callback");
-        let callback = &mut *(baton as *mut &mut dyn FnMut(&LogEntry) -> Result<(), Error>);
-        eprintln!("  Creating LogEntry from raw");
+        // Use single dereference pattern like commit callback
+        let callback =
+            &mut *(baton as *mut &mut dyn FnMut(&LogEntry) -> Result<(), Error<'static>>);
         let log_entry = LogEntry::from_raw(log_entry);
-        eprintln!("  Calling callback");
         let ret = callback(&log_entry);
-        eprintln!("  Callback returned, processing result");
-        if let Err(mut err) = ret {
-            err.as_mut_ptr()
+        if let Err(err) = ret {
+            err.into_raw()
         } else {
             std::ptr::null_mut()
         }
@@ -1129,7 +1602,8 @@ pub(crate) extern "C" fn wrap_log_entry_receiver(
 extern "C" fn wrap_cancel_func(
     cancel_baton: *mut std::ffi::c_void,
 ) -> *mut subversion_sys::svn_error_t {
-    let cancel_check = unsafe { &*(cancel_baton as *const Box<dyn Fn() -> Result<(), Error>>) };
+    let cancel_check =
+        unsafe { &*(cancel_baton as *const Box<dyn Fn() -> Result<(), Error<'static>>>) };
     match cancel_check() {
         Ok(()) => std::ptr::null_mut(),
         Err(e) => unsafe { e.into_raw() },
@@ -1174,7 +1648,7 @@ impl From<TextConflictChoice> for subversion_sys::svn_client_conflict_option_id_
     }
 }
 
-/// Conflict resolution choice for tree conflicts  
+/// Conflict resolution choice for tree conflicts
 #[cfg(feature = "client")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TreeConflictChoice {
@@ -1194,29 +1668,64 @@ pub enum TreeConflictChoice {
     IgnoreIncomingAdd,
 }
 
+#[cfg(feature = "client")]
+impl From<TreeConflictChoice> for subversion_sys::svn_client_conflict_option_id_t {
+    fn from(choice: TreeConflictChoice) -> Self {
+        match choice {
+            TreeConflictChoice::Postpone => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_postpone,
+            TreeConflictChoice::AcceptCurrentState => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_accept_current_wc_state,
+            TreeConflictChoice::AcceptIncomingDelete => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_delete_accept,
+            TreeConflictChoice::IgnoreIncomingDelete => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_delete_ignore,
+            TreeConflictChoice::UpdateMoveDestination => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_update_move_destination,
+            TreeConflictChoice::AcceptIncomingAdd => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_add_ignore,
+            TreeConflictChoice::IgnoreIncomingAdd => subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_delete_ignore,
+        }
+    }
+}
+
 /// Client conflict option ID that maps directly to svn_client_conflict_option_id_t
 #[cfg(feature = "client")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClientConflictOptionId {
+    /// Undefined or uninitialized option
     Undefined,
+    /// Postpone the conflict resolution
     Postpone,
+    /// Use the base text (common ancestor)
     BaseText,
+    /// Use the incoming text from the merge
     IncomingText,
+    /// Use the working text (local changes)
     WorkingText,
+    /// Use incoming text only where there are conflicts
     IncomingTextWhereConflicted,
+    /// Use working text only where there are conflicts
     WorkingTextWhereConflicted,
+    /// Use the merged text
     MergedText,
+    /// Unspecified option
     Unspecified,
+    /// Accept the current working copy state
     AcceptCurrentWcState,
+    /// Update the move destination
     UpdateMoveDestination,
+    /// Update any children that were moved away
     UpdateAnyMovedAwayChildren,
+    /// Ignore the incoming addition
     IncomingAddIgnore,
+    /// Merge the incoming added file text
     IncomingAddedFileTextMerge,
+    /// Replace and merge the incoming added file
     IncomingAddedFileReplaceAndMerge,
+    /// Merge the incoming added directory
     IncomingAddedDirMerge,
+    /// Replace the incoming added directory
     IncomingAddedDirReplace,
+    /// Replace and merge the incoming added directory
     IncomingAddedDirReplaceAndMerge,
+    /// Ignore the incoming deletion
     IncomingDeleteIgnore,
+    /// Accept the incoming deletion
     IncomingDeleteAccept,
 }
 
@@ -1248,17 +1757,54 @@ impl From<ClientConflictOptionId> for subversion_sys::svn_client_conflict_option
     }
 }
 
+#[cfg(feature = "client")]
+impl From<subversion_sys::svn_client_conflict_option_id_t> for ClientConflictOptionId {
+    fn from(id: subversion_sys::svn_client_conflict_option_id_t) -> Self {
+        match id {
+            subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_undefined => ClientConflictOptionId::Undefined,
+            subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_postpone => ClientConflictOptionId::Postpone,
+            subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_base_text => ClientConflictOptionId::BaseText,
+            subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_text => ClientConflictOptionId::IncomingText,
+            subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_working_text => ClientConflictOptionId::WorkingText,
+            subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_text_where_conflicted => ClientConflictOptionId::IncomingTextWhereConflicted,
+            subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_working_text_where_conflicted => ClientConflictOptionId::WorkingTextWhereConflicted,
+            subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_merged_text => ClientConflictOptionId::MergedText,
+            subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_unspecified => ClientConflictOptionId::Unspecified,
+            subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_accept_current_wc_state => ClientConflictOptionId::AcceptCurrentWcState,
+            subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_update_move_destination => ClientConflictOptionId::UpdateMoveDestination,
+            subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_update_any_moved_away_children => ClientConflictOptionId::UpdateAnyMovedAwayChildren,
+            subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_add_ignore => ClientConflictOptionId::IncomingAddIgnore,
+            subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_added_file_text_merge => ClientConflictOptionId::IncomingAddedFileTextMerge,
+            subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_added_file_replace_and_merge => ClientConflictOptionId::IncomingAddedFileReplaceAndMerge,
+            subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_added_dir_merge => ClientConflictOptionId::IncomingAddedDirMerge,
+            subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_added_dir_replace => ClientConflictOptionId::IncomingAddedDirReplace,
+            subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_added_dir_replace_and_merge => ClientConflictOptionId::IncomingAddedDirReplaceAndMerge,
+            subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_delete_ignore => ClientConflictOptionId::IncomingDeleteIgnore,
+            subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_delete_accept => ClientConflictOptionId::IncomingDeleteAccept,
+            _ => ClientConflictOptionId::Undefined,
+        }
+    }
+}
+
 /// Legacy conflict choice enum for backward compatibility with WC functions
 #[cfg(feature = "wc")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConflictChoice {
+    /// Postpone resolution for later.
     Postpone,
+    /// Use base version (original).
     Base,
+    /// Use their version (incoming changes).
     TheirsFull,
+    /// Use my version (local changes).
     MineFull,
+    /// Use their version for conflicts only.
     TheirsConflict,
+    /// Use my version for conflicts only.
     MineConflict,
+    /// Use a merged version.
     Merged,
+    /// Undefined/unspecified.
     Unspecified,
 }
 
@@ -1294,12 +1840,14 @@ impl From<ConflictChoice> for subversion_sys::svn_wc_conflict_choice_t {
     }
 }
 
+/// A checksum value.
 pub struct Checksum<'pool> {
-    ptr: *const subversion_sys::svn_checksum_t,
-    _pool: std::marker::PhantomData<&'pool apr::Pool>,
+    pub(crate) ptr: *const subversion_sys::svn_checksum_t,
+    _pool: std::marker::PhantomData<&'pool apr::Pool<'static>>,
 }
 
 impl<'pool> Checksum<'pool> {
+    /// Creates a Checksum from a raw pointer.
     pub fn from_raw(ptr: *const subversion_sys::svn_checksum_t) -> Self {
         Self {
             ptr,
@@ -1307,18 +1855,22 @@ impl<'pool> Checksum<'pool> {
         }
     }
 
+    /// Returns the kind of checksum.
     pub fn kind(&self) -> ChecksumKind {
         ChecksumKind::from(unsafe { (*self.ptr).kind })
     }
 
+    /// Returns the size of the checksum in bytes.
     pub fn size(&self) -> usize {
         unsafe { subversion_sys::svn_checksum_size(self.ptr) }
     }
 
+    /// Returns true if the checksum is empty.
     pub fn is_empty(&self) -> bool {
         unsafe { subversion_sys::svn_checksum_is_empty_checksum(self.ptr as *mut _) == 1 }
     }
 
+    /// Returns the digest bytes.
     pub fn digest(&self) -> &[u8] {
         unsafe {
             let digest = (*self.ptr).digest;
@@ -1326,7 +1878,12 @@ impl<'pool> Checksum<'pool> {
         }
     }
 
-    pub fn parse_hex(kind: ChecksumKind, hex: &str, pool: &'pool apr::Pool) -> Result<Self, Error> {
+    /// Parses a checksum from a hexadecimal string.
+    pub fn parse_hex(
+        kind: ChecksumKind,
+        hex: &str,
+        pool: &'pool apr::Pool<'pool>,
+    ) -> Result<Self, Error<'static>> {
         let mut checksum = std::ptr::null_mut();
         let kind = kind.into();
         let hex = std::ffi::CString::new(hex).unwrap();
@@ -1341,7 +1898,11 @@ impl<'pool> Checksum<'pool> {
         }
     }
 
-    pub fn empty(kind: ChecksumKind, pool: &'pool apr::Pool) -> Result<Self, Error> {
+    /// Creates an empty checksum of the specified kind.
+    pub fn empty(
+        kind: ChecksumKind,
+        pool: &'pool apr::Pool<'pool>,
+    ) -> Result<Self, Error<'static>> {
         let kind = kind.into();
         unsafe {
             let checksum = subversion_sys::svn_checksum_empty_checksum(kind, pool.as_mut_ptr());
@@ -1350,8 +1911,47 @@ impl<'pool> Checksum<'pool> {
     }
 
     /// Create a new checksum from data
-    pub fn create(kind: ChecksumKind, data: &[u8], pool: &'pool apr::Pool) -> Result<Self, Error> {
+    pub fn create(
+        kind: ChecksumKind,
+        data: &[u8],
+        pool: &'pool apr::Pool<'pool>,
+    ) -> Result<Self, Error<'static>> {
         checksum(kind, data, pool)
+    }
+
+    /// Construct a checksum from raw digest bytes.
+    ///
+    /// The digest must be exactly the right length for the checksum kind
+    /// (16 bytes for MD5, 20 bytes for SHA1).
+    pub fn from_digest(
+        kind: ChecksumKind,
+        digest: &[u8],
+        pool: &'pool apr::Pool<'pool>,
+    ) -> Result<Self, Error<'static>> {
+        let expected_len = match kind {
+            ChecksumKind::MD5 => 16,
+            ChecksumKind::SHA1 => 20,
+            _ => {
+                return Err(Error::from_message(
+                    "from_digest only supports MD5 and SHA1",
+                ))
+            }
+        };
+        if digest.len() != expected_len {
+            return Err(Error::from_message(&format!(
+                "digest length {} does not match expected {} for {:?}",
+                digest.len(),
+                expected_len,
+                kind,
+            )));
+        }
+        let checksum_ptr = pool.calloc::<subversion_sys::svn_checksum_t>();
+        let digest_copy = apr::strings::pmemdup(digest, pool);
+        unsafe {
+            (*checksum_ptr).kind = kind.into();
+            (*checksum_ptr).digest = digest_copy.as_ptr();
+        }
+        Ok(Checksum::from_raw(checksum_ptr))
     }
 
     /// Compare two checksums for equality
@@ -1360,11 +1960,11 @@ impl<'pool> Checksum<'pool> {
     }
 
     /// Duplicate this checksum into a new pool
-    pub fn dup(&self, pool: &'pool apr::Pool) -> Result<Checksum<'pool>, Error> {
+    pub fn dup(&self, pool: &'pool apr::Pool<'pool>) -> Result<Checksum<'pool>, Error<'_>> {
         unsafe {
             let new_checksum = subversion_sys::svn_checksum_dup(self.ptr, pool.as_mut_ptr());
             if new_checksum.is_null() {
-                Err(Error::from_str("Failed to duplicate checksum"))
+                Err(Error::from_message("Failed to duplicate checksum"))
             } else {
                 Ok(Checksum::from_raw(new_checksum))
             }
@@ -1372,7 +1972,7 @@ impl<'pool> Checksum<'pool> {
     }
 
     /// Serialize checksum to a string representation
-    pub fn serialize(&self, pool: &apr::Pool) -> Result<String, Error> {
+    pub fn serialize(&self, pool: &apr::Pool) -> Result<String, Error<'static>> {
         unsafe {
             let serialized = subversion_sys::svn_checksum_serialize(
                 self.ptr,
@@ -1380,7 +1980,7 @@ impl<'pool> Checksum<'pool> {
                 pool.as_mut_ptr(),
             );
             if serialized.is_null() {
-                Err(Error::from_str("Failed to serialize checksum"))
+                Err(Error::from_message("Failed to serialize checksum"))
             } else {
                 let cstr = std::ffi::CStr::from_ptr(serialized);
                 Ok(cstr.to_string_lossy().into_owned())
@@ -1389,7 +1989,7 @@ impl<'pool> Checksum<'pool> {
     }
 
     /// Deserialize checksum from a string representation
-    pub fn deserialize(data: &str, pool: &'pool apr::Pool) -> Result<Self, Error> {
+    pub fn deserialize(data: &str, pool: &'pool apr::Pool<'pool>) -> Result<Self, Error<'static>> {
         let data_cstr = std::ffi::CString::new(data)?;
         let mut checksum = std::ptr::null();
         unsafe {
@@ -1401,7 +2001,7 @@ impl<'pool> Checksum<'pool> {
             );
             Error::from_raw(err)?;
             if checksum.is_null() {
-                Err(Error::from_str("Failed to deserialize checksum"))
+                Err(Error::from_message("Failed to deserialize checksum"))
             } else {
                 Ok(Checksum::from_raw(checksum))
             }
@@ -1447,13 +2047,15 @@ impl<'pool> Checksum<'pool> {
     }
 }
 
+/// A context for computing checksums incrementally.
 pub struct ChecksumContext<'pool> {
     ptr: *mut subversion_sys::svn_checksum_ctx_t,
-    _pool: std::marker::PhantomData<&'pool apr::Pool>,
+    _pool: std::marker::PhantomData<&'pool apr::Pool<'static>>,
 }
 
 impl<'pool> ChecksumContext<'pool> {
-    pub fn new(kind: ChecksumKind, pool: &'pool apr::Pool) -> Result<Self, Error> {
+    /// Creates a new checksum context.
+    pub fn new(kind: ChecksumKind, pool: &'pool apr::Pool<'pool>) -> Result<Self, Error<'static>> {
         let kind = kind.into();
         unsafe {
             let cc = subversion_sys::svn_checksum_ctx_create(kind, pool.as_mut_ptr());
@@ -1464,13 +2066,15 @@ impl<'pool> ChecksumContext<'pool> {
         }
     }
 
-    pub fn reset(&mut self) -> Result<(), Error> {
+    /// Resets the checksum context.
+    pub fn reset(&mut self) -> Result<(), Error<'static>> {
         let err = unsafe { subversion_sys::svn_checksum_ctx_reset(self.ptr) };
         Error::from_raw(err)?;
         Ok(())
     }
 
-    pub fn update(&mut self, data: &[u8]) -> Result<(), Error> {
+    /// Updates the checksum with more data.
+    pub fn update(&mut self, data: &[u8]) -> Result<(), Error<'static>> {
         let err = unsafe {
             subversion_sys::svn_checksum_update(
                 self.ptr,
@@ -1482,7 +2086,11 @@ impl<'pool> ChecksumContext<'pool> {
         Ok(())
     }
 
-    pub fn finish(&self, result_pool: &'pool apr::Pool) -> Result<Checksum<'pool>, Error> {
+    /// Finishes the checksum computation and returns the result.
+    pub fn finish(
+        &self,
+        result_pool: &'pool apr::Pool<'pool>,
+    ) -> Result<Checksum<'pool>, Error<'_>> {
         let mut checksum = std::ptr::null_mut();
         unsafe {
             Error::from_raw(subversion_sys::svn_checksum_final(
@@ -1495,11 +2103,12 @@ impl<'pool> ChecksumContext<'pool> {
     }
 }
 
+/// Computes a checksum for the given data.
 pub fn checksum<'pool>(
     kind: ChecksumKind,
     data: &[u8],
-    pool: &'pool apr::Pool,
-) -> Result<Checksum<'pool>, Error> {
+    pool: &'pool apr::Pool<'pool>,
+) -> Result<Checksum<'pool>, Error<'static>> {
     let mut checksum = std::ptr::null_mut();
     let kind = kind.into();
     unsafe {
@@ -1527,7 +2136,7 @@ mod svn_string_helpers {
         }
     }
 
-    /// Get the data from an svn_string_t as a Vec<u8>
+    /// Get the data from an svn_string_t as a `Vec<u8>`
     pub fn to_vec(s: &svn_string_t) -> Vec<u8> {
         as_bytes(s).to_vec()
     }

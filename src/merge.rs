@@ -46,7 +46,7 @@ pub fn merge<S1, S2, T>(
     depth: Depth,
     options: &MergeOptions,
     ctx: &mut crate::client::Context,
-) -> Result<(), Error>
+) -> Result<(), Error<'static>>
 where
     S1: AsCanonicalUri,
     S2: AsCanonicalUri,
@@ -121,7 +121,7 @@ pub fn merge_peg<S, T>(
     depth: Depth,
     options: &MergeOptions,
     ctx: &mut crate::client::Context,
-) -> Result<(), Error>
+) -> Result<(), Error<'static>>
 where
     S: AsCanonicalUri,
     T: AsCanonicalDirent,
@@ -194,7 +194,7 @@ pub fn get_merged_mergeinfo<P>(
     path_or_url: P,
     peg_revision: impl Into<Revision>,
     ctx: &mut crate::client::Context,
-) -> Result<std::collections::HashMap<String, Vec<crate::RevisionRange>>, Error>
+) -> Result<std::collections::HashMap<String, Vec<crate::RevisionRange>>, Error<'_>>
 where
     P: AsCanonicalUri,
 {
@@ -288,7 +288,7 @@ impl<'a> MergeinfoHash<'a> {
         }
     }
 
-    /// Convert the mergeinfo to a HashMap<String, Vec<RevisionRange>>
+    /// Convert the mergeinfo to a `HashMap<String, Vec<RevisionRange>>`
     pub fn to_hashmap(&self) -> std::collections::HashMap<String, Vec<crate::RevisionRange>> {
         self.inner
             .iter()
@@ -329,7 +329,7 @@ impl<'a> MergeinfoHash<'a> {
 /// Converts a string in the format "/trunk:1-10,15,20-25" into a mergeinfo hash
 pub fn parse_mergeinfo(
     mergeinfo_str: &str,
-) -> Result<std::collections::HashMap<String, Vec<crate::RevisionRange>>, Error> {
+) -> Result<std::collections::HashMap<String, Vec<crate::RevisionRange>>, Error<'_>> {
     with_tmp_pool(|pool| unsafe {
         let mergeinfo_cstr = CString::new(mergeinfo_str)?;
         let mut mergeinfo_ptr = ptr::null_mut();
@@ -354,7 +354,7 @@ pub fn parse_mergeinfo(
 /// Convert mergeinfo to a string representation
 pub fn mergeinfo_to_string(
     mergeinfo: &std::collections::HashMap<String, Vec<crate::RevisionRange>>,
-) -> Result<String, Error> {
+) -> Result<String, Error<'static>> {
     with_tmp_pool(|pool| unsafe {
         // Create an APR hash from the Rust HashMap
         let hash = apr_sys::apr_hash_make(pool.as_mut_ptr());
@@ -415,7 +415,7 @@ pub fn mergeinfo_diff(
         std::collections::HashMap<String, Vec<crate::RevisionRange>>,
         std::collections::HashMap<String, Vec<crate::RevisionRange>>,
     ),
-    Error,
+    Error<'static>,
 > {
     with_tmp_pool(|pool| unsafe {
         // Convert Rust HashMaps to APR hashes
@@ -448,7 +448,7 @@ pub fn mergeinfo_diff(
 pub fn mergeinfo_merge(
     mergeinfo1: &std::collections::HashMap<String, Vec<crate::RevisionRange>>,
     mergeinfo2: &std::collections::HashMap<String, Vec<crate::RevisionRange>>,
-) -> Result<std::collections::HashMap<String, Vec<crate::RevisionRange>>, Error> {
+) -> Result<std::collections::HashMap<String, Vec<crate::RevisionRange>>, Error<'static>> {
     with_tmp_pool(|pool| unsafe {
         let hash1 = hashmap_to_mergeinfo_hash(mergeinfo1, pool)?;
         let hash2 = hashmap_to_mergeinfo_hash(mergeinfo2, pool)?;
@@ -471,7 +471,7 @@ pub fn mergeinfo_remove(
     mergeinfo: &mut std::collections::HashMap<String, Vec<crate::RevisionRange>>,
     eraser: &std::collections::HashMap<String, Vec<crate::RevisionRange>>,
     consider_inheritance: bool,
-) -> Result<(), Error> {
+) -> Result<(), Error<'static>> {
     with_tmp_pool(|pool| unsafe {
         let hash = hashmap_to_mergeinfo_hash(mergeinfo, pool)?;
         let eraser_hash = hashmap_to_mergeinfo_hash(eraser, pool)?;
@@ -497,7 +497,7 @@ pub fn mergeinfo_intersect(
     mergeinfo1: &std::collections::HashMap<String, Vec<crate::RevisionRange>>,
     mergeinfo2: &std::collections::HashMap<String, Vec<crate::RevisionRange>>,
     consider_inheritance: bool,
-) -> Result<std::collections::HashMap<String, Vec<crate::RevisionRange>>, Error> {
+) -> Result<std::collections::HashMap<String, Vec<crate::RevisionRange>>, Error<'static>> {
     with_tmp_pool(|pool| unsafe {
         let hash1 = hashmap_to_mergeinfo_hash(mergeinfo1, pool)?;
         let hash2 = hashmap_to_mergeinfo_hash(mergeinfo2, pool)?;
@@ -520,10 +520,10 @@ pub fn mergeinfo_intersect(
 }
 
 // Helper function to convert Rust HashMap to APR hash
-unsafe fn hashmap_to_mergeinfo_hash(
+unsafe fn hashmap_to_mergeinfo_hash<'p>(
     mergeinfo: &std::collections::HashMap<String, Vec<crate::RevisionRange>>,
-    pool: &apr::Pool,
-) -> Result<*mut apr_sys::apr_hash_t, Error> {
+    pool: &'p apr::Pool<'p>,
+) -> Result<*mut apr_sys::apr_hash_t, Error<'static>> {
     let hash = apr_sys::apr_hash_make(pool.as_mut_ptr());
 
     for (path, ranges) in mergeinfo {
@@ -588,99 +588,50 @@ mod tests {
 
     #[test]
     fn test_parse_mergeinfo() {
-        // Test parsing a simple mergeinfo string
-        let mergeinfo_str = "/trunk:1-10";
-        let result = parse_mergeinfo(mergeinfo_str);
-
-        // This will likely fail without a real SVN context, but tests the API
-        assert!(result.is_ok() || result.is_err());
+        let mergeinfo = parse_mergeinfo("/trunk:1-10").unwrap();
+        assert_eq!(mergeinfo.len(), 1);
+        assert!(mergeinfo.contains_key("/trunk"));
+        let ranges = &mergeinfo["/trunk"];
+        assert_eq!(ranges.len(), 1);
     }
 
     #[test]
-    fn test_mergeinfo_to_string() {
-        // Test converting a mergeinfo hashmap to string
-        let mut mergeinfo = std::collections::HashMap::new();
-        mergeinfo.insert(
-            "/trunk".to_string(),
-            vec![crate::RevisionRange::new(
-                crate::Revision::Number(crate::Revnum(1)),
-                crate::Revision::Number(crate::Revnum(10)),
-            )],
-        );
-
-        let result = mergeinfo_to_string(&mergeinfo);
-        assert!(result.is_ok() || result.is_err());
+    fn test_mergeinfo_roundtrip() {
+        let mergeinfo = parse_mergeinfo("/trunk:1-10").unwrap();
+        let s = mergeinfo_to_string(&mergeinfo).unwrap();
+        assert_eq!(s, "/trunk:1-10");
     }
 
     #[test]
     fn test_mergeinfo_diff() {
-        let mut mergeinfo1 = std::collections::HashMap::new();
-        mergeinfo1.insert(
-            "/trunk".to_string(),
-            vec![crate::RevisionRange::new(
-                crate::Revision::Number(crate::Revnum(1)),
-                crate::Revision::Number(crate::Revnum(10)),
-            )],
-        );
+        let mi1 = parse_mergeinfo("/trunk:1-10").unwrap();
+        let mi2 = parse_mergeinfo("/trunk:5-15").unwrap();
 
-        let mut mergeinfo2 = std::collections::HashMap::new();
-        mergeinfo2.insert(
-            "/trunk".to_string(),
-            vec![crate::RevisionRange::new(
-                crate::Revision::Number(crate::Revnum(5)),
-                crate::Revision::Number(crate::Revnum(15)),
-            )],
-        );
-
-        let result = mergeinfo_diff(&mergeinfo1, &mergeinfo2, false);
-        assert!(result.is_ok() || result.is_err());
+        let (deleted, added) = mergeinfo_diff(&mi1, &mi2, false).unwrap();
+        // deleted = in mi1 but not mi2, added = in mi2 but not mi1
+        assert!(deleted.contains_key("/trunk"));
+        assert!(added.contains_key("/trunk"));
     }
 
     #[test]
     fn test_mergeinfo_merge() {
-        let mut mergeinfo1 = std::collections::HashMap::new();
-        mergeinfo1.insert(
-            "/trunk".to_string(),
-            vec![crate::RevisionRange::new(
-                crate::Revision::Number(crate::Revnum(1)),
-                crate::Revision::Number(crate::Revnum(10)),
-            )],
-        );
+        let mi1 = parse_mergeinfo("/trunk:1-10").unwrap();
+        let mi2 = parse_mergeinfo("/trunk:11-20").unwrap();
 
-        let mut mergeinfo2 = std::collections::HashMap::new();
-        mergeinfo2.insert(
-            "/trunk".to_string(),
-            vec![crate::RevisionRange::new(
-                crate::Revision::Number(crate::Revnum(11)),
-                crate::Revision::Number(crate::Revnum(20)),
-            )],
-        );
-
-        let result = mergeinfo_merge(&mergeinfo1, &mergeinfo2);
-        assert!(result.is_ok() || result.is_err());
+        let merged = mergeinfo_merge(&mi1, &mi2).unwrap();
+        assert!(merged.contains_key("/trunk"));
+        let s = mergeinfo_to_string(&merged).unwrap();
+        assert_eq!(s, "/trunk:1-20");
     }
 
     #[test]
     fn test_mergeinfo_intersect() {
-        let mut mergeinfo1 = std::collections::HashMap::new();
-        mergeinfo1.insert(
-            "/trunk".to_string(),
-            vec![crate::RevisionRange::new(
-                crate::Revision::Number(crate::Revnum(1)),
-                crate::Revision::Number(crate::Revnum(10)),
-            )],
-        );
+        let mi1 = parse_mergeinfo("/trunk:1-10").unwrap();
+        let mi2 = parse_mergeinfo("/trunk:5-15").unwrap();
 
-        let mut mergeinfo2 = std::collections::HashMap::new();
-        mergeinfo2.insert(
-            "/trunk".to_string(),
-            vec![crate::RevisionRange::new(
-                crate::Revision::Number(crate::Revnum(5)),
-                crate::Revision::Number(crate::Revnum(15)),
-            )],
-        );
-
-        let result = mergeinfo_intersect(&mergeinfo1, &mergeinfo2, false);
-        assert!(result.is_ok() || result.is_err());
+        let intersection = mergeinfo_intersect(&mi1, &mi2, false).unwrap();
+        assert!(intersection.contains_key("/trunk"));
+        let s = mergeinfo_to_string(&intersection).unwrap();
+        assert_eq!(s, "/trunk:5-10");
     }
 }

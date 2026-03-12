@@ -14,7 +14,7 @@ use crate::{error::Error, Revision};
 /// - Dates: "{2023-01-01}", "{2023-01-01T12:00:00}"
 ///
 /// Returns the parsed start and end revisions.
-pub fn parse_revision(arg: &str) -> Result<(Revision, Revision), Error> {
+pub fn parse_revision(arg: &str) -> Result<(Revision, Revision), Error<'static>> {
     let pool = apr::Pool::new();
     let arg_cstr = std::ffi::CString::new(arg)?;
     let mut start_rev = subversion_sys::svn_opt_revision_t::default();
@@ -28,7 +28,7 @@ pub fn parse_revision(arg: &str) -> Result<(Revision, Revision), Error> {
             pool.as_mut_ptr(),
         );
         if result != 0 {
-            return Err(Error::from_str("Failed to parse revision"));
+            return Err(Error::from_message("Failed to parse revision"));
         }
 
         Ok((Revision::from(start_rev), Revision::from(end_rev)))
@@ -39,7 +39,7 @@ pub fn parse_revision(arg: &str) -> Result<(Revision, Revision), Error> {
 ///
 /// This function parses strings like "path@123" or "path@HEAD" into
 /// separate path and revision components.
-pub fn parse_path(path: &str) -> Result<(String, Revision), Error> {
+pub fn parse_path(path: &str) -> Result<(String, Revision), Error<'static>> {
     let pool = apr::Pool::new();
     let path_cstr = std::ffi::CString::new(path)?;
     let mut revision = subversion_sys::svn_opt_revision_t::default();
@@ -74,7 +74,7 @@ pub fn resolve_revisions(
     op_revision: &Revision,
     is_url: bool,
     notice_local_mods: bool,
-) -> Result<(Revision, Revision), Error> {
+) -> Result<(Revision, Revision), Error<'static>> {
     let pool = apr::Pool::new();
     let mut peg_rev = (*peg_revision).into();
     let mut op_rev = (*op_revision).into();

@@ -1,5 +1,5 @@
 use crate::{svn_result, Error};
-use std::ffi::CString;
+use std::ffi::{c_void, CString};
 use std::path::Path;
 use std::ptr;
 
@@ -7,71 +7,123 @@ use std::ptr;
 #[derive(Debug, Clone)]
 pub enum ConfigOption<'a> {
     // Auth section
+    /// Whether to store passwords.
     StorePasswords(bool),
+    /// Whether to store plaintext passwords.
     StorePlaintextPasswords(bool),
+    /// Whether to store authentication credentials.
     StoreAuthCreds(bool),
+    /// Whether to store SSL client certificate passphrases.
     StoreSslClientCertPP(bool),
+    /// Whether to store SSL client certificate passphrases in plaintext.
     StoreSslClientCertPPPlaintext(bool),
+    /// Password store types to use.
     PasswordStores(&'a str),
+    /// KWallet wallet name.
     KwalletWallet(&'a str),
+    /// KWallet SVN application name.
     KwalletSvnApplicationName(&'a str),
+    /// Whether to prompt for SSL client certificate file.
     SslClientCertFilePrompt(bool),
 
     // Helpers section
+    /// Editor command.
     EditorCmd(&'a str),
+    /// Diff command.
     DiffCmd(&'a str),
+    /// Three-way diff command.
     Diff3Cmd(&'a str),
+    /// Diff file extensions.
     DiffExtensions(&'a str),
+    /// Merge tool command.
     MergeToolCmd(&'a str),
 
     // Miscellany section
+    /// Global ignore patterns.
     GlobalIgnores(&'a str),
+    /// Log message encoding.
     LogEncoding(&'a str),
+    /// Whether to use commit times for timestamps.
     UseCommitTimes(bool),
+    /// Whether to avoid unlocking files.
     NoUnlock(bool),
+    /// MIME types file path.
     MimeTypesFile(&'a str),
+    /// Preserved conflict file extension.
     PreservedConflictFileExt(&'a str),
+    /// Whether to enable automatic properties.
     EnableAutoProps(bool),
+    /// Whether to handle conflicts interactively.
     InteractiveConflicts(bool),
+    /// Memory cache size.
     MemoryCacheSize(i64),
+    /// Whether to ignore content type in diffs.
     DiffIgnoreContentType(bool),
 
     // Working copy section
+    /// Whether to use exclusive locking.
     ExclusiveLocking(bool),
+    /// Exclusive locking clients.
     ExclusiveLockingClients(&'a str),
+    /// Busy timeout value.
     BusyTimeout(i64),
 
     // Proxy section (from servers file)
+    /// HTTP proxy host.
     HttpProxy(&'a str),
+    /// HTTP proxy port.
     HttpProxyPort(i64),
+    /// HTTP proxy username.
     HttpProxyUsername(&'a str),
+    /// HTTP proxy password.
     HttpProxyPassword(&'a str),
+    /// HTTP proxy exceptions.
     HttpProxyExceptions(&'a str),
+    /// HTTP timeout value.
     HttpTimeout(i64),
+    /// Whether to use HTTP compression.
     HttpCompression(bool),
+    /// Maximum HTTP connections.
     HttpMaxConnections(i64),
+    /// Whether to use chunked HTTP requests.
     HttpChunkedRequests(bool),
 
     // SSL section (from servers file)
+    /// SSL certificate authority files.
     SslAuthorityFiles(&'a str),
+    /// Whether to trust the default CA.
     SslTrustDefaultCa(bool),
+    /// SSL client certificate file.
     SslClientCertFile(&'a str),
+    /// SSL client certificate password.
     SslClientCertPassword(&'a str),
 
     // Generic string/int/bool options for sections not covered above
+    /// Generic string configuration option.
     String {
+        /// Configuration section name.
         section: &'a str,
+        /// Option name.
         option: &'a str,
+        /// String value.
         value: &'a str,
     },
+    /// Generic integer configuration option.
     Int {
+        /// Configuration section name.
         section: &'a str,
+        /// Option name.
         option: &'a str,
+        /// Integer value.
         value: i64,
     },
+    /// Generic boolean configuration option.
     Bool {
+        /// Configuration section name.
         section: &'a str,
+        /// Option name.
         option: &'a str,
+        /// Boolean value.
         value: bool,
     },
 }
@@ -79,28 +131,27 @@ pub enum ConfigOption<'a> {
 /// Configuration container wrapping svn_config_t
 pub struct Config {
     ptr: *mut subversion_sys::svn_config_t,
-    #[allow(dead_code)]
-    pool: apr::Pool,
+    _pool: apr::Pool<'static>,
 }
 
 /// Configuration hash wrapping apr_hash_t (as expected by repository access APIs)
+#[cfg(feature = "ra")]
 pub struct ConfigHash {
     ptr: *mut apr_sys::apr_hash_t,
-    #[allow(dead_code)]
-    pool: apr::Pool,
+    _pool: apr::Pool<'static>,
 }
 
 impl Config {
     /// Create from raw pointer and pool
     pub(crate) unsafe fn from_ptr_and_pool(
         ptr: *mut subversion_sys::svn_config_t,
-        pool: apr::Pool,
+        pool: apr::Pool<'static>,
     ) -> Self {
-        Self { ptr, pool }
+        Self { ptr, _pool: pool }
     }
 
     /// Get a configuration option value
-    pub fn get(&self, option: ConfigOption) -> Result<ConfigValue, Error> {
+    pub fn get(&self, option: ConfigOption) -> Result<ConfigValue, Error<'static>> {
         match option {
             // Auth options
             ConfigOption::StorePasswords(_) => {
@@ -226,16 +277,16 @@ impl Config {
     }
 
     /// Set a configuration option
-    pub fn set(&mut self, option: ConfigOption) -> Result<(), Error> {
+    pub fn set(&mut self, option: ConfigOption) -> Result<(), Error<'static>> {
         let (section, key, value) = match option {
             // Auth options
-            ConfigOption::StorePasswords(v) => ("auth", "store-passwords", format!("{}", v)),
+            ConfigOption::StorePasswords(v) => ("auth", "store-passwords", v.to_string()),
             ConfigOption::StorePlaintextPasswords(v) => {
-                ("auth", "store-plaintext-passwords", format!("{}", v))
+                ("auth", "store-plaintext-passwords", v.to_string())
             }
-            ConfigOption::StoreAuthCreds(v) => ("auth", "store-auth-creds", format!("{}", v)),
+            ConfigOption::StoreAuthCreds(v) => ("auth", "store-auth-creds", v.to_string()),
             ConfigOption::StoreSslClientCertPP(v) => {
-                ("auth", "store-ssl-client-cert-pp", format!("{}", v))
+                ("auth", "store-ssl-client-cert-pp", v.to_string())
             }
             ConfigOption::StoreSslClientCertPPPlaintext(v) => (
                 "auth",
@@ -248,7 +299,7 @@ impl Config {
                 ("auth", "kwallet-svn-application-name", v.to_string())
             }
             ConfigOption::SslClientCertFilePrompt(v) => {
-                ("auth", "ssl-client-cert-file-prompt", format!("{}", v))
+                ("auth", "ssl-client-cert-file-prompt", v.to_string())
             }
 
             // Helpers options
@@ -261,56 +312,50 @@ impl Config {
             // Miscellany options
             ConfigOption::GlobalIgnores(v) => ("miscellany", "global-ignores", v.to_string()),
             ConfigOption::LogEncoding(v) => ("miscellany", "log-encoding", v.to_string()),
-            ConfigOption::UseCommitTimes(v) => ("miscellany", "use-commit-times", format!("{}", v)),
-            ConfigOption::NoUnlock(v) => ("miscellany", "no-unlock", format!("{}", v)),
+            ConfigOption::UseCommitTimes(v) => ("miscellany", "use-commit-times", v.to_string()),
+            ConfigOption::NoUnlock(v) => ("miscellany", "no-unlock", v.to_string()),
             ConfigOption::MimeTypesFile(v) => ("miscellany", "mime-types-file", v.to_string()),
             ConfigOption::PreservedConflictFileExt(v) => {
                 ("miscellany", "preserved-conflict-file-exts", v.to_string())
             }
-            ConfigOption::EnableAutoProps(v) => {
-                ("miscellany", "enable-auto-props", format!("{}", v))
-            }
+            ConfigOption::EnableAutoProps(v) => ("miscellany", "enable-auto-props", v.to_string()),
             ConfigOption::InteractiveConflicts(v) => {
-                ("miscellany", "interactive-conflicts", format!("{}", v))
+                ("miscellany", "interactive-conflicts", v.to_string())
             }
-            ConfigOption::MemoryCacheSize(v) => {
-                ("miscellany", "memory-cache-size", format!("{}", v))
-            }
+            ConfigOption::MemoryCacheSize(v) => ("miscellany", "memory-cache-size", v.to_string()),
             ConfigOption::DiffIgnoreContentType(v) => {
-                ("miscellany", "diff-ignore-content-type", format!("{}", v))
+                ("miscellany", "diff-ignore-content-type", v.to_string())
             }
 
             // Working copy options
             ConfigOption::ExclusiveLocking(v) => {
-                ("working-copy", "exclusive-locking", format!("{}", v))
+                ("working-copy", "exclusive-locking", v.to_string())
             }
             ConfigOption::ExclusiveLockingClients(v) => {
                 ("working-copy", "exclusive-locking-clients", v.to_string())
             }
-            ConfigOption::BusyTimeout(v) => ("working-copy", "busy-timeout", format!("{}", v)),
+            ConfigOption::BusyTimeout(v) => ("working-copy", "busy-timeout", v.to_string()),
 
             // Proxy options
             ConfigOption::HttpProxy(v) => ("global", "http-proxy", v.to_string()),
-            ConfigOption::HttpProxyPort(v) => ("global", "http-proxy-port", format!("{}", v)),
+            ConfigOption::HttpProxyPort(v) => ("global", "http-proxy-port", v.to_string()),
             ConfigOption::HttpProxyUsername(v) => ("global", "http-proxy-username", v.to_string()),
             ConfigOption::HttpProxyPassword(v) => ("global", "http-proxy-password", v.to_string()),
             ConfigOption::HttpProxyExceptions(v) => {
                 ("global", "http-proxy-exceptions", v.to_string())
             }
-            ConfigOption::HttpTimeout(v) => ("global", "http-timeout", format!("{}", v)),
-            ConfigOption::HttpCompression(v) => ("global", "http-compression", format!("{}", v)),
+            ConfigOption::HttpTimeout(v) => ("global", "http-timeout", v.to_string()),
+            ConfigOption::HttpCompression(v) => ("global", "http-compression", v.to_string()),
             ConfigOption::HttpMaxConnections(v) => {
-                ("global", "http-max-connections", format!("{}", v))
+                ("global", "http-max-connections", v.to_string())
             }
             ConfigOption::HttpChunkedRequests(v) => {
-                ("global", "http-chunked-requests", format!("{}", v))
+                ("global", "http-chunked-requests", v.to_string())
             }
 
             // SSL options
             ConfigOption::SslAuthorityFiles(v) => ("global", "ssl-authority-files", v.to_string()),
-            ConfigOption::SslTrustDefaultCa(v) => {
-                ("global", "ssl-trust-default-ca", format!("{}", v))
-            }
+            ConfigOption::SslTrustDefaultCa(v) => ("global", "ssl-trust-default-ca", v.to_string()),
             ConfigOption::SslClientCertFile(v) => ("global", "ssl-client-cert-file", v.to_string()),
             ConfigOption::SslClientCertPassword(v) => {
                 ("global", "ssl-client-cert-password", v.to_string())
@@ -326,19 +371,19 @@ impl Config {
                 section,
                 option,
                 value,
-            } => (section, option, format!("{}", value)),
+            } => (section, option, value.to_string()),
             ConfigOption::Bool {
                 section,
                 option,
                 value,
-            } => (section, option, format!("{}", value)),
+            } => (section, option, value.to_string()),
         };
 
         self.set_value(section, key, &value)
     }
 
     // Internal helper functions
-    fn get_string_value(&self, section: &str, option: &str) -> Result<ConfigValue, Error> {
+    fn get_string_value(&self, section: &str, option: &str) -> Result<ConfigValue, Error<'static>> {
         let section_cstr = CString::new(section)?;
         let option_cstr = CString::new(option)?;
 
@@ -368,7 +413,7 @@ impl Config {
         section: &str,
         option: &str,
         default: Option<bool>,
-    ) -> Result<ConfigValue, Error> {
+    ) -> Result<ConfigValue, Error<'static>> {
         let section_cstr = CString::new(section)?;
         let option_cstr = CString::new(option)?;
 
@@ -391,7 +436,7 @@ impl Config {
         section: &str,
         option: &str,
         default: Option<i64>,
-    ) -> Result<ConfigValue, Error> {
+    ) -> Result<ConfigValue, Error<'static>> {
         let section_cstr = CString::new(section)?;
         let option_cstr = CString::new(option)?;
 
@@ -409,7 +454,12 @@ impl Config {
         }
     }
 
-    fn set_value(&mut self, section: &str, option: &str, value: &str) -> Result<(), Error> {
+    fn set_value(
+        &mut self,
+        section: &str,
+        option: &str,
+        value: &str,
+    ) -> Result<(), Error<'static>> {
         let section_cstr = CString::new(section)?;
         let option_cstr = CString::new(option)?;
         let value_cstr = CString::new(value)?;
@@ -425,27 +475,107 @@ impl Config {
         Ok(())
     }
 
+    /// Returns a raw pointer to the configuration.
     pub fn as_ptr(&self) -> *const subversion_sys::svn_config_t {
         self.ptr
     }
 
+    /// Returns a mutable raw pointer to the configuration.
     pub fn as_mut_ptr(&mut self) -> *mut subversion_sys::svn_config_t {
         self.ptr
     }
+
+    /// Enumerate all sections in this configuration.
+    ///
+    /// Calls `callback` with each section name. Return `true` from the
+    /// callback to continue enumeration, `false` to stop.
+    /// Returns the number of times the callback was invoked.
+    pub fn enumerate_sections<F>(&self, mut callback: F) -> i32
+    where
+        F: FnMut(&str) -> bool,
+    {
+        unsafe extern "C" fn trampoline<F: FnMut(&str) -> bool>(
+            name: *const std::os::raw::c_char,
+            baton: *mut c_void,
+            _pool: *mut apr_sys::apr_pool_t,
+        ) -> subversion_sys::svn_boolean_t {
+            let cb = &mut *(baton as *mut F);
+            let name = std::ffi::CStr::from_ptr(name).to_str().unwrap();
+            if cb(name) {
+                1
+            } else {
+                0
+            }
+        }
+
+        let pool = apr::Pool::new();
+        unsafe {
+            subversion_sys::svn_config_enumerate_sections2(
+                self.ptr as *mut _,
+                Some(trampoline::<F>),
+                &mut callback as *mut F as *mut c_void,
+                pool.as_mut_ptr(),
+            )
+        }
+    }
+
+    /// Enumerate all options in the given section.
+    ///
+    /// Calls `callback` with each option name and value. Return `true` from
+    /// the callback to continue enumeration, `false` to stop.
+    /// Returns the number of times the callback was invoked.
+    pub fn enumerate<F>(&self, section: &str, mut callback: F) -> Result<i32, Error<'static>>
+    where
+        F: FnMut(&str, &str) -> bool,
+    {
+        unsafe extern "C" fn trampoline<F: FnMut(&str, &str) -> bool>(
+            name: *const std::os::raw::c_char,
+            value: *const std::os::raw::c_char,
+            baton: *mut c_void,
+            _pool: *mut apr_sys::apr_pool_t,
+        ) -> subversion_sys::svn_boolean_t {
+            let cb = &mut *(baton as *mut F);
+            let name = std::ffi::CStr::from_ptr(name).to_str().unwrap();
+            let value = std::ffi::CStr::from_ptr(value).to_str().unwrap();
+            if cb(name, value) {
+                1
+            } else {
+                0
+            }
+        }
+
+        let section_cstr = CString::new(section)?;
+        let pool = apr::Pool::new();
+        Ok(unsafe {
+            subversion_sys::svn_config_enumerate2(
+                self.ptr as *mut _,
+                section_cstr.as_ptr(),
+                Some(trampoline::<F>),
+                &mut callback as *mut F as *mut c_void,
+                pool.as_mut_ptr(),
+            )
+        })
+    }
+
+    /// Check if a section exists in this configuration.
+    pub fn has_section(&self, section: &str) -> Result<bool, Error<'static>> {
+        let section_cstr = CString::new(section)?;
+        Ok(unsafe {
+            subversion_sys::svn_config_has_section(self.ptr as *mut _, section_cstr.as_ptr()) != 0
+        })
+    }
 }
 
+#[cfg(feature = "ra")]
 impl ConfigHash {
     /// Create from raw pointer and pool
-    pub(crate) unsafe fn from_ptr_and_pool(ptr: *mut apr_sys::apr_hash_t, pool: apr::Pool) -> Self {
-        Self { ptr, pool }
+    pub(crate) unsafe fn from_ptr_and_pool(
+        ptr: *mut apr_sys::apr_hash_t,
+        pool: apr::Pool<'static>,
+    ) -> Self {
+        Self { ptr, _pool: pool }
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn as_ptr(&self) -> *const apr_sys::apr_hash_t {
-        self.ptr
-    }
-
-    #[allow(dead_code)]
     pub(crate) fn as_mut_ptr(&mut self) -> *mut apr_sys::apr_hash_t {
         self.ptr
     }
@@ -454,13 +584,18 @@ impl ConfigHash {
 /// Configuration value returned from get operations
 #[derive(Debug, Clone, PartialEq)]
 pub enum ConfigValue {
+    /// String configuration value.
     String(String),
+    /// Integer configuration value.
     Int(i64),
+    /// Boolean configuration value.
     Bool(bool),
+    /// No value present.
     None,
 }
 
 impl ConfigValue {
+    /// Returns the value as a string if it is one.
     pub fn as_string(&self) -> Option<&str> {
         match self {
             ConfigValue::String(s) => Some(s),
@@ -468,6 +603,7 @@ impl ConfigValue {
         }
     }
 
+    /// Returns the value as an integer if it is one.
     pub fn as_int(&self) -> Option<i64> {
         match self {
             ConfigValue::Int(i) => Some(*i),
@@ -475,6 +611,7 @@ impl ConfigValue {
         }
     }
 
+    /// Returns the value as a boolean if it is one.
     pub fn as_bool(&self) -> Option<bool> {
         match self {
             ConfigValue::Bool(b) => Some(*b),
@@ -484,12 +621,13 @@ impl ConfigValue {
 }
 
 /// Get the configuration hash (for repository access APIs)
-pub fn get_config_hash(config_dir: Option<&Path>) -> Result<ConfigHash, Error> {
+#[cfg(feature = "ra")]
+pub fn get_config_hash(config_dir: Option<&Path>) -> Result<ConfigHash, Error<'static>> {
     let pool = apr::Pool::new();
 
     let config_dir_cstr = if let Some(dir) = config_dir {
         Some(CString::new(dir.to_str().ok_or_else(|| {
-            Error::from_str("Invalid config directory path")
+            Error::from_message("Invalid config directory path")
         })?)?)
     } else {
         None
@@ -510,14 +648,14 @@ pub fn get_config_hash(config_dir: Option<&Path>) -> Result<ConfigHash, Error> {
 }
 
 /// Read configuration from the default locations
-pub fn get_config(config_dir: Option<&Path>) -> Result<(Config, Config), Error> {
+pub fn get_config(config_dir: Option<&Path>) -> Result<(Config, Config), Error<'static>> {
     // Create separate pools for each config object that will be returned
     let config_pool = apr::Pool::new();
     let servers_pool = apr::Pool::new();
 
     let config_dir_cstr = if let Some(dir) = config_dir {
         Some(CString::new(dir.to_str().ok_or_else(|| {
-            Error::from_str("Invalid config directory path")
+            Error::from_message("Invalid config directory path")
         })?)?)
     } else {
         None
@@ -571,11 +709,11 @@ pub fn get_config(config_dir: Option<&Path>) -> Result<(Config, Config), Error> 
 }
 
 /// Read a configuration file
-pub fn read_config(file: &Path, must_exist: bool) -> Result<Config, Error> {
+pub fn read_config(file: &Path, must_exist: bool) -> Result<Config, Error<'static>> {
     let pool = apr::Pool::new();
     let file_cstr = CString::new(
         file.to_str()
-            .ok_or_else(|| Error::from_str("Invalid file path"))?,
+            .ok_or_else(|| Error::from_message("Invalid file path"))?,
     )?;
 
     unsafe {

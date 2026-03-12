@@ -22,31 +22,31 @@ impl<T> LoggingBackend<T> {
 }
 
 impl<T: Read + Write + Send + 'static> StreamBackend for LoggingBackend<T> {
-    fn read(&mut self, buf: &mut [u8]) -> Result<usize, subversion::Error> {
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, subversion::Error<'static>> {
         println!("{}: Reading up to {} bytes", self.log_prefix, buf.len());
         let n = self
             .inner
             .read(buf)
-            .map_err(|e| subversion::Error::from_str(&e.to_string()))?;
+            .map_err(|e| subversion::Error::from_message(&e.to_string()))?;
         println!("{}: Read {} bytes", self.log_prefix, n);
         Ok(n)
     }
 
-    fn write(&mut self, buf: &[u8]) -> Result<usize, subversion::Error> {
+    fn write(&mut self, buf: &[u8]) -> Result<usize, subversion::Error<'static>> {
         println!("{}: Writing {} bytes", self.log_prefix, buf.len());
         let n = self
             .inner
             .write(buf)
-            .map_err(|e| subversion::Error::from_str(&e.to_string()))?;
+            .map_err(|e| subversion::Error::from_message(&e.to_string()))?;
         println!("{}: Wrote {} bytes", self.log_prefix, n);
         Ok(n)
     }
 
-    fn close(&mut self) -> Result<(), subversion::Error> {
+    fn close(&mut self) -> Result<(), subversion::Error<'static>> {
         println!("{}: Closing stream", self.log_prefix);
         self.inner
             .flush()
-            .map_err(|e| subversion::Error::from_str(&e.to_string()))?;
+            .map_err(|e| subversion::Error::from_message(&e.to_string()))?;
         Ok(())
     }
 }
@@ -97,12 +97,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let backend = BufferBackend::from_vec(b"Built with builder".to_vec());
     let mut stream = StreamBuilder::new(backend).buffer_size(1024).build()?;
 
-    // Read from the stream created with builder
-    let mut buf = vec![0u8; 18];
-    stream.read(&mut buf)?;
+    // Actually use the stream to demonstrate it works
+    let mut buffer = vec![0u8; 18];
+    let bytes_read = stream.read(&mut buffer)?;
+    println!("   Stream created with builder pattern");
     println!(
-        "   Read from builder stream: {:?}",
-        String::from_utf8_lossy(&buf)
+        "   Read {} bytes: {:?}",
+        bytes_read,
+        String::from_utf8_lossy(&buffer[..bytes_read])
     );
 
     // Example 5: Read-only and Write-only backends

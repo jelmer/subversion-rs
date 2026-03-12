@@ -26,7 +26,7 @@ impl From<subversion_sys::svn_subst_eol_style_t> for EolStyle {
             subversion_sys::svn_subst_eol_style_svn_subst_eol_style_none => EolStyle::None,
             subversion_sys::svn_subst_eol_style_svn_subst_eol_style_native => EolStyle::Native,
             subversion_sys::svn_subst_eol_style_svn_subst_eol_style_fixed => EolStyle::Fixed,
-            _ => EolStyle::Unknown,
+            _ => unreachable!("unknown svn_subst_eol_style_t value: {}", style),
         }
     }
 }
@@ -88,30 +88,27 @@ pub fn translation_required(
     force_eol_check: bool,
 ) -> bool {
     with_tmp_pool(|pool| {
-        let eol_ptr = match eol {
-            Some(s) => {
-                let cstr = std::ffi::CString::new(s).unwrap();
-                cstr.as_ptr()
-            }
-            None => std::ptr::null(),
-        };
+        let eol_cstr = eol.map(|s| std::ffi::CString::new(s).unwrap());
+        let eol_ptr = eol_cstr
+            .as_ref()
+            .map(|c| c.as_ptr())
+            .unwrap_or(std::ptr::null());
 
         let keywords_hash = match keywords {
             Some(kw) => {
-                // Create C strings that will live for the duration of the call
-                let c_strings: Vec<_> = kw
-                    .iter()
-                    .map(|(k, v)| {
-                        (
-                            std::ffi::CString::new(k.as_str()).unwrap(),
-                            std::ffi::CString::new(v.as_str()).unwrap(),
-                        )
-                    })
-                    .collect();
                 let mut hash = apr::hash::Hash::new(pool);
-                for ((k, _), (_, v_cstr)) in kw.iter().zip(c_strings.iter()) {
+                for (k, v) in kw.iter() {
                     unsafe {
-                        hash.insert(k.as_bytes(), v_cstr.as_ptr() as *mut std::ffi::c_void);
+                        // Copy key into pool to ensure it outlives the hash
+                        let k_pooled = apr::strings::pstrdup_raw(k, pool).unwrap();
+                        // Create svn_string_t for the value (SVN expects svn_string_t*, not const char*)
+                        let v_cstr = std::ffi::CString::new(v.as_str()).unwrap();
+                        let svn_str =
+                            subversion_sys::svn_string_create(v_cstr.as_ptr(), pool.as_mut_ptr());
+                        // Use the pooled key which is null-terminated
+                        let key_slice =
+                            std::slice::from_raw_parts(k_pooled as *const u8, k.len() + 1);
+                        hash.insert(key_slice, svn_str as *mut std::ffi::c_void);
                     }
                 }
                 unsafe { hash.as_mut_ptr() }
@@ -142,7 +139,7 @@ pub fn build_keywords(
     date: Option<apr::time::Time>,
     author: Option<&str>,
     repos_root_url: Option<&str>,
-) -> Result<HashMap<String, String>, Error> {
+) -> Result<HashMap<String, String>, Error<'static>> {
     with_tmp_pool(|pool| {
         let keywords_cstr = std::ffi::CString::new(keywords_string).unwrap();
         let rev_cstr = rev.map(|s| std::ffi::CString::new(s).unwrap());
@@ -195,18 +192,31 @@ pub fn keywords_differ(
     a: Option<&HashMap<String, String>>,
     b: Option<&HashMap<String, String>>,
     compare_values: bool,
-) -> Result<bool, Error> {
+) -> Result<bool, Error<'static>> {
     with_tmp_pool(|pool| {
+        // Keep c_strings alive until after the FFI call
+        // Store key AND CString value together to ensure iteration order matches
+        // Sort by key to ensure deterministic order regardless of HashMap iteration
+        let mut c_strings_a: Vec<_> = match a {
+            Some(kw) => kw
+                .iter()
+                .map(|(k, v)| (k.as_str(), std::ffi::CString::new(v.as_str()).unwrap()))
+                .collect(),
+            None => Vec::new(),
+        };
+        c_strings_a.sort_by(|a, b| a.0.cmp(b.0));
+
         let hash_a = match a {
-            Some(kw) => {
+            Some(_kw) => {
                 let mut hash = apr::hash::Hash::new(pool);
-                let c_strings: Vec<_> = kw
-                    .iter()
-                    .map(|(k, v)| (k.as_str(), std::ffi::CString::new(v.as_str()).unwrap()))
-                    .collect();
-                for ((k, _), (_, v_cstr)) in kw.iter().zip(c_strings.iter()) {
+                // Use c_strings_a directly instead of re-iterating over HashMap
+                // to ensure consistent iteration order
+                for (k, v_cstr) in c_strings_a.iter() {
                     unsafe {
-                        hash.insert(k.as_bytes(), v_cstr.as_ptr() as *mut std::ffi::c_void);
+                        // Create svn_string_t for the value (SVN expects svn_string_t*, not const char*)
+                        let svn_str =
+                            subversion_sys::svn_string_create(v_cstr.as_ptr(), pool.as_mut_ptr());
+                        hash.insert(k.as_bytes(), svn_str as *mut std::ffi::c_void);
                     }
                 }
                 unsafe { hash.as_mut_ptr() }
@@ -214,16 +224,29 @@ pub fn keywords_differ(
             None => std::ptr::null_mut(),
         };
 
+        // Keep c_strings alive until after the FFI call
+        // Store key AND CString value together to ensure iteration order matches
+        // Sort by key to ensure deterministic order regardless of HashMap iteration
+        let mut c_strings_b: Vec<_> = match b {
+            Some(kw) => kw
+                .iter()
+                .map(|(k, v)| (k.as_str(), std::ffi::CString::new(v.as_str()).unwrap()))
+                .collect(),
+            None => Vec::new(),
+        };
+        c_strings_b.sort_by(|a, b| a.0.cmp(b.0));
+
         let hash_b = match b {
-            Some(kw) => {
+            Some(_kw) => {
                 let mut hash = apr::hash::Hash::new(pool);
-                let c_strings: Vec<_> = kw
-                    .iter()
-                    .map(|(k, v)| (k.as_str(), std::ffi::CString::new(v.as_str()).unwrap()))
-                    .collect();
-                for ((k, _), (_, v_cstr)) in kw.iter().zip(c_strings.iter()) {
+                // Use c_strings_b directly instead of re-iterating over HashMap
+                // to ensure consistent iteration order
+                for (k, v_cstr) in c_strings_b.iter() {
                     unsafe {
-                        hash.insert(k.as_bytes(), v_cstr.as_ptr() as *mut std::ffi::c_void);
+                        // Create svn_string_t for the value (SVN expects svn_string_t*, not const char*)
+                        let svn_str =
+                            subversion_sys::svn_string_create(v_cstr.as_ptr(), pool.as_mut_ptr());
+                        hash.insert(k.as_bytes(), svn_str as *mut std::ffi::c_void);
                     }
                 }
                 unsafe { hash.as_mut_ptr() }
@@ -253,52 +276,49 @@ pub fn stream_translated(
     repair: bool,
     keywords: Option<&HashMap<String, String>>,
     expand: bool,
-) -> Result<crate::io::Stream, Error> {
-    with_tmp_pool(|pool| {
-        let eol_cstr = eol_str.map(|s| std::ffi::CString::new(s).unwrap());
-        let eol_ptr = eol_cstr
-            .as_ref()
-            .map(|c| c.as_ptr())
-            .unwrap_or(std::ptr::null());
+) -> Result<crate::io::Stream, Error<'static>> {
+    // Create result_pool OUTSIDE with_tmp_pool so it survives
+    let result_pool = apr::Pool::new();
 
-        let keywords_hash = match keywords {
-            Some(kw) => {
-                // Create C strings that will live for the duration of the call
-                let c_strings: Vec<_> = kw
-                    .iter()
-                    .map(|(k, v)| {
-                        (
-                            std::ffi::CString::new(k.as_str()).unwrap(),
-                            std::ffi::CString::new(v.as_str()).unwrap(),
-                        )
-                    })
-                    .collect();
-                let mut hash = apr::hash::Hash::new(pool);
-                for ((k, _), (_, v_cstr)) in kw.iter().zip(c_strings.iter()) {
-                    unsafe {
-                        hash.insert(k.as_bytes(), v_cstr.as_ptr() as *mut std::ffi::c_void);
-                    }
+    // Copy eol_str into result_pool so it survives
+    let eol_ptr = match eol_str {
+        Some(s) => apr::strings::pstrdup_raw(s, &result_pool)?,
+        None => std::ptr::null(),
+    };
+
+    // Allocate keywords_hash in result_pool, not temporary pool
+    let keywords_hash = match keywords {
+        Some(kw) => {
+            // Create C strings and copy them into the result_pool using apr::strings::pstrdup
+            let mut hash = apr::hash::Hash::new(&result_pool);
+            for (k, v) in kw.iter() {
+                unsafe {
+                    // Copy both key and value into result_pool
+                    let key_ptr = apr::strings::pstrdup_raw(k, &result_pool)?;
+                    let val_ptr = apr::strings::pstrdup_raw(v, &result_pool)?;
+                    hash.insert(
+                        std::slice::from_raw_parts(key_ptr as *const u8, k.len()),
+                        val_ptr as *mut std::ffi::c_void,
+                    );
                 }
-                unsafe { hash.as_mut_ptr() }
             }
-            None => std::ptr::null_mut(),
-        };
-
-        let result_pool = apr::Pool::new();
-
-        unsafe {
-            let translated_stream = subversion_sys::svn_subst_stream_translated(
-                source_stream.as_mut_ptr(),
-                eol_ptr,
-                if repair { 1 } else { 0 },
-                keywords_hash,
-                if expand { 1 } else { 0 },
-                result_pool.as_mut_ptr(),
-            );
-
-            Ok(crate::io::Stream::from_ptr(translated_stream, result_pool))
+            unsafe { hash.as_mut_ptr() }
         }
-    })
+        None => std::ptr::null_mut(),
+    };
+
+    unsafe {
+        let translated_stream = subversion_sys::svn_subst_stream_translated(
+            source_stream.as_mut_ptr(),
+            eol_ptr,
+            if repair { 1 } else { 0 },
+            keywords_hash,
+            if expand { 1 } else { 0 },
+            result_pool.as_mut_ptr(),
+        );
+
+        Ok(crate::io::Stream::from_ptr(translated_stream, result_pool))
+    }
 }
 
 /// Create a translated stream for converting to normal form
@@ -311,55 +331,52 @@ pub fn stream_translated_to_normal_form(
     eol_str: Option<&str>,
     always_repair_eols: bool,
     keywords: Option<&HashMap<String, String>>,
-) -> Result<crate::io::Stream, Error> {
-    with_tmp_pool(|pool| {
-        let eol_cstr = eol_str.map(|s| std::ffi::CString::new(s).unwrap());
-        let eol_ptr = eol_cstr
-            .as_ref()
-            .map(|c| c.as_ptr())
-            .unwrap_or(std::ptr::null());
+) -> Result<crate::io::Stream, Error<'static>> {
+    // Create result_pool OUTSIDE with_tmp_pool so it survives
+    let result_pool = apr::Pool::new();
 
-        let keywords_hash = match keywords {
-            Some(kw) => {
-                // Create C strings that will live for the duration of the call
-                let c_strings: Vec<_> = kw
-                    .iter()
-                    .map(|(k, v)| {
-                        (
-                            std::ffi::CString::new(k.as_str()).unwrap(),
-                            std::ffi::CString::new(v.as_str()).unwrap(),
-                        )
-                    })
-                    .collect();
-                let mut hash = apr::hash::Hash::new(pool);
-                for ((k, _), (_, v_cstr)) in kw.iter().zip(c_strings.iter()) {
-                    unsafe {
-                        hash.insert(k.as_bytes(), v_cstr.as_ptr() as *mut std::ffi::c_void);
-                    }
+    // Copy eol_str into result_pool so it survives
+    let eol_ptr = match eol_str {
+        Some(s) => apr::strings::pstrdup_raw(s, &result_pool)?,
+        None => std::ptr::null(),
+    };
+
+    // Allocate keywords_hash in result_pool, not temporary pool
+    let keywords_hash = match keywords {
+        Some(kw) => {
+            // Create C strings and copy them into the result_pool using apr::strings::pstrdup
+            let mut hash = apr::hash::Hash::new(&result_pool);
+            for (k, v) in kw.iter() {
+                unsafe {
+                    // Copy both key and value into result_pool
+                    let key_ptr = apr::strings::pstrdup_raw(k, &result_pool)?;
+                    let val_ptr = apr::strings::pstrdup_raw(v, &result_pool)?;
+                    hash.insert(
+                        std::slice::from_raw_parts(key_ptr as *const u8, k.len()),
+                        val_ptr as *mut std::ffi::c_void,
+                    );
                 }
-                unsafe { hash.as_mut_ptr() }
             }
-            None => std::ptr::null_mut(),
-        };
-
-        let result_pool = apr::Pool::new();
-
-        unsafe {
-            let mut translated_stream: *mut subversion_sys::svn_stream_t = std::ptr::null_mut();
-            let err = subversion_sys::svn_subst_stream_translated_to_normal_form(
-                &mut translated_stream,
-                source_stream.as_mut_ptr(),
-                eol_style.into(),
-                eol_ptr,
-                if always_repair_eols { 1 } else { 0 },
-                keywords_hash,
-                result_pool.as_mut_ptr(),
-            );
-            Error::from_raw(err)?;
-
-            Ok(crate::io::Stream::from_ptr(translated_stream, result_pool))
+            unsafe { hash.as_mut_ptr() }
         }
-    })
+        None => std::ptr::null_mut(),
+    };
+
+    unsafe {
+        let mut translated_stream: *mut subversion_sys::svn_stream_t = std::ptr::null_mut();
+        let err = subversion_sys::svn_subst_stream_translated_to_normal_form(
+            &mut translated_stream,
+            source_stream.as_mut_ptr(),
+            eol_style.into(),
+            eol_ptr,
+            if always_repair_eols { 1 } else { 0 },
+            keywords_hash,
+            result_pool.as_mut_ptr(),
+        );
+        Error::from_raw(err)?;
+
+        Ok(crate::io::Stream::from_ptr(translated_stream, result_pool))
+    }
 }
 
 /// Copy and translate a file with keyword and EOL substitution
@@ -374,7 +391,7 @@ pub fn translate_stream(
     repair: bool,
     keywords: Option<&HashMap<String, String>>,
     expand: bool,
-) -> Result<(), Error> {
+) -> Result<(), Error<'static>> {
     with_tmp_pool(|pool| {
         let eol_cstr = eol_str.map(|s| std::ffi::CString::new(s).unwrap());
         let eol_ptr = eol_cstr
@@ -384,20 +401,19 @@ pub fn translate_stream(
 
         let keywords_hash = match keywords {
             Some(kw) => {
-                // Create C strings that will live for the duration of the call
-                let c_strings: Vec<_> = kw
-                    .iter()
-                    .map(|(k, v)| {
-                        (
-                            std::ffi::CString::new(k.as_str()).unwrap(),
-                            std::ffi::CString::new(v.as_str()).unwrap(),
-                        )
-                    })
-                    .collect();
                 let mut hash = apr::hash::Hash::new(pool);
-                for ((k, _), (_, v_cstr)) in kw.iter().zip(c_strings.iter()) {
+                for (k, v) in kw.iter() {
                     unsafe {
-                        hash.insert(k.as_bytes(), v_cstr.as_ptr() as *mut std::ffi::c_void);
+                        // Copy key into pool to ensure it outlives the hash
+                        let k_pooled = apr::strings::pstrdup_raw(k, pool).unwrap();
+                        // Create svn_string_t for the value (SVN expects svn_string_t*, not const char*)
+                        let v_cstr = std::ffi::CString::new(v.as_str()).unwrap();
+                        let svn_str =
+                            subversion_sys::svn_string_create(v_cstr.as_ptr(), pool.as_mut_ptr());
+                        // Use the pooled key which is null-terminated
+                        let key_slice =
+                            std::slice::from_raw_parts(k_pooled as *const u8, k.len() + 1);
+                        hash.insert(key_slice, svn_str as *mut std::ffi::c_void);
                     }
                 }
                 unsafe { hash.as_mut_ptr() }
@@ -418,6 +434,302 @@ pub fn translate_stream(
             Error::from_raw(err)
         }
     })
+}
+
+/// Copy and translate a file with keyword and EOL substitution.
+///
+/// Copies from `src` to `dst` while performing EOL and keyword translation.
+/// If `special` is true, the file is treated as a special file (symlink, etc.).
+pub fn copy_and_translate(
+    src: &std::path::Path,
+    dst: &std::path::Path,
+    eol_str: Option<&str>,
+    repair: bool,
+    keywords: Option<&HashMap<String, String>>,
+    expand: bool,
+    special: bool,
+) -> Result<(), Error<'static>> {
+    with_tmp_pool(|pool| {
+        let src_cstr = std::ffi::CString::new(
+            src.to_str()
+                .ok_or_else(|| Error::from_message("Invalid source path encoding"))?,
+        )?;
+        let dst_cstr = std::ffi::CString::new(
+            dst.to_str()
+                .ok_or_else(|| Error::from_message("Invalid destination path encoding"))?,
+        )?;
+
+        let eol_cstr = eol_str.map(|s| std::ffi::CString::new(s).unwrap());
+        let eol_ptr = eol_cstr
+            .as_ref()
+            .map(|c| c.as_ptr())
+            .unwrap_or(std::ptr::null());
+
+        let keywords_hash = match keywords {
+            Some(kw) => {
+                let mut hash = apr::hash::Hash::new(pool);
+                for (k, v) in kw.iter() {
+                    unsafe {
+                        let k_pooled = apr::strings::pstrdup_raw(k, pool).unwrap();
+                        let v_cstr = std::ffi::CString::new(v.as_str()).unwrap();
+                        let svn_str =
+                            subversion_sys::svn_string_create(v_cstr.as_ptr(), pool.as_mut_ptr());
+                        let key_slice =
+                            std::slice::from_raw_parts(k_pooled as *const u8, k.len() + 1);
+                        hash.insert(key_slice, svn_str as *mut std::ffi::c_void);
+                    }
+                }
+                unsafe { hash.as_mut_ptr() }
+            }
+            None => std::ptr::null_mut(),
+        };
+
+        unsafe {
+            let err = subversion_sys::svn_subst_copy_and_translate4(
+                src_cstr.as_ptr(),
+                dst_cstr.as_ptr(),
+                eol_ptr,
+                if repair { 1 } else { 0 },
+                keywords_hash,
+                if expand { 1 } else { 0 },
+                if special { 1 } else { 0 },
+                None,
+                std::ptr::null_mut(),
+                pool.as_mut_ptr(),
+            );
+            Error::from_raw(err)
+        }
+    })
+}
+
+/// Translate a string with keyword and EOL substitution.
+///
+/// Returns the translated string.
+pub fn translate_cstring(
+    src: &str,
+    eol_str: Option<&str>,
+    repair: bool,
+    keywords: Option<&HashMap<String, String>>,
+    expand: bool,
+) -> Result<String, Error<'static>> {
+    with_tmp_pool(|pool| {
+        let src_cstr = std::ffi::CString::new(src)?;
+        let eol_cstr = eol_str.map(|s| std::ffi::CString::new(s).unwrap());
+        let eol_ptr = eol_cstr
+            .as_ref()
+            .map(|c| c.as_ptr())
+            .unwrap_or(std::ptr::null());
+
+        let keywords_hash = match keywords {
+            Some(kw) => {
+                let mut hash = apr::hash::Hash::new(pool);
+                for (k, v) in kw.iter() {
+                    unsafe {
+                        let k_pooled = apr::strings::pstrdup_raw(k, pool).unwrap();
+                        let v_cstr = std::ffi::CString::new(v.as_str()).unwrap();
+                        let svn_str =
+                            subversion_sys::svn_string_create(v_cstr.as_ptr(), pool.as_mut_ptr());
+                        let key_slice =
+                            std::slice::from_raw_parts(k_pooled as *const u8, k.len() + 1);
+                        hash.insert(key_slice, svn_str as *mut std::ffi::c_void);
+                    }
+                }
+                unsafe { hash.as_mut_ptr() }
+            }
+            None => std::ptr::null_mut(),
+        };
+
+        let mut dst_ptr: *const std::ffi::c_char = std::ptr::null();
+
+        unsafe {
+            let err = subversion_sys::svn_subst_translate_cstring2(
+                src_cstr.as_ptr(),
+                &mut dst_ptr,
+                eol_ptr,
+                if repair { 1 } else { 0 },
+                keywords_hash,
+                if expand { 1 } else { 0 },
+                pool.as_mut_ptr(),
+            );
+            Error::from_raw(err)?;
+
+            if dst_ptr.is_null() {
+                return Ok(String::new());
+            }
+
+            Ok(std::ffi::CStr::from_ptr(dst_ptr)
+                .to_str()
+                .map_err(|_| Error::from_message("Translated string is not valid UTF-8"))?
+                .to_string())
+        }
+    })
+}
+
+/// Translate a string to UTF-8 and LF line endings.
+///
+/// Returns the translated string and flags indicating what translations were performed.
+pub fn translate_string(
+    value: &[u8],
+    encoding: Option<&str>,
+    repair: bool,
+) -> Result<(Vec<u8>, bool, bool), Error<'static>> {
+    with_tmp_pool(|pool| {
+        let encoding_cstr = encoding.map(|s| std::ffi::CString::new(s).unwrap());
+        let encoding_ptr = encoding_cstr
+            .as_ref()
+            .map(|c| c.as_ptr())
+            .unwrap_or(std::ptr::null());
+
+        // Create svn_string_t for input
+        let input_str = unsafe {
+            subversion_sys::svn_string_ncreate(
+                value.as_ptr() as *const std::ffi::c_char,
+                value.len(),
+                pool.as_mut_ptr(),
+            )
+        };
+
+        let mut new_value: *mut subversion_sys::svn_string_t = std::ptr::null_mut();
+        let mut translated_to_utf8: i32 = 0;
+        let mut translated_line_endings: i32 = 0;
+
+        unsafe {
+            let err = subversion_sys::svn_subst_translate_string2(
+                &mut new_value,
+                &mut translated_to_utf8,
+                &mut translated_line_endings,
+                input_str,
+                encoding_ptr,
+                if repair { 1 } else { 0 },
+                pool.as_mut_ptr(),
+                pool.as_mut_ptr(),
+            );
+            Error::from_raw(err)?;
+
+            if new_value.is_null() || (*new_value).data.is_null() {
+                return Ok((Vec::new(), false, false));
+            }
+
+            let data = std::slice::from_raw_parts((*new_value).data as *const u8, (*new_value).len);
+            Ok((
+                data.to_vec(),
+                translated_to_utf8 != 0,
+                translated_line_endings != 0,
+            ))
+        }
+    })
+}
+
+/// Open a stream for reading a special file (symlink, etc.).
+///
+/// Returns a stream that reads the "normal form" content of the special file.
+pub fn read_specialfile(path: &std::path::Path) -> Result<crate::io::Stream, Error<'static>> {
+    let pool = apr::Pool::new();
+    let path_cstr = std::ffi::CString::new(
+        path.to_str()
+            .ok_or_else(|| Error::from_message("Invalid path encoding"))?,
+    )?;
+
+    let mut stream: *mut subversion_sys::svn_stream_t = std::ptr::null_mut();
+
+    unsafe {
+        let err = subversion_sys::svn_subst_read_specialfile(
+            &mut stream,
+            path_cstr.as_ptr(),
+            pool.as_mut_ptr(),
+            pool.as_mut_ptr(),
+        );
+        Error::from_raw(err)?;
+
+        Ok(crate::io::Stream::from_ptr(stream, pool))
+    }
+}
+
+/// Create a stream for writing a special file (symlink, etc.).
+///
+/// Returns a stream that accepts content in "normal form" and creates
+/// the special file when closed.
+pub fn create_specialfile(path: &std::path::Path) -> Result<crate::io::Stream, Error<'static>> {
+    let pool = apr::Pool::new();
+    let path_cstr = std::ffi::CString::new(
+        path.to_str()
+            .ok_or_else(|| Error::from_message("Invalid path encoding"))?,
+    )?;
+
+    let mut stream: *mut subversion_sys::svn_stream_t = std::ptr::null_mut();
+
+    unsafe {
+        let err = subversion_sys::svn_subst_create_specialfile(
+            &mut stream,
+            path_cstr.as_ptr(),
+            pool.as_mut_ptr(),
+            pool.as_mut_ptr(),
+        );
+        Error::from_raw(err)?;
+
+        Ok(crate::io::Stream::from_ptr(stream, pool))
+    }
+}
+
+/// Create a detranslated stream (from working copy to repository form).
+///
+/// Returns a stream that translates content from the working copy format
+/// to the repository format.
+pub fn stream_detranslated(
+    src_path: &std::path::Path,
+    eol_style: EolStyle,
+    eol_str: Option<&str>,
+    always_repair_eols: bool,
+    keywords: Option<&HashMap<String, String>>,
+    special: bool,
+) -> Result<crate::io::Stream, Error<'static>> {
+    let pool = apr::Pool::new();
+    let path_cstr = std::ffi::CString::new(
+        src_path
+            .to_str()
+            .ok_or_else(|| Error::from_message("Invalid path encoding"))?,
+    )?;
+
+    let eol_ptr = match eol_str {
+        Some(s) => apr::strings::pstrdup_raw(s, &pool)?,
+        None => std::ptr::null(),
+    };
+
+    let keywords_hash = match keywords {
+        Some(kw) => {
+            let mut hash = apr::hash::Hash::new(&pool);
+            for (k, v) in kw.iter() {
+                unsafe {
+                    let key_ptr = apr::strings::pstrdup_raw(k, &pool)?;
+                    let val_ptr = apr::strings::pstrdup_raw(v, &pool)?;
+                    hash.insert(
+                        std::slice::from_raw_parts(key_ptr as *const u8, k.len()),
+                        val_ptr as *mut std::ffi::c_void,
+                    );
+                }
+            }
+            unsafe { hash.as_mut_ptr() }
+        }
+        None => std::ptr::null_mut(),
+    };
+
+    let mut stream: *mut subversion_sys::svn_stream_t = std::ptr::null_mut();
+
+    unsafe {
+        let err = subversion_sys::svn_subst_stream_detranslated(
+            &mut stream,
+            path_cstr.as_ptr(),
+            eol_style.into(),
+            eol_ptr,
+            if always_repair_eols { 1 } else { 0 },
+            keywords_hash,
+            if special { 1 } else { 0 },
+            pool.as_mut_ptr(),
+        );
+        Error::from_raw(err)?;
+
+        Ok(crate::io::Stream::from_ptr(stream, pool))
+    }
 }
 
 #[cfg(test)]
@@ -498,7 +810,6 @@ mod tests {
         assert!(empty_keywords.is_empty());
     }
 
-    #[ignore] // TODO: Memory management issue causing segfault
     #[test]
     fn test_keywords_differ() {
         let mut kw1 = HashMap::new();
@@ -529,5 +840,174 @@ mod tests {
 
         // Both empty
         assert!(!keywords_differ(None, None, false).unwrap());
+    }
+
+    #[test]
+    fn test_eol_style_conversions() {
+        // Test From<svn_subst_eol_style_t> for EolStyle
+        let unknown: EolStyle =
+            subversion_sys::svn_subst_eol_style_svn_subst_eol_style_unknown.into();
+        assert_eq!(unknown, EolStyle::Unknown);
+
+        let none: EolStyle = subversion_sys::svn_subst_eol_style_svn_subst_eol_style_none.into();
+        assert_eq!(none, EolStyle::None);
+
+        let native: EolStyle =
+            subversion_sys::svn_subst_eol_style_svn_subst_eol_style_native.into();
+        assert_eq!(native, EolStyle::Native);
+
+        let fixed: EolStyle = subversion_sys::svn_subst_eol_style_svn_subst_eol_style_fixed.into();
+        assert_eq!(fixed, EolStyle::Fixed);
+
+        // Test From<EolStyle> for svn_subst_eol_style_t
+        let unknown_raw: subversion_sys::svn_subst_eol_style_t = EolStyle::Unknown.into();
+        assert_eq!(
+            unknown_raw,
+            subversion_sys::svn_subst_eol_style_svn_subst_eol_style_unknown
+        );
+
+        let none_raw: subversion_sys::svn_subst_eol_style_t = EolStyle::None.into();
+        assert_eq!(
+            none_raw,
+            subversion_sys::svn_subst_eol_style_svn_subst_eol_style_none
+        );
+
+        let native_raw: subversion_sys::svn_subst_eol_style_t = EolStyle::Native.into();
+        assert_eq!(
+            native_raw,
+            subversion_sys::svn_subst_eol_style_svn_subst_eol_style_native
+        );
+
+        let fixed_raw: subversion_sys::svn_subst_eol_style_t = EolStyle::Fixed.into();
+        assert_eq!(
+            fixed_raw,
+            subversion_sys::svn_subst_eol_style_svn_subst_eol_style_fixed
+        );
+    }
+
+    #[test]
+    fn test_build_keywords_with_nulls() {
+        // Test with all None values
+        let keywords = build_keywords("Id", None, None, None, None, None).unwrap();
+        assert!(keywords.contains_key("Id"));
+
+        // Test with some None values
+        let keywords = build_keywords("Rev", Some("100"), None, None, None, None).unwrap();
+        assert!(keywords.contains_key("Rev"));
+    }
+
+    #[test]
+    fn test_stream_translated() {
+        // Create a simple memory stream with test content
+        let content = b"Test content with $Id$ keyword\n";
+        let source = crate::io::Stream::from(&content[..]);
+
+        // Test basic stream translation without keywords
+        stream_translated(source, Some("\n"), false, None, true).unwrap();
+    }
+
+    #[test]
+    fn test_stream_translated_with_keywords() {
+        let content = b"Test content with $Id$ keyword\n";
+        let source = crate::io::Stream::from(&content[..]);
+
+        let mut keywords = HashMap::new();
+        keywords.insert("Id".to_string(), "test-id".to_string());
+
+        stream_translated(source, Some("\n"), false, Some(&keywords), true).unwrap();
+    }
+
+    #[test]
+    fn test_stream_translated_to_normal_form() {
+        let content = b"Test content\r\n";
+        let source = crate::io::Stream::from(&content[..]);
+
+        stream_translated_to_normal_form(source, EolStyle::Native, Some("\n"), false, None)
+            .unwrap();
+    }
+
+    #[test]
+    fn test_stream_translated_to_normal_form_with_keywords() {
+        let content = b"Test $Rev$ content\n";
+        let source = crate::io::Stream::from(&content[..]);
+
+        let mut keywords = HashMap::new();
+        keywords.insert("Rev".to_string(), "123".to_string());
+
+        stream_translated_to_normal_form(
+            source,
+            EolStyle::Fixed,
+            Some("\n"),
+            false,
+            Some(&keywords),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn test_translate_stream() {
+        let content = b"Test content\n";
+        let mut source = crate::io::Stream::from(&content[..]);
+        let mut dest = crate::io::Stream::empty();
+
+        translate_stream(&mut source, &mut dest, Some("\n"), false, None, false).unwrap();
+    }
+
+    #[test]
+    fn test_translate_stream_with_keywords() {
+        let content = b"Test $Id$ content\n";
+        let mut source = crate::io::Stream::from(&content[..]);
+        let mut dest = crate::io::Stream::empty();
+
+        let mut keywords = HashMap::new();
+        keywords.insert("Id".to_string(), "test-id".to_string());
+
+        translate_stream(
+            &mut source,
+            &mut dest,
+            Some("\n"),
+            false,
+            Some(&keywords),
+            true,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn test_translate_cstring() {
+        let src = "Hello\nWorld\n";
+        let result = translate_cstring(src, Some("\n"), false, None, false).unwrap();
+        assert_eq!(result, "Hello\nWorld\n");
+    }
+
+    #[test]
+    fn test_translate_cstring_with_eol() {
+        let src = "Hello\nWorld\n";
+        let result = translate_cstring(src, Some("\r\n"), false, None, false).unwrap();
+        assert_eq!(result, "Hello\r\nWorld\r\n");
+    }
+
+    #[test]
+    fn test_translate_string() {
+        let value = b"Hello\nWorld\n";
+        let (result, to_utf8, line_endings) = translate_string(value, None, false).unwrap();
+        assert_eq!(result, b"Hello\nWorld\n");
+        // Input is already UTF-8 with LF endings, so no translation needed
+        assert!(!to_utf8);
+        assert!(!line_endings);
+    }
+
+    #[test]
+    fn test_copy_and_translate() {
+        let td = tempfile::tempdir().unwrap();
+        let src = td.path().join("src.txt");
+        let dst = td.path().join("dst.txt");
+
+        std::fs::write(&src, "Hello\nWorld\n").unwrap();
+
+        copy_and_translate(&src, &dst, Some("\n"), false, None, false, false).unwrap();
+
+        let content = std::fs::read_to_string(&dst).unwrap();
+        assert_eq!(content, "Hello\nWorld\n");
     }
 }

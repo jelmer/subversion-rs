@@ -16,32 +16,40 @@ documentation = "https://docs.rs/subversion"
 doctest = false
 
 [dependencies]
-apr = "0.3"
+apr = "0.4.2"
 bitflags = "2.10.0"
 apr-sys = "0.2.1"
-atty = "0.2"
+is-terminal = "0.4"
 ctor = ">=0.2.0,<0.7.0"
-indexmap = "2.13"
+indexmap = "2.12"
 lazy_static = "1.5.0"
 libc = "0.2"
-pyo3 = { version = "0.27", optional = true }
-url = { version = "2.5.8", optional = true }
+url = { version = "2.5.7", optional = true }
 subversion-sys = { version = "0.0.8", path = "subversion-sys", default-features = false }
 
 [features]
-default = ["ra", "wc", "client", "delta"]
-pyo3 = ["dep:pyo3"]
+default = ["ra", "wc", "client", "delta", "repos"]
 url = ["dep:url"]
 client = ["wc", "ra", "subversion-sys/client"]
 ra = ["delta", "subversion-sys/ra"]
 wc = ["delta", "subversion-sys/wc"]
 delta = ["subversion-sys/delta"]
-# Enable zero-copy borrowed views for high-performance operations
-# This exposes lifetime-bound types that borrow from pools
-zero-copy = []
+repos = ["delta"]
+# Optional utility modules
+x509 = []
+cmdline = []
+nls = []
+utf = []
+cache = []
+
+[package.metadata.cargo-all-features]
+# Exclude utility modules from feature combination matrix — they are
+# independent of one another and of the core features, so testing every
+# combination is wasteful.
+denylist = ["x509", "cmdline", "nls", "utf", "cache", "url"]
 
 [dev-dependencies]
-tempfile = "3.24.0"
+tempfile = "3.23.0"
 
 [[example]]
 name = "checkout"

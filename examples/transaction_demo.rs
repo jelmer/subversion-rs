@@ -2,17 +2,17 @@ use std::io::Write;
 use subversion::fs::Fs;
 use subversion::Revnum;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
     // Create a temporary filesystem for demonstration
     let temp_dir = tempfile::tempdir()?;
     let fs_path = temp_dir.path().join("test-fs");
 
     println!("Creating filesystem at: {:?}", fs_path);
-    let fs = Fs::create(&fs_path)?;
+    let fs = Fs::create(&fs_path).map_err(|e| e.to_string())?;
 
     // Begin a transaction
     println!("Beginning transaction...");
-    let mut txn = fs.begin_txn(Revnum::from(0u32))?;
+    let mut txn = fs.begin_txn(Revnum::from(0u32), 0)?;
 
     // Get transaction information
     let txn_name = txn.name()?;
@@ -38,12 +38,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     root.make_file("trunk/src/main.rs")?;
 
     // Add content to files
-    let mut stream = root.apply_text("trunk/README.txt")?;
+    let mut stream = root.apply_text("trunk/README.txt", None)?;
     stream.write_all(b"This is a demo repository.\n")?;
     stream.write_all(b"Created using Subversion Rust bindings.\n")?;
     drop(stream);
 
-    let mut stream = root.apply_text("trunk/src/main.rs")?;
+    let mut stream = root.apply_text("trunk/src/main.rs", None)?;
     stream.write_all(b"fn main() {\n")?;
     stream.write_all(b"    println!(\"Hello from SVN!\");\n")?;
     stream.write_all(b"}\n")?;
@@ -72,7 +72,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("trunk/README.txt exists as: {:?}", readme_kind);
 
     // Show properties
-    let props = committed_root.proplist("trunk/src/main.rs")?;
+    let props = committed_root
+        .proplist("trunk/src/main.rs")
+        .map_err(|e| e.to_string())?;
     println!("Properties on trunk/src/main.rs:");
     for (key, value) in props {
         println!("  {}: {}", key, String::from_utf8_lossy(&value));

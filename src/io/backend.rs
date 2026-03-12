@@ -13,29 +13,29 @@ use std::io::{Read, Write};
 /// so you only need to implement the operations your backend supports.
 pub trait StreamBackend: Send + 'static {
     /// Read data from the stream
-    fn read(&mut self, buf: &mut [u8]) -> Result<usize, Error> {
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, Error<'static>> {
         let _ = buf;
-        Err(Error::from_str("Read not supported"))
+        Err(Error::from_message("Read not supported"))
     }
 
     /// Write data to the stream
-    fn write(&mut self, buf: &[u8]) -> Result<usize, Error> {
+    fn write(&mut self, buf: &[u8]) -> Result<usize, Error<'static>> {
         let _ = buf;
-        Err(Error::from_str("Write not supported"))
+        Err(Error::from_message("Write not supported"))
     }
 
     /// Close the stream and flush any pending data
-    fn close(&mut self) -> Result<(), Error> {
+    fn close(&mut self) -> Result<(), Error<'static>> {
         Ok(())
     }
 
     /// Check if data is available without blocking
-    fn data_available(&mut self) -> Result<bool, Error> {
+    fn data_available(&mut self) -> Result<bool, Error<'static>> {
         Ok(true)
     }
 
     /// Skip forward in the stream
-    fn skip(&mut self, count: usize) -> Result<usize, Error> {
+    fn skip(&mut self, count: usize) -> Result<usize, Error<'static>> {
         // Default implementation using read
         let mut buf = vec![0u8; count.min(8192)];
         let mut total_skipped = 0;
@@ -58,18 +58,18 @@ pub trait StreamBackend: Send + 'static {
     }
 
     /// Create a mark at the current position (if supported)
-    fn mark(&mut self) -> Result<StreamMark, Error> {
-        Err(Error::from_str("Mark not supported"))
+    fn mark(&mut self) -> Result<StreamMark, Error<'static>> {
+        Err(Error::from_message("Mark not supported"))
     }
 
     /// Seek to a previously created mark (if supported)
-    fn seek(&mut self, _mark: &StreamMark) -> Result<(), Error> {
-        Err(Error::from_str("Seek not supported"))
+    fn seek(&mut self, _mark: &StreamMark) -> Result<(), Error<'static>> {
+        Err(Error::from_message("Seek not supported"))
     }
 
     /// Reset to the beginning of the stream (if supported)
-    fn reset(&mut self) -> Result<(), Error> {
-        Err(Error::from_str("Reset not supported"))
+    fn reset(&mut self) -> Result<(), Error<'static>> {
+        Err(Error::from_message("Reset not supported"))
     }
 
     /// Check if this backend supports reset
@@ -89,16 +89,16 @@ impl<T> StreamBackend for T
 where
     T: Read + Write + Send + 'static,
 {
-    fn read(&mut self, buf: &mut [u8]) -> Result<usize, Error> {
-        Read::read(self, buf).map_err(|e| Error::from_str(&e.to_string()))
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, Error<'static>> {
+        Read::read(self, buf).map_err(|e| Error::from_message(&e.to_string()))
     }
 
-    fn write(&mut self, buf: &[u8]) -> Result<usize, Error> {
-        Write::write(self, buf).map_err(|e| Error::from_str(&e.to_string()))
+    fn write(&mut self, buf: &[u8]) -> Result<usize, Error<'static>> {
+        Write::write(self, buf).map_err(|e| Error::from_message(&e.to_string()))
     }
 
-    fn close(&mut self) -> Result<(), Error> {
-        Write::flush(self).map_err(|e| Error::from_str(&e.to_string()))
+    fn close(&mut self) -> Result<(), Error<'static>> {
+        Write::flush(self).map_err(|e| Error::from_message(&e.to_string()))
     }
 }
 
@@ -116,6 +116,7 @@ impl Default for BufferBackend {
 }
 
 impl BufferBackend {
+    /// Creates a new empty buffer backend.
     pub fn new() -> Self {
         Self {
             buffer: Vec::new(),
@@ -124,6 +125,7 @@ impl BufferBackend {
         }
     }
 
+    /// Creates a new buffer backend with the specified capacity.
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             buffer: Vec::with_capacity(capacity),
@@ -132,6 +134,7 @@ impl BufferBackend {
         }
     }
 
+    /// Creates a buffer backend from an existing vector.
     pub fn from_vec(buffer: Vec<u8>) -> Self {
         let len = buffer.len();
         Self {
@@ -143,7 +146,7 @@ impl BufferBackend {
 }
 
 impl StreamBackend for BufferBackend {
-    fn read(&mut self, buf: &mut [u8]) -> Result<usize, Error> {
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, Error<'static>> {
         let available = self.write_pos.saturating_sub(self.read_pos);
         let to_read = buf.len().min(available);
 
@@ -155,7 +158,7 @@ impl StreamBackend for BufferBackend {
         Ok(to_read)
     }
 
-    fn write(&mut self, buf: &[u8]) -> Result<usize, Error> {
+    fn write(&mut self, buf: &[u8]) -> Result<usize, Error<'static>> {
         // Ensure buffer has enough capacity
         if self.write_pos + buf.len() > self.buffer.len() {
             self.buffer.resize(self.write_pos + buf.len(), 0);
@@ -167,7 +170,7 @@ impl StreamBackend for BufferBackend {
         Ok(buf.len())
     }
 
-    fn reset(&mut self) -> Result<(), Error> {
+    fn reset(&mut self) -> Result<(), Error<'static>> {
         self.read_pos = 0;
         Ok(())
     }
@@ -180,19 +183,19 @@ impl StreamBackend for BufferBackend {
         true
     }
 
-    fn mark(&mut self) -> Result<StreamMark, Error> {
+    fn mark(&mut self) -> Result<StreamMark, Error<'static>> {
         Ok(StreamMark {
             position: self.read_pos as u64,
         })
     }
 
-    fn seek(&mut self, mark: &StreamMark) -> Result<(), Error> {
+    fn seek(&mut self, mark: &StreamMark) -> Result<(), Error<'static>> {
         let pos = mark.position as usize;
         if pos <= self.write_pos {
             self.read_pos = pos;
             Ok(())
         } else {
-            Err(Error::from_str("Seek position out of bounds"))
+            Err(Error::from_message("Seek position out of bounds"))
         }
     }
 }
@@ -203,16 +206,17 @@ pub struct ReadOnlyBackend<R: Read + Send + 'static> {
 }
 
 impl<R: Read + Send + 'static> ReadOnlyBackend<R> {
+    /// Creates a new read-only backend from a reader.
     pub fn new(reader: R) -> Self {
         Self { reader }
     }
 }
 
 impl<R: Read + Send + 'static> StreamBackend for ReadOnlyBackend<R> {
-    fn read(&mut self, buf: &mut [u8]) -> Result<usize, Error> {
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, Error<'static>> {
         self.reader
             .read(buf)
-            .map_err(|e| Error::from_str(&e.to_string()))
+            .map_err(|e| Error::from_message(&e.to_string()))
     }
 }
 
@@ -222,21 +226,22 @@ pub struct WriteOnlyBackend<W: Write + Send + 'static> {
 }
 
 impl<W: Write + Send + 'static> WriteOnlyBackend<W> {
+    /// Creates a new write-only backend from a writer.
     pub fn new(writer: W) -> Self {
         Self { writer }
     }
 }
 
 impl<W: Write + Send + 'static> StreamBackend for WriteOnlyBackend<W> {
-    fn write(&mut self, buf: &[u8]) -> Result<usize, Error> {
+    fn write(&mut self, buf: &[u8]) -> Result<usize, Error<'static>> {
         self.writer
             .write(buf)
-            .map_err(|e| Error::from_str(&e.to_string()))
+            .map_err(|e| Error::from_message(&e.to_string()))
     }
 
-    fn close(&mut self) -> Result<(), Error> {
+    fn close(&mut self) -> Result<(), Error<'static>> {
         self.writer
             .flush()
-            .map_err(|e| Error::from_str(&e.to_string()))
+            .map_err(|e| Error::from_message(&e.to_string()))
     }
 }
