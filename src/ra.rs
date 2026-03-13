@@ -1701,12 +1701,14 @@ impl<'a> Session<'a> {
         mut revstart: impl FnMut(
             Revnum,
             &HashMap<String, Vec<u8>>,
-        ) -> Result<crate::delta::WrapEditor<'static>, Error<'static>>,
+        ) -> Result<crate::delta::WrapEditor<'static>, Error<'static>>
+            + 'static,
         mut revfinish: impl FnMut(
             Revnum,
             &HashMap<String, Vec<u8>>,
             &mut crate::delta::WrapEditor<'static>,
-        ) -> Result<(), Error<'static>>,
+        ) -> Result<(), Error<'static>>
+            + 'static,
     ) -> Result<(), Error<'static>> {
         // We use raw pointers to the closures to pass them through C callbacks.
         // Safety: the raw pointers are only used within the scope of svn_ra_replay_range
