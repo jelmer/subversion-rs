@@ -14,8 +14,15 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v5
 
-      - name: Install apr
-        run: sudo apt install -y libapr1-dev libaprutil1-dev libutf8proc-dev
+      - name: Install dependencies
+        run: |
+          sudo apt update -y
+          sudo apt install -y libapr1-dev libaprutil1-dev libsvn-dev pkg-config libutf8proc-dev libsqlite3-dev subversion
+        # Work around https://bugs.debian.org/1055242
+      - name: "Fix up Version: field in Subversion .pc files"
+        run: |
+          svnversion=$(svn --version | grep -oP 'svn, version \K\d+\.\d+\.\d+')
+          sudo sed -i "s/^Version: \$/Version: $svnversion/" /usr/lib/*/pkgconfig/libsvn_*.pc
 
       - name: Install stable toolchain
         uses: actions-rs/toolchain@v1
@@ -24,6 +31,9 @@ jobs:
           toolchain: stable
           override: true
 
-      - run: cargo publish --token ${CRATES_TOKEN}
+      - run: cargo publish -p subversion-sys --token ${CRATES_TOKEN}
+        env:
+          CRATES_TOKEN: ${{ secrets.CRATES_TOKEN }}
+      - run: cargo publish -p subversion --token ${CRATES_TOKEN}
         env:
           CRATES_TOKEN: ${{ secrets.CRATES_TOKEN }}
