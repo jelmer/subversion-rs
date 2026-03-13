@@ -1701,139 +1701,183 @@ impl<'a> Session<'a> {
         mut revstart: impl FnMut(
             Revnum,
             &HashMap<String, Vec<u8>>,
-        ) -> Result<crate::delta::WrapEditor<'static>, Error<'static>>
-            + 'static,
+        ) -> Result<crate::delta::WrapEditor<'static>, Error<'static>>,
         mut revfinish: impl FnMut(
             Revnum,
             &HashMap<String, Vec<u8>>,
             &mut crate::delta::WrapEditor<'static>,
-        ) -> Result<(), Error<'static>>
-            + 'static,
+        ) -> Result<(), Error<'static>>,
     ) -> Result<(), Error<'static>> {
         // We use raw pointers to the closures to pass them through C callbacks.
         // Safety: the raw pointers are only used within the scope of svn_ra_replay_range
         // below, and the closures live on the stack for that entire duration.
+        //
+        // The baton stores *mut c_void pointers (not trait object fat pointers) to avoid
+        // requiring 'static bounds on the closures. The extern "C" wrapper functions
+        // cast these back to the concrete closure types via the type parameters on
+        // replay_range_inner.
         struct ReplayRangeBaton {
-            revstart: *mut dyn FnMut(
+            revstart: *mut std::ffi::c_void,
+            revfinish: *mut std::ffi::c_void,
+            current_editor: Option<crate::delta::WrapEditor<'static>>,
+        }
+
+        fn replay_range_inner<RS, RF>(
+            session_ptr: *mut subversion_sys::svn_ra_session_t,
+            start_revision: Revnum,
+            end_revision: Revnum,
+            low_water_mark: Revnum,
+            send_deltas: bool,
+            revstart: &mut RS,
+            revfinish: &mut RF,
+        ) -> Result<(), Error<'static>>
+        where
+            RS: FnMut(
                 Revnum,
                 &HashMap<String, Vec<u8>>,
-            )
-                -> Result<crate::delta::WrapEditor<'static>, Error<'static>>,
-            revfinish: *mut dyn FnMut(
+            ) -> Result<crate::delta::WrapEditor<'static>, Error<'static>>,
+            RF: FnMut(
                 Revnum,
                 &HashMap<String, Vec<u8>>,
                 &mut crate::delta::WrapEditor<'static>,
             ) -> Result<(), Error<'static>>,
-            current_editor: Option<crate::delta::WrapEditor<'static>>,
-        }
+        {
+            extern "C" fn revstart_wrapper<RS>(
+                revision: subversion_sys::svn_revnum_t,
+                replay_baton: *mut std::ffi::c_void,
+                editor: *mut *const subversion_sys::svn_delta_editor_t,
+                edit_baton: *mut *mut std::ffi::c_void,
+                rev_props: *mut apr_sys::apr_hash_t,
+                _pool: *mut apr_sys::apr_pool_t,
+            ) -> *mut subversion_sys::svn_error_t
+            where
+                RS: FnMut(
+                    Revnum,
+                    &HashMap<String, Vec<u8>>,
+                )
+                    -> Result<crate::delta::WrapEditor<'static>, Error<'static>>,
+            {
+                let baton = unsafe { &mut *(replay_baton as *mut ReplayRangeBaton) };
 
-        extern "C" fn revstart_wrapper(
-            revision: subversion_sys::svn_revnum_t,
-            replay_baton: *mut std::ffi::c_void,
-            editor: *mut *const subversion_sys::svn_delta_editor_t,
-            edit_baton: *mut *mut std::ffi::c_void,
-            rev_props: *mut apr_sys::apr_hash_t,
-            _pool: *mut apr_sys::apr_pool_t,
-        ) -> *mut subversion_sys::svn_error_t {
-            let baton = unsafe { &mut *(replay_baton as *mut ReplayRangeBaton) };
+                let rev_props_map = if rev_props.is_null() {
+                    HashMap::new()
+                } else {
+                    let prop_hash = unsafe { crate::props::PropHash::from_ptr(rev_props) };
+                    prop_hash.to_hashmap()
+                };
 
-            let rev_props_map = if rev_props.is_null() {
-                HashMap::new()
-            } else {
-                let prop_hash = unsafe { crate::props::PropHash::from_ptr(rev_props) };
-                prop_hash.to_hashmap()
-            };
-
-            let rev = match Revnum::from_raw(revision) {
-                Some(r) => r,
-                None => {
-                    return unsafe {
-                        Error::from_message("Invalid revision in replay_range revstart").into_raw()
-                    };
-                }
-            };
-
-            match (unsafe { &mut *baton.revstart })(rev, &rev_props_map) {
-                Ok(wrap_editor) => {
-                    baton.current_editor = Some(wrap_editor);
-                    let (editor_ptr, editor_baton_ptr) =
-                        baton.current_editor.as_ref().unwrap().as_raw_parts();
-                    unsafe {
-                        *editor = editor_ptr;
-                        *edit_baton = editor_baton_ptr;
+                let rev = match Revnum::from_raw(revision) {
+                    Some(r) => r,
+                    None => {
+                        return unsafe {
+                            Error::from_message("Invalid revision in replay_range revstart")
+                                .into_raw()
+                        };
                     }
-                    std::ptr::null_mut()
+                };
+
+                let revstart = unsafe { &mut *(baton.revstart as *mut RS) };
+                match revstart(rev, &rev_props_map) {
+                    Ok(wrap_editor) => {
+                        baton.current_editor = Some(wrap_editor);
+                        let (editor_ptr, editor_baton_ptr) =
+                            baton.current_editor.as_ref().unwrap().as_raw_parts();
+                        unsafe {
+                            *editor = editor_ptr;
+                            *edit_baton = editor_baton_ptr;
+                        }
+                        std::ptr::null_mut()
+                    }
+                    Err(e) => unsafe { e.into_raw() },
                 }
-                Err(e) => unsafe { e.into_raw() },
             }
+
+            extern "C" fn revfinish_wrapper<RF>(
+                revision: subversion_sys::svn_revnum_t,
+                replay_baton: *mut std::ffi::c_void,
+                _editor: *const subversion_sys::svn_delta_editor_t,
+                _edit_baton: *mut std::ffi::c_void,
+                rev_props: *mut apr_sys::apr_hash_t,
+                _pool: *mut apr_sys::apr_pool_t,
+            ) -> *mut subversion_sys::svn_error_t
+            where
+                RF: FnMut(
+                    Revnum,
+                    &HashMap<String, Vec<u8>>,
+                    &mut crate::delta::WrapEditor<'static>,
+                ) -> Result<(), Error<'static>>,
+            {
+                let baton = unsafe { &mut *(replay_baton as *mut ReplayRangeBaton) };
+
+                let rev_props_map = if rev_props.is_null() {
+                    HashMap::new()
+                } else {
+                    let prop_hash = unsafe { crate::props::PropHash::from_ptr(rev_props) };
+                    prop_hash.to_hashmap()
+                };
+
+                let rev = match Revnum::from_raw(revision) {
+                    Some(r) => r,
+                    None => {
+                        return unsafe {
+                            Error::from_message("Invalid revision in replay_range revfinish")
+                                .into_raw()
+                        };
+                    }
+                };
+
+                let revfinish = unsafe { &mut *(baton.revfinish as *mut RF) };
+                let result = match baton.current_editor.as_mut() {
+                    Some(editor) => revfinish(rev, &rev_props_map, editor),
+                    None => Err(Error::from_message(
+                        "revfinish called without a current editor",
+                    )),
+                };
+
+                // Drop the editor after revfinish
+                baton.current_editor = None;
+
+                match result {
+                    Ok(()) => std::ptr::null_mut(),
+                    Err(e) => unsafe { e.into_raw() },
+                }
+            }
+
+            let mut baton = ReplayRangeBaton {
+                revstart: revstart as *mut RS as *mut std::ffi::c_void,
+                revfinish: revfinish as *mut RF as *mut std::ffi::c_void,
+                current_editor: None,
+            };
+            let baton_ptr = &mut baton as *mut ReplayRangeBaton;
+
+            let pool = Pool::new();
+            let err = unsafe {
+                subversion_sys::svn_ra_replay_range(
+                    session_ptr,
+                    start_revision.into(),
+                    end_revision.into(),
+                    low_water_mark.into(),
+                    send_deltas.into(),
+                    Some(revstart_wrapper::<RS>),
+                    Some(revfinish_wrapper::<RF>),
+                    baton_ptr as *mut std::ffi::c_void,
+                    pool.as_mut_ptr(),
+                )
+            };
+
+            Error::from_raw(err)?;
+            Ok(())
         }
 
-        extern "C" fn revfinish_wrapper(
-            revision: subversion_sys::svn_revnum_t,
-            replay_baton: *mut std::ffi::c_void,
-            _editor: *const subversion_sys::svn_delta_editor_t,
-            _edit_baton: *mut std::ffi::c_void,
-            rev_props: *mut apr_sys::apr_hash_t,
-            _pool: *mut apr_sys::apr_pool_t,
-        ) -> *mut subversion_sys::svn_error_t {
-            let baton = unsafe { &mut *(replay_baton as *mut ReplayRangeBaton) };
-
-            let rev_props_map = if rev_props.is_null() {
-                HashMap::new()
-            } else {
-                let prop_hash = unsafe { crate::props::PropHash::from_ptr(rev_props) };
-                prop_hash.to_hashmap()
-            };
-
-            let rev = match Revnum::from_raw(revision) {
-                Some(r) => r,
-                None => {
-                    return unsafe {
-                        Error::from_message("Invalid revision in replay_range revfinish").into_raw()
-                    };
-                }
-            };
-
-            let result = match baton.current_editor.as_mut() {
-                Some(editor) => (unsafe { &mut *baton.revfinish })(rev, &rev_props_map, editor),
-                None => Err(Error::from_message(
-                    "revfinish called without a current editor",
-                )),
-            };
-
-            // Drop the editor after revfinish
-            baton.current_editor = None;
-
-            match result {
-                Ok(()) => std::ptr::null_mut(),
-                Err(e) => unsafe { e.into_raw() },
-            }
-        }
-
-        let mut baton = ReplayRangeBaton {
-            revstart: &mut revstart as *mut _ as *mut _,
-            revfinish: &mut revfinish as *mut _ as *mut _,
-            current_editor: None,
-        };
-        let baton_ptr = &mut baton as *mut ReplayRangeBaton;
-
-        let pool = Pool::new();
-        let err = unsafe {
-            subversion_sys::svn_ra_replay_range(
-                self.ptr,
-                start_revision.into(),
-                end_revision.into(),
-                low_water_mark.into(),
-                send_deltas.into(),
-                Some(revstart_wrapper),
-                Some(revfinish_wrapper),
-                baton_ptr as *mut std::ffi::c_void,
-                pool.as_mut_ptr(),
-            )
-        };
-
-        Error::from_raw(err)?;
-        Ok(())
+        replay_range_inner(
+            self.ptr,
+            start_revision,
+            end_revision,
+            low_water_mark,
+            send_deltas,
+            &mut revstart,
+            &mut revfinish,
+        )
     }
 
     /// Get the history of a file as revisions
@@ -2678,7 +2722,7 @@ pub fn abi_version() -> i32 {
     subversion_sys::SVN_RA_ABI_VERSION as i32
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "repos"))]
 mod tests {
     use super::*;
     use crate::mergeinfo::MergeinfoInheritance;

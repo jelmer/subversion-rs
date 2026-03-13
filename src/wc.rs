@@ -5469,7 +5469,7 @@ pub fn transmit_prop_deltas_dir<'a>(
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "client", feature = "repos"))]
 mod tests {
     use super::*;
     use std::path::{Path, PathBuf};

@@ -30,7 +30,7 @@ subversion-sys = { version = "0.0.8", path = "subversion-sys", default-features 
 [features]
 default = ["ra", "wc", "client", "delta", "repos"]
 url = ["dep:url"]
-client = ["wc", "ra", "subversion-sys/client"]
+client = ["wc", "ra", "repos", "subversion-sys/client"]
 ra = ["delta", "subversion-sys/ra"]
 wc = ["delta", "subversion-sys/wc"]
 delta = ["subversion-sys/delta"]
@@ -62,3 +62,11 @@ required-features = ["client"]
 [[example]]
 name = "merge_with_conflicts"
 required-features = ["client"]
+
+[[example]]
+name = "resolve_conflicts"
+required-features = ["client", "repos"]
+
+[[example]]
+name = "branch_merge"
+required-features = ["client", "repos"]

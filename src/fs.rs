@@ -5624,6 +5624,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "delta")]
     fn test_get_file_delta_stream() {
         let dir = tempdir().unwrap();
         let fs_path = dir.path().join("test-fs");
