@@ -169,76 +169,76 @@ pub fn version() -> crate::Version {
 
 // Status constants for Python compatibility
 /// Status constant indicating no status.
-pub const STATUS_NONE: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_none;
+pub const STATUS_NONE: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_none as u32;
 /// Status constant for unversioned items.
-pub const STATUS_UNVERSIONED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_unversioned;
+pub const STATUS_UNVERSIONED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_unversioned as u32;
 /// Status constant for normal versioned items.
-pub const STATUS_NORMAL: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_normal;
+pub const STATUS_NORMAL: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_normal as u32;
 /// Status constant for added items.
-pub const STATUS_ADDED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_added;
+pub const STATUS_ADDED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_added as u32;
 /// Status constant for missing items.
-pub const STATUS_MISSING: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_missing;
+pub const STATUS_MISSING: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_missing as u32;
 /// Status constant for deleted items.
-pub const STATUS_DELETED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_deleted;
+pub const STATUS_DELETED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_deleted as u32;
 /// Status constant for replaced items.
-pub const STATUS_REPLACED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_replaced;
+pub const STATUS_REPLACED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_replaced as u32;
 /// Status constant for modified items.
-pub const STATUS_MODIFIED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_modified;
+pub const STATUS_MODIFIED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_modified as u32;
 /// Status constant for merged items.
-pub const STATUS_MERGED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_merged;
+pub const STATUS_MERGED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_merged as u32;
 /// Status constant for conflicted items.
-pub const STATUS_CONFLICTED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_conflicted;
+pub const STATUS_CONFLICTED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_conflicted as u32;
 /// Status constant for ignored items.
-pub const STATUS_IGNORED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_ignored;
+pub const STATUS_IGNORED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_ignored as u32;
 /// Status constant for obstructed items.
-pub const STATUS_OBSTRUCTED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_obstructed;
+pub const STATUS_OBSTRUCTED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_obstructed as u32;
 /// Status constant for external items.
-pub const STATUS_EXTERNAL: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_external;
+pub const STATUS_EXTERNAL: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_external as u32;
 /// Status constant for incomplete items.
-pub const STATUS_INCOMPLETE: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_incomplete;
+pub const STATUS_INCOMPLETE: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_incomplete as u32;
 
 // Schedule constants for Python compatibility
 /// Schedule constant for normal items.
-pub const SCHEDULE_NORMAL: u32 = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_normal;
+pub const SCHEDULE_NORMAL: u32 = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_normal as u32;
 /// Schedule constant for items to be added.
-pub const SCHEDULE_ADD: u32 = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_add;
+pub const SCHEDULE_ADD: u32 = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_add as u32;
 /// Schedule constant for items to be deleted.
-pub const SCHEDULE_DELETE: u32 = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_delete;
+pub const SCHEDULE_DELETE: u32 = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_delete as u32;
 /// Schedule constant for items to be replaced.
-pub const SCHEDULE_REPLACE: u32 = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_replace;
+pub const SCHEDULE_REPLACE: u32 = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_replace as u32;
 
 /// Working copy status types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
 pub enum StatusKind {
     /// Not under version control
-    None = subversion_sys::svn_wc_status_kind_svn_wc_status_none,
+    None = subversion_sys::svn_wc_status_kind_svn_wc_status_none as u32,
     /// Item is not versioned
-    Unversioned = subversion_sys::svn_wc_status_kind_svn_wc_status_unversioned,
+    Unversioned = subversion_sys::svn_wc_status_kind_svn_wc_status_unversioned as u32,
     /// Item is versioned and unchanged
-    Normal = subversion_sys::svn_wc_status_kind_svn_wc_status_normal,
+    Normal = subversion_sys::svn_wc_status_kind_svn_wc_status_normal as u32,
     /// Item has been added
-    Added = subversion_sys::svn_wc_status_kind_svn_wc_status_added,
+    Added = subversion_sys::svn_wc_status_kind_svn_wc_status_added as u32,
     /// Item is missing (removed by non-svn command)
-    Missing = subversion_sys::svn_wc_status_kind_svn_wc_status_missing,
+    Missing = subversion_sys::svn_wc_status_kind_svn_wc_status_missing as u32,
     /// Item has been deleted
-    Deleted = subversion_sys::svn_wc_status_kind_svn_wc_status_deleted,
+    Deleted = subversion_sys::svn_wc_status_kind_svn_wc_status_deleted as u32,
     /// Item has been replaced
-    Replaced = subversion_sys::svn_wc_status_kind_svn_wc_status_replaced,
+    Replaced = subversion_sys::svn_wc_status_kind_svn_wc_status_replaced as u32,
     /// Item has been modified
-    Modified = subversion_sys::svn_wc_status_kind_svn_wc_status_modified,
+    Modified = subversion_sys::svn_wc_status_kind_svn_wc_status_modified as u32,
     /// Item has been merged
-    Merged = subversion_sys::svn_wc_status_kind_svn_wc_status_merged,
+    Merged = subversion_sys::svn_wc_status_kind_svn_wc_status_merged as u32,
     /// Item is in conflict
-    Conflicted = subversion_sys::svn_wc_status_kind_svn_wc_status_conflicted,
+    Conflicted = subversion_sys::svn_wc_status_kind_svn_wc_status_conflicted as u32,
     /// Item is ignored
-    Ignored = subversion_sys::svn_wc_status_kind_svn_wc_status_ignored,
+    Ignored = subversion_sys::svn_wc_status_kind_svn_wc_status_ignored as u32,
     /// Item is obstructed
-    Obstructed = subversion_sys::svn_wc_status_kind_svn_wc_status_obstructed,
+    Obstructed = subversion_sys::svn_wc_status_kind_svn_wc_status_obstructed as u32,
     /// Item is an external
-    External = subversion_sys::svn_wc_status_kind_svn_wc_status_external,
+    External = subversion_sys::svn_wc_status_kind_svn_wc_status_external as u32,
     /// Item is incomplete
-    Incomplete = subversion_sys::svn_wc_status_kind_svn_wc_status_incomplete,
+    Incomplete = subversion_sys::svn_wc_status_kind_svn_wc_status_incomplete as u32,
 }
 
 impl From<subversion_sys::svn_wc_status_kind> for StatusKind {
@@ -397,13 +397,13 @@ impl<'pool> Status<'pool> {
 #[repr(u32)]
 pub enum Schedule {
     /// Nothing scheduled
-    Normal = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_normal,
+    Normal = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_normal as u32,
     /// Scheduled for addition
-    Add = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_add,
+    Add = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_add as u32,
     /// Scheduled for deletion
-    Delete = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_delete,
+    Delete = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_delete as u32,
     /// Scheduled for replacement
-    Replace = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_replace,
+    Replace = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_replace as u32,
 }
 
 impl From<subversion_sys::svn_wc_schedule_t> for Schedule {
@@ -2081,7 +2081,7 @@ pub fn ensure_adm(
                 url_cstr.as_ptr(),
                 repos_root_cstr.as_ptr(),
                 uuid_cstr.as_ptr(),
-                revision,
+                revision as subversion_sys::svn_revnum_t,
                 subversion_sys::svn_depth_t_svn_depth_infinity,
                 pool.as_mut_ptr(),
             )
@@ -4373,7 +4373,7 @@ impl Notify {
 
     /// Get the action type
     pub fn action(&self) -> u32 {
-        unsafe { (*self.ptr).action }
+        unsafe { (*self.ptr).action.into() }
     }
 
     /// Get the path
@@ -4431,17 +4431,17 @@ impl Notify {
 
     /// Get the content state
     pub fn content_state(&self) -> u32 {
-        unsafe { (*self.ptr).content_state }
+        unsafe { (*self.ptr).content_state.into() }
     }
 
     /// Get the property state
     pub fn prop_state(&self) -> u32 {
-        unsafe { (*self.ptr).prop_state }
+        unsafe { (*self.ptr).prop_state.into() }
     }
 
     /// Get the lock state
     pub fn lock_state(&self) -> u32 {
-        unsafe { (*self.ptr).lock_state }
+        unsafe { (*self.ptr).lock_state.into() }
     }
 
     /// Get the revision
@@ -4512,32 +4512,32 @@ impl Notify {
 
     /// Get the hunk original start line (for patch operations)
     pub fn hunk_original_start(&self) -> u64 {
-        unsafe { (*self.ptr).hunk_original_start }
+        unsafe { (*self.ptr).hunk_original_start.into() }
     }
 
     /// Get the hunk original length (for patch operations)
     pub fn hunk_original_length(&self) -> u64 {
-        unsafe { (*self.ptr).hunk_original_length }
+        unsafe { (*self.ptr).hunk_original_length.into() }
     }
 
     /// Get the hunk modified start line (for patch operations)
     pub fn hunk_modified_start(&self) -> u64 {
-        unsafe { (*self.ptr).hunk_modified_start }
+        unsafe { (*self.ptr).hunk_modified_start.into() }
     }
 
     /// Get the hunk modified length (for patch operations)
     pub fn hunk_modified_length(&self) -> u64 {
-        unsafe { (*self.ptr).hunk_modified_length }
+        unsafe { (*self.ptr).hunk_modified_length.into() }
     }
 
     /// Get the line at which a hunk was matched (for patch operations)
     pub fn hunk_matched_line(&self) -> u64 {
-        unsafe { (*self.ptr).hunk_matched_line }
+        unsafe { (*self.ptr).hunk_matched_line.into() }
     }
 
     /// Get the fuzz factor the hunk was applied with (for patch operations)
     pub fn hunk_fuzz(&self) -> u64 {
-        unsafe { (*self.ptr).hunk_fuzz }
+        unsafe { (*self.ptr).hunk_fuzz.into() }
     }
 }
 
@@ -5102,8 +5102,8 @@ pub fn revision_status(
 
         let status = unsafe { *status_ptr };
         Ok((
-            status.min_rev,
-            status.max_rev,
+            status.min_rev.into(),
+            status.max_rev.into(),
             status.switched != 0,
             status.modified != 0,
         ))

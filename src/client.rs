@@ -6698,13 +6698,13 @@ impl Context {
             Ok((
                 needs_reintegration != 0,
                 yca_url_str,
-                yca_rev,
+                yca_rev.into(),
                 base_url_str,
-                base_rev,
+                base_rev.into(),
                 right_url_str,
-                right_rev,
+                right_rev.into(),
                 target_url_str,
-                target_rev_out,
+                target_rev_out.into(),
                 repos_root_url_str,
             ))
         }

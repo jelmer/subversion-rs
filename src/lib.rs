@@ -54,6 +54,10 @@
 #![deny(missing_docs)]
 #![allow(clippy::type_complexity)]
 #![allow(clippy::too_many_arguments)]
+// C type sizes differ across platforms (e.g. long is i64 on Linux, i32 on Windows),
+// so conversions that look like no-ops on one platform are needed on another.
+#![allow(clippy::unnecessary_cast)]
+#![allow(clippy::useless_conversion)]
 
 // Re-export apr_sys for internal use
 extern crate apr_sys;
@@ -331,7 +335,7 @@ impl Revnum {
 
     /// Get the raw svn_revnum_t value
     pub fn as_i64(&self) -> i64 {
-        self.0
+        self.0 as i64
     }
 }
 

@@ -2205,13 +2205,13 @@ impl<'a> Notify<'a> {
 
     /// Get the notification action type
     pub fn action(&self) -> u32 {
-        unsafe { (*self.ptr).action }
+        unsafe { (*self.ptr).action.into() }
     }
 
     /// Check if this is a verify_rev_end notification
     pub fn is_verify_rev_end(&self) -> bool {
         // svn_repos_notify_verify_rev_end value
-        self.action() == subversion_sys::svn_repos_notify_action_t_svn_repos_notify_verify_rev_end
+        self.action() == subversion_sys::svn_repos_notify_action_t_svn_repos_notify_verify_rev_end as u32
     }
 }
 
