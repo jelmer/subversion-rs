@@ -42,37 +42,58 @@ jobs:
 
     runs-on: windows-latest
 
-    defaults:
-      run:
-        shell: msys2 {0}
-
     steps:
     - uses: actions/checkout@v5
-    - uses: msys2/setup-msys2@v2
-      with:
-        msystem: MSYS
-        update: true
-        install: >-
-          base-devel
-          pkgconf
-          subversion
-          apr-devel
-          apr-util-devel
-          clang
-          rust
-    - name: "Fix up Version: field in Subversion .pc files"
+    - name: Install dependencies (vcpkg)
       run: |
-        svnversion=$(svn --version | grep -oP 'svn, version \K\d+\.\d+\.\d+')
-        sed -i "s/^Version: \$/Version: $svnversion/" /usr/share/pkgconfig/libsvn_*.pc
-    - name: "Create clang.dll symlink for bindgen"
-      run: ln -s /usr/bin/msys-clang-*.dll /usr/bin/clang.dll
+        vcpkg install subversion:x64-windows apr:x64-windows apr-util:x64-windows
+        $prefix = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows"
+        echo "SYSTEM_DEPS_APR_1_NO_PKG_CONFIG=1" >> $env:GITHUB_ENV
+        echo "SYSTEM_DEPS_APR_1_INCLUDE=$prefix\include" >> $env:GITHUB_ENV
+        echo "SYSTEM_DEPS_APR_1_SEARCH_NATIVE=$prefix\lib" >> $env:GITHUB_ENV
+        echo "SYSTEM_DEPS_APR_1_LIB=libapr-1" >> $env:GITHUB_ENV
+        echo "SYSTEM_DEPS_APR_UTIL_1_NO_PKG_CONFIG=1" >> $env:GITHUB_ENV
+        echo "SYSTEM_DEPS_APR_UTIL_1_INCLUDE=$prefix\include" >> $env:GITHUB_ENV
+        echo "SYSTEM_DEPS_APR_UTIL_1_SEARCH_NATIVE=$prefix\lib" >> $env:GITHUB_ENV
+        echo "SYSTEM_DEPS_APR_UTIL_1_LIB=libaprutil-1" >> $env:GITHUB_ENV
+        echo "SYSTEM_DEPS_LIBSVN_CLIENT_NO_PKG_CONFIG=1" >> $env:GITHUB_ENV
+        echo "SYSTEM_DEPS_LIBSVN_CLIENT_INCLUDE=$prefix\include\subversion-1;$prefix\include" >> $env:GITHUB_ENV
+        echo "SYSTEM_DEPS_LIBSVN_CLIENT_SEARCH_NATIVE=$prefix\lib" >> $env:GITHUB_ENV
+        echo "SYSTEM_DEPS_LIBSVN_CLIENT_LIB=libsvn_client-1" >> $env:GITHUB_ENV
+        echo "SYSTEM_DEPS_LIBSVN_DELTA_NO_PKG_CONFIG=1" >> $env:GITHUB_ENV
+        echo "SYSTEM_DEPS_LIBSVN_DELTA_INCLUDE=$prefix\include\subversion-1;$prefix\include" >> $env:GITHUB_ENV
+        echo "SYSTEM_DEPS_LIBSVN_DELTA_SEARCH_NATIVE=$prefix\lib" >> $env:GITHUB_ENV
+        echo "SYSTEM_DEPS_LIBSVN_DELTA_LIB=libsvn_delta-1" >> $env:GITHUB_ENV
+        echo "SYSTEM_DEPS_LIBSVN_DIFF_NO_PKG_CONFIG=1" >> $env:GITHUB_ENV
+        echo "SYSTEM_DEPS_LIBSVN_DIFF_INCLUDE=$prefix\include\subversion-1;$prefix\include" >> $env:GITHUB_ENV
+        echo "SYSTEM_DEPS_LIBSVN_DIFF_SEARCH_NATIVE=$prefix\lib" >> $env:GITHUB_ENV
+        echo "SYSTEM_DEPS_LIBSVN_DIFF_LIB=libsvn_diff-1" >> $env:GITHUB_ENV
+        echo "SYSTEM_DEPS_LIBSVN_SUBR_NO_PKG_CONFIG=1" >> $env:GITHUB_ENV
+        echo "SYSTEM_DEPS_LIBSVN_SUBR_INCLUDE=$prefix\include\subversion-1;$prefix\include" >> $env:GITHUB_ENV
+        echo "SYSTEM_DEPS_LIBSVN_SUBR_SEARCH_NATIVE=$prefix\lib" >> $env:GITHUB_ENV
+        echo "SYSTEM_DEPS_LIBSVN_SUBR_LIB=libsvn_subr-1" >> $env:GITHUB_ENV
+        echo "SYSTEM_DEPS_LIBSVN_REPOS_NO_PKG_CONFIG=1" >> $env:GITHUB_ENV
+        echo "SYSTEM_DEPS_LIBSVN_REPOS_INCLUDE=$prefix\include\subversion-1;$prefix\include" >> $env:GITHUB_ENV
+        echo "SYSTEM_DEPS_LIBSVN_REPOS_SEARCH_NATIVE=$prefix\lib" >> $env:GITHUB_ENV
+        echo "SYSTEM_DEPS_LIBSVN_REPOS_LIB=libsvn_repos-1" >> $env:GITHUB_ENV
+        echo "SYSTEM_DEPS_LIBSVN_FS_NO_PKG_CONFIG=1" >> $env:GITHUB_ENV
+        echo "SYSTEM_DEPS_LIBSVN_FS_INCLUDE=$prefix\include\subversion-1;$prefix\include" >> $env:GITHUB_ENV
+        echo "SYSTEM_DEPS_LIBSVN_FS_SEARCH_NATIVE=$prefix\lib" >> $env:GITHUB_ENV
+        echo "SYSTEM_DEPS_LIBSVN_FS_LIB=libsvn_fs-1" >> $env:GITHUB_ENV
+        echo "SYSTEM_DEPS_LIBSVN_WC_NO_PKG_CONFIG=1" >> $env:GITHUB_ENV
+        echo "SYSTEM_DEPS_LIBSVN_WC_INCLUDE=$prefix\include\subversion-1;$prefix\include" >> $env:GITHUB_ENV
+        echo "SYSTEM_DEPS_LIBSVN_WC_SEARCH_NATIVE=$prefix\lib" >> $env:GITHUB_ENV
+        echo "SYSTEM_DEPS_LIBSVN_WC_LIB=libsvn_wc-1" >> $env:GITHUB_ENV
+        echo "SYSTEM_DEPS_LIBSVN_RA_NO_PKG_CONFIG=1" >> $env:GITHUB_ENV
+        echo "SYSTEM_DEPS_LIBSVN_RA_INCLUDE=$prefix\include\subversion-1;$prefix\include" >> $env:GITHUB_ENV
+        echo "SYSTEM_DEPS_LIBSVN_RA_SEARCH_NATIVE=$prefix\lib" >> $env:GITHUB_ENV
+        echo "SYSTEM_DEPS_LIBSVN_RA_LIB=libsvn_ra-1" >> $env:GITHUB_ENV
+        echo "$prefix\bin" >> $env:GITHUB_PATH
     - name: Build
       run: cargo build
       env:
-        LIBCLANG_PATH: /usr/bin
         RUSTFLAGS: -Dwarnings
     - name: Run tests
       run: cargo test
       env:
-        LIBCLANG_PATH: /usr/bin
         RUSTFLAGS: -Dwarnings
