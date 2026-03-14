@@ -37,3 +37,22 @@ jobs:
         RUSTFLAGS: -Dwarnings
     - name: Check formatting
       run: cargo fmt -- --check
+
+  build-macos:
+
+    runs-on: macos-latest
+
+    steps:
+    - uses: actions/checkout@v5
+    - name: Install dependencies
+      run: brew install subversion pkg-config
+    - name: Install cargo-all-features
+      run: cargo install cargo-all-features
+    - name: Build
+      run: cargo build-all-features
+      env:
+        RUSTFLAGS: -Dwarnings
+    - name: Run tests
+      run: cargo test-all-features
+      env:
+        RUSTFLAGS: -Dwarnings
