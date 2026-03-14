@@ -2205,13 +2205,14 @@ impl<'a> Notify<'a> {
 
     /// Get the notification action type
     pub fn action(&self) -> u32 {
-        unsafe { (*self.ptr).action }
+        unsafe { (*self.ptr).action as u32 }
     }
 
     /// Check if this is a verify_rev_end notification
     pub fn is_verify_rev_end(&self) -> bool {
         // svn_repos_notify_verify_rev_end value
-        self.action() == subversion_sys::svn_repos_notify_action_t_svn_repos_notify_verify_rev_end
+        self.action()
+            == subversion_sys::svn_repos_notify_action_t_svn_repos_notify_verify_rev_end as u32
     }
 }
 
@@ -4246,7 +4247,7 @@ mod additional_tests {
         let repo = Repos::create(&repo_path).unwrap();
 
         // Build the repository URL from the path
-        let repo_url = format!("file://{}", repo_path.to_string_lossy());
+        let repo_url = crate::path_to_file_url(&repo_path);
 
         // Test get_commit_editor with basic parameters
         let result = repo.get_commit_editor(
@@ -4496,7 +4497,7 @@ admin = rw
         let repo = Repos::create(&repo_path).unwrap();
 
         // Build the repository URL from the path
-        let repo_url = format!("file://{}", repo_path.to_string_lossy());
+        let repo_url = crate::path_to_file_url(&repo_path);
 
         // Get a commit editor which we can use for testing reports
         let editor_result = repo.get_commit_editor(
@@ -4566,7 +4567,7 @@ admin = rw
         let repo = Repos::create(&repo_path).unwrap();
 
         // Build the repository URL
-        let repo_url = format!("file://{}", repo_path.to_string_lossy());
+        let repo_url = crate::path_to_file_url(&repo_path);
 
         // Get a commit editor using the public API
         let editor_box = repo
@@ -4760,7 +4761,7 @@ admin = rw
         let temp_dir = tempfile::tempdir().unwrap();
         let repo_path = temp_dir.path().join("test_repo");
         let repo = Repos::create(&repo_path).unwrap();
-        let repo_url = format!("file://{}", repo_path.to_string_lossy());
+        let repo_url = crate::path_to_file_url(&repo_path);
 
         // Track callback invocations
         let authz_called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -4797,7 +4798,7 @@ admin = rw
         let temp_dir = tempfile::tempdir().unwrap();
         let repo_path = temp_dir.path().join("test_repo");
         let repo = Repos::create(&repo_path).unwrap();
-        let repo_url = format!("file://{}", repo_path.to_string_lossy());
+        let repo_url = crate::path_to_file_url(&repo_path);
 
         // Get a commit editor first
         let editor_result = repo.get_commit_editor(
@@ -4902,7 +4903,7 @@ admin = rw
         let temp_dir = tempfile::tempdir().unwrap();
         let repo_path = temp_dir.path().join("test_repo");
         let repo = Repos::create(&repo_path).unwrap();
-        let repo_url = format!("file://{}", repo_path.to_string_lossy());
+        let repo_url = crate::path_to_file_url(&repo_path);
 
         // Test with txn=None - should create a new transaction internally
         let result = repo.get_commit_editor(
@@ -5157,7 +5158,7 @@ admin = rw
         let files = ["/file0.txt", "/file1.txt", "/file2.txt"];
         for (i, path) in files.iter().enumerate() {
             let mut txn = repo
-                .begin_txn_for_commit(crate::Revnum(i as i64), "author", "commit")
+                .begin_txn_for_commit(crate::Revnum(i as _), "author", "commit")
                 .unwrap();
             txn.root().unwrap().make_file(*path).unwrap();
             repo.commit_txn(txn).unwrap();

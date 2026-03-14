@@ -824,7 +824,7 @@ impl TxDeltaWindow {
 
             // Fill in ops
             for (i, &(action_code, offset, length)) in ops.iter().enumerate() {
-                (*ops_ptr.add(i)).action_code = action_code as std::os::raw::c_uint;
+                (*ops_ptr.add(i)).action_code = action_code as _;
                 (*ops_ptr.add(i)).offset = offset as apr_sys::apr_size_t;
                 (*ops_ptr.add(i)).length = length as apr_sys::apr_size_t;
             }
