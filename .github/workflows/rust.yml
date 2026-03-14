@@ -58,7 +58,6 @@ jobs:
           subversion
           clang
           rust
-          cargo
     - name: "Fix up Version: field in Subversion .pc files"
       run: |
         svnversion=$(svn --version | grep -oP 'svn, version \K\d+\.\d+\.\d+')
