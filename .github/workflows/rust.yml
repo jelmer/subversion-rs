@@ -50,14 +50,19 @@ jobs:
     - uses: actions/checkout@v5
     - uses: msys2/setup-msys2@v2
       with:
-        msystem: UCRT64
+        msystem: MSYS
         update: true
         install: >-
-          mingw-w64-ucrt-x86_64-toolchain
-          mingw-w64-ucrt-x86_64-pkgconf
-          mingw-w64-ucrt-x86_64-subversion
-          mingw-w64-ucrt-x86_64-rust
-          mingw-w64-ucrt-x86_64-clang
+          base-devel
+          pkgconf
+          subversion
+          clang
+          rust
+          cargo
+    - name: "Fix up Version: field in Subversion .pc files"
+      run: |
+        svnversion=$(svn --version | grep -oP 'svn, version \K\d+\.\d+\.\d+')
+        sed -i "s/^Version: \$/Version: $svnversion/" /usr/share/pkgconfig/libsvn_*.pc
     - name: Build
       run: cargo build
       env:
