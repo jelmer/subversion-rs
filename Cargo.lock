@@ -19,9 +19,9 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "apr"
-version = "0.4.2"
+version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "93e5afaf2a65c6af5fbb4637fdf1c620a603dfd189368461ded09f4f6a5cd5a8"
+checksum = "542b26acc95b84446737e8eca862606d11443caf086d5cfd3cf0e4c4e6b29346"
 dependencies = [
  "apr-sys",
  "ctor",
@@ -29,9 +29,9 @@ dependencies = [
 
 [[package]]
 name = "apr-sys"
-version = "0.2.1"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "edccb3d92ae38dd713e46ea192cf3a2fb3ffa387817691816cef9a3b5ebb8b7c"
+checksum = "4b3848e5dd8525d8a6b592eef87a6cebaa472472128d8b1fc3dc246154025661"
 dependencies = [
  "bindgen",
  "system-deps",
