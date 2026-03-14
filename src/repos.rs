@@ -4247,7 +4247,7 @@ mod additional_tests {
         let repo = Repos::create(&repo_path).unwrap();
 
         // Build the repository URL from the path
-        let repo_url = format!("file://{}", repo_path.to_string_lossy());
+        let repo_url = crate::path_to_file_url(&repo_path);
 
         // Test get_commit_editor with basic parameters
         let result = repo.get_commit_editor(
@@ -4497,7 +4497,7 @@ admin = rw
         let repo = Repos::create(&repo_path).unwrap();
 
         // Build the repository URL from the path
-        let repo_url = format!("file://{}", repo_path.to_string_lossy());
+        let repo_url = crate::path_to_file_url(&repo_path);
 
         // Get a commit editor which we can use for testing reports
         let editor_result = repo.get_commit_editor(
@@ -4567,7 +4567,7 @@ admin = rw
         let repo = Repos::create(&repo_path).unwrap();
 
         // Build the repository URL
-        let repo_url = format!("file://{}", repo_path.to_string_lossy());
+        let repo_url = crate::path_to_file_url(&repo_path);
 
         // Get a commit editor using the public API
         let editor_box = repo
@@ -4761,7 +4761,7 @@ admin = rw
         let temp_dir = tempfile::tempdir().unwrap();
         let repo_path = temp_dir.path().join("test_repo");
         let repo = Repos::create(&repo_path).unwrap();
-        let repo_url = format!("file://{}", repo_path.to_string_lossy());
+        let repo_url = crate::path_to_file_url(&repo_path);
 
         // Track callback invocations
         let authz_called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -4798,7 +4798,7 @@ admin = rw
         let temp_dir = tempfile::tempdir().unwrap();
         let repo_path = temp_dir.path().join("test_repo");
         let repo = Repos::create(&repo_path).unwrap();
-        let repo_url = format!("file://{}", repo_path.to_string_lossy());
+        let repo_url = crate::path_to_file_url(&repo_path);
 
         // Get a commit editor first
         let editor_result = repo.get_commit_editor(
@@ -4903,7 +4903,7 @@ admin = rw
         let temp_dir = tempfile::tempdir().unwrap();
         let repo_path = temp_dir.path().join("test_repo");
         let repo = Repos::create(&repo_path).unwrap();
-        let repo_url = format!("file://{}", repo_path.to_string_lossy());
+        let repo_url = crate::path_to_file_url(&repo_path);
 
         // Test with txn=None - should create a new transaction internally
         let result = repo.get_commit_editor(

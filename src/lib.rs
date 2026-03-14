@@ -341,6 +341,18 @@ impl Revnum {
 
 pub use error::Error;
 
+/// Convert a local filesystem path to a properly canonical `file://` URL.
+///
+/// On Windows, `format!("file://{}", path.display())` produces malformed URLs
+/// with backslashes. This function uses SVN's `svn_uri_get_file_url_from_dirent`
+/// to produce correct, canonical URLs on all platforms.
+#[cfg(test)]
+#[allow(dead_code)]
+pub(crate) fn path_to_file_url(path: &std::path::Path) -> String {
+    let dirent = crate::dirent::Dirent::new(path).unwrap();
+    dirent.to_file_url().unwrap().to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

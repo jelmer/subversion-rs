@@ -1160,7 +1160,7 @@ impl Context {
     /// Checks the working copy format version.
     pub fn check_wc(&mut self, path: &str) -> Result<i32, crate::Error<'_>> {
         let scratch_pool = apr::pool::Pool::new();
-        let path = std::ffi::CString::new(path).unwrap();
+        let path = crate::dirent::to_absolute_cstring(path)?;
         let mut wc_format = 0;
         let err = unsafe {
             subversion_sys::svn_wc_check_wc2(
@@ -1177,7 +1177,7 @@ impl Context {
     /// Checks if a file's text content has been modified.
     pub fn text_modified(&mut self, path: &str) -> Result<bool, crate::Error<'_>> {
         let scratch_pool = apr::pool::Pool::new();
-        let path = std::ffi::CString::new(path).unwrap();
+        let path = crate::dirent::to_absolute_cstring(path)?;
         let mut modified = 0;
         let err = unsafe {
             subversion_sys::svn_wc_text_modified_p2(
@@ -1195,7 +1195,7 @@ impl Context {
     /// Checks if a file's properties have been modified.
     pub fn props_modified(&mut self, path: &str) -> Result<bool, crate::Error<'_>> {
         let scratch_pool = apr::pool::Pool::new();
-        let path = std::ffi::CString::new(path).unwrap();
+        let path = crate::dirent::to_absolute_cstring(path)?;
         let mut modified = 0;
         let err = unsafe {
             subversion_sys::svn_wc_props_modified_p2(
@@ -1212,7 +1212,7 @@ impl Context {
     /// Checks if a path has conflicts (text, property, tree).
     pub fn conflicted(&mut self, path: &str) -> Result<(bool, bool, bool), crate::Error<'_>> {
         let scratch_pool = apr::pool::Pool::new();
-        let path = std::ffi::CString::new(path).unwrap();
+        let path = crate::dirent::to_absolute_cstring(path)?;
         let mut text_conflicted = 0;
         let mut prop_conflicted = 0;
         let mut tree_conflicted = 0;
@@ -1245,7 +1245,7 @@ impl Context {
         depth: crate::Depth,
     ) -> Result<(), crate::Error<'_>> {
         let scratch_pool = apr::pool::Pool::new();
-        let local_abspath = std::ffi::CString::new(local_abspath).unwrap();
+        let local_abspath = crate::dirent::to_absolute_cstring(local_abspath)?;
         let url = std::ffi::CString::new(url).unwrap();
         let repos_root_url = std::ffi::CString::new(repos_root_url).unwrap();
         let repos_uuid = std::ffi::CString::new(repos_uuid).unwrap();
@@ -1268,7 +1268,7 @@ impl Context {
     /// Checks if a path is locked in the working copy.
     /// Returns (locked_here, locked) where locked_here means locked in this working copy.
     pub fn locked(&mut self, path: &str) -> Result<(bool, bool), crate::Error<'_>> {
-        let path = std::ffi::CString::new(path).unwrap();
+        let path = crate::dirent::to_absolute_cstring(path)?;
         let mut locked = 0;
         let mut locked_here = 0;
         let scratch_pool = apr::pool::Pool::new();
@@ -1294,7 +1294,7 @@ impl Context {
 
     /// Upgrade a working copy to the latest format
     pub fn upgrade(&mut self, local_abspath: &str) -> Result<(), crate::Error<'_>> {
-        let local_abspath_cstr = std::ffi::CString::new(local_abspath)?;
+        let local_abspath_cstr = crate::dirent::to_absolute_cstring(local_abspath)?;
         let scratch_pool = apr::pool::Pool::new();
 
         let err = unsafe {
@@ -1360,7 +1360,7 @@ impl Context {
         copyfrom_url: Option<&str>,
         copyfrom_rev: Option<crate::Revnum>,
     ) -> Result<(), crate::Error<'_>> {
-        let local_abspath_cstr = std::ffi::CString::new(local_abspath)?;
+        let local_abspath_cstr = crate::dirent::to_absolute_cstring(local_abspath)?;
         let copyfrom_url_cstr = copyfrom_url.map(std::ffi::CString::new).transpose()?;
         let scratch_pool = apr::pool::Pool::new();
 
@@ -1409,8 +1409,7 @@ pub fn text_modified(
     path: &std::path::Path,
     force_comparison: bool,
 ) -> Result<bool, crate::Error<'_>> {
-    let path_str = path.to_string_lossy();
-    let path_cstr = std::ffi::CString::new(path_str.as_ref()).unwrap();
+    let path_cstr = crate::dirent::to_absolute_cstring(path)?;
     let mut modified = 0;
 
     with_tmp_pool(|pool| -> Result<(), crate::Error> {
@@ -1445,8 +1444,7 @@ pub fn text_modified(
 
 /// Check if properties are modified in a working copy file
 pub fn props_modified(path: &std::path::Path) -> Result<bool, crate::Error<'_>> {
-    let path_str = path.to_string_lossy();
-    let path_cstr = std::ffi::CString::new(path_str.as_ref()).unwrap();
+    let path_cstr = crate::dirent::to_absolute_cstring(path)?;
     let mut modified = 0;
 
     with_tmp_pool(|pool| -> Result<(), crate::Error> {
@@ -1500,7 +1498,7 @@ pub fn crawl_revisions5(
     use_commit_times: bool,
     notify_func: Option<&dyn Fn(&Notify)>,
 ) -> Result<(), crate::Error<'static>> {
-    let local_abspath_cstr = std::ffi::CString::new(local_abspath)?;
+    let local_abspath_cstr = crate::dirent::to_absolute_cstring(local_abspath)?;
 
     let notify_baton = notify_func
         .map(|f| box_notify_baton_borrowed(f))
@@ -2012,8 +2010,7 @@ pub type DirEntries = std::collections::HashMap<String, crate::DirEntry>;
 
 /// Check working copy format at path
 pub fn check_wc(path: &std::path::Path) -> Result<Option<i32>, crate::Error<'_>> {
-    let path_str = path.to_string_lossy();
-    let path_cstr = std::ffi::CString::new(path_str.as_ref()).unwrap();
+    let path_cstr = crate::dirent::to_absolute_cstring(path)?;
     let mut wc_format = 0;
 
     with_tmp_pool(|pool| -> Result<(), crate::Error> {
@@ -2058,8 +2055,7 @@ pub fn ensure_adm(
     repos_root: &str,
     revision: i64,
 ) -> Result<(), crate::Error<'static>> {
-    let path_str = path.to_string_lossy();
-    let path_cstr = std::ffi::CString::new(path_str.as_ref()).unwrap();
+    let path_cstr = crate::dirent::to_absolute_cstring(path)?;
     let uuid_cstr = std::ffi::CString::new(uuid).unwrap();
     let url_cstr = std::ffi::CString::new(url).unwrap();
     let repos_root_cstr = std::ffi::CString::new(repos_root).unwrap();
@@ -2115,7 +2111,7 @@ pub fn is_wc_prop(name: &str) -> bool {
 
 /// Match a path against an ignore list
 pub fn match_ignore_list(path: &str, patterns: &[&str]) -> Result<bool, crate::Error<'static>> {
-    let path_cstr = std::ffi::CString::new(path).unwrap();
+    let path_cstr = std::ffi::CString::new(path)?;
 
     with_tmp_pool(|pool| {
         // We need to keep the CStrings alive for the duration of the call
@@ -2146,8 +2142,7 @@ pub fn match_ignore_list(path: &str, patterns: &[&str]) -> Result<bool, crate::E
 
 /// Get the actual target for a path (anchor/target split)
 pub fn get_actual_target(path: &std::path::Path) -> Result<(String, String), crate::Error<'_>> {
-    let path_str = path.to_string_lossy();
-    let path_cstr = std::ffi::CString::new(path_str.as_ref()).unwrap();
+    let path_cstr = crate::dirent::to_absolute_cstring(path)?;
     let mut anchor: *const i8 = std::ptr::null();
     let mut target: *const i8 = std::ptr::null();
 
@@ -2202,8 +2197,7 @@ pub fn get_actual_target(path: &std::path::Path) -> Result<(String, String), cra
 pub fn get_pristine_contents(
     path: &std::path::Path,
 ) -> Result<Option<crate::io::Stream>, crate::Error<'_>> {
-    let path_str = path.to_string_lossy();
-    let path_cstr = std::ffi::CString::new(path_str.as_ref()).unwrap();
+    let path_cstr = crate::dirent::to_absolute_cstring(path)?;
     let mut contents: *mut subversion_sys::svn_stream_t = std::ptr::null_mut();
 
     // Create a pool that will live as long as the Stream
@@ -2249,8 +2243,7 @@ pub fn get_pristine_contents(
 pub fn get_pristine_copy_path(
     path: &std::path::Path,
 ) -> Result<std::path::PathBuf, crate::Error<'_>> {
-    let path_str = path.to_string_lossy();
-    let path_cstr = std::ffi::CString::new(path_str.as_ref()).unwrap();
+    let path_cstr = crate::dirent::to_absolute_cstring(path)?;
     let mut pristine_path: *const i8 = std::ptr::null();
 
     let pristine_path_str = with_tmp_pool(|pool| -> Result<String, crate::Error> {
@@ -2280,7 +2273,7 @@ pub fn get_pristine_copy_path(
 impl Context {
     /// Get the actual target for a path using this working copy context
     pub fn get_actual_target(&mut self, path: &str) -> Result<(String, String), crate::Error<'_>> {
-        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let path_cstr = crate::dirent::to_absolute_cstring(path)?;
         let mut anchor: *const i8 = std::ptr::null();
         let mut target: *const i8 = std::ptr::null();
 
@@ -2321,7 +2314,7 @@ impl Context {
         &mut self,
         path: &str,
     ) -> Result<Option<crate::io::Stream>, crate::Error<'_>> {
-        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let path_cstr = crate::dirent::to_absolute_cstring(path)?;
         let mut contents: *mut subversion_sys::svn_stream_t = std::ptr::null_mut();
 
         let pool = apr::Pool::new();
@@ -2350,7 +2343,7 @@ impl Context {
         &mut self,
         path: &str,
     ) -> Result<Option<std::collections::HashMap<String, Vec<u8>>>, crate::Error<'_>> {
-        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let path_cstr = crate::dirent::to_absolute_cstring(path)?;
         let mut props: *mut apr_sys::apr_hash_t = std::ptr::null_mut();
 
         let pool = apr::Pool::new();
@@ -2391,7 +2384,7 @@ impl Context {
         F: FnMut(&str, &Status<'_>) -> Result<(), Error<'static>>,
     {
         let pool = apr::Pool::new();
-        let path_cstr = std::ffi::CString::new(local_abspath.to_str().unwrap())?;
+        let path_cstr = crate::dirent::to_absolute_cstring(local_abspath)?;
 
         // Build ignore_patterns APR array if provided
         let pattern_cstrs: Vec<std::ffi::CString> = ignore_patterns
@@ -2493,7 +2486,7 @@ impl Context {
         sha1_checksum: Option<&crate::Checksum>,
     ) -> Result<(), Error<'static>> {
         let pool = apr::Pool::new();
-        let path_cstr = std::ffi::CString::new(local_abspath.to_str().unwrap())?;
+        let path_cstr = crate::dirent::to_absolute_cstring(local_abspath)?;
 
         // Build the wcprop_changes APR array if provided
         let wcprop_changes_ptr = if let Some(changes) = wcprop_changes {
@@ -2582,7 +2575,7 @@ impl Context {
         lock: &Lock,
     ) -> Result<(), Error<'static>> {
         let pool = apr::Pool::new();
-        let path_cstr = std::ffi::CString::new(local_abspath.to_str().unwrap())?;
+        let path_cstr = crate::dirent::to_absolute_cstring(local_abspath)?;
 
         unsafe {
             let err = subversion_sys::svn_wc_add_lock2(
@@ -2600,7 +2593,7 @@ impl Context {
     /// Removes lock information for the given path.
     pub fn remove_lock(&mut self, local_abspath: &std::path::Path) -> Result<(), Error<'static>> {
         let pool = apr::Pool::new();
-        let path_cstr = std::ffi::CString::new(local_abspath.to_str().unwrap())?;
+        let path_cstr = crate::dirent::to_absolute_cstring(local_abspath)?;
 
         unsafe {
             let err = subversion_sys::svn_wc_remove_lock2(
@@ -2624,7 +2617,7 @@ impl Context {
     ) -> Result<(), Error<'static>> {
         let pool = apr::Pool::new();
         let path = local_abspath.to_str().unwrap();
-        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let path_cstr = crate::dirent::to_absolute_cstring(path)?;
 
         let cancel_baton = cancel_func
             .map(box_cancel_baton_borrowed)
@@ -2671,7 +2664,7 @@ impl Context {
     ) -> Result<(), Error<'static>> {
         let pool = apr::Pool::new();
         let path = local_abspath.to_str().unwrap();
-        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let path_cstr = crate::dirent::to_absolute_cstring(path)?;
 
         let prop_cstr = resolve_property.map(|p| std::ffi::CString::new(p).unwrap());
         let prop_ptr = prop_cstr.as_ref().map_or(std::ptr::null(), |p| p.as_ptr());
@@ -2724,7 +2717,7 @@ impl Context {
         notify_func: Option<&dyn Fn(&Notify)>,
     ) -> Result<(), Error<'static>> {
         let path = local_abspath.to_str().unwrap();
-        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let path_cstr = crate::dirent::to_absolute_cstring(path)?;
         let pool = apr::Pool::new();
 
         // Build the props APR hash if provided
@@ -3190,7 +3183,7 @@ impl Context {
         notify_func: Option<&dyn Fn(&Notify)>,
     ) -> Result<(), Error<'static>> {
         let path = local_abspath.to_str().unwrap();
-        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let path_cstr = crate::dirent::to_absolute_cstring(path)?;
         let pool = apr::Pool::new();
 
         let cancel_baton = cancel_func
@@ -3247,7 +3240,7 @@ impl Context {
         name: &str,
     ) -> Result<Option<Vec<u8>>, Error<'_>> {
         let path = local_abspath.to_str().unwrap();
-        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let path_cstr = crate::dirent::to_absolute_cstring(path)?;
         let name_cstr = std::ffi::CString::new(name).unwrap();
         let result_pool = apr::Pool::new();
         let scratch_pool = apr::Pool::new();
@@ -3292,7 +3285,7 @@ impl Context {
         notify_func: Option<&dyn Fn(&Notify)>,
     ) -> Result<(), Error<'static>> {
         let path = local_abspath.to_str().unwrap();
-        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let path_cstr = crate::dirent::to_absolute_cstring(path)?;
         let name_cstr = std::ffi::CString::new(name).unwrap();
         let scratch_pool = apr::Pool::new();
 
@@ -3381,7 +3374,7 @@ impl Context {
         local_abspath: &std::path::Path,
     ) -> Result<std::collections::HashMap<String, Vec<u8>>, Error<'_>> {
         let path = local_abspath.to_str().unwrap();
-        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let path_cstr = crate::dirent::to_absolute_cstring(path)?;
         let result_pool = apr::Pool::new();
         let scratch_pool = apr::Pool::new();
 
@@ -3450,7 +3443,7 @@ impl Context {
         Error<'_>,
     > {
         let path = local_abspath.to_str().unwrap();
-        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let path_cstr = crate::dirent::to_absolute_cstring(path)?;
         let result_pool = apr::Pool::new();
         let scratch_pool = apr::Pool::new();
 
@@ -3523,7 +3516,7 @@ impl Context {
         show_hidden: bool,
     ) -> Result<crate::NodeKind, Error<'static>> {
         let path = local_abspath.to_str().unwrap();
-        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let path_cstr = crate::dirent::to_absolute_cstring(path)?;
         let scratch_pool = apr::Pool::new();
 
         let mut kind: subversion_sys::svn_node_kind_t =
@@ -3551,7 +3544,7 @@ impl Context {
     /// administrative directory.
     pub fn is_wc_root(&mut self, local_abspath: &std::path::Path) -> Result<bool, Error<'static>> {
         let path = local_abspath.to_str().unwrap();
-        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let path_cstr = crate::dirent::to_absolute_cstring(path)?;
         let scratch_pool = apr::Pool::new();
 
         let mut wc_root: i32 = 0;
@@ -3587,7 +3580,7 @@ impl Context {
         notify_func: Option<&dyn Fn(&Notify)>,
     ) -> Result<(), Error<'static>> {
         let path = local_abspath.to_str().unwrap();
-        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let path_cstr = crate::dirent::to_absolute_cstring(path)?;
         let scratch_pool = apr::Pool::new();
 
         let cancel_baton = cancel_func
@@ -3974,8 +3967,7 @@ impl Context {
         local_abspath: &std::path::Path,
         options: &RevertOptions,
     ) -> Result<(), Error<'static>> {
-        let path_cstr =
-            std::ffi::CString::new(local_abspath.to_str().expect("path must be valid UTF-8"))?;
+        let path_cstr = crate::dirent::to_absolute_cstring(local_abspath)?;
 
         let scratch_pool = apr::Pool::new();
 
@@ -4079,8 +4071,7 @@ impl Context {
         depth: crate::Depth,
         changelist_filter: &[String],
     ) -> Result<(), Error<'static>> {
-        let path_cstr =
-            std::ffi::CString::new(local_abspath.to_str().expect("path must be valid UTF-8"))?;
+        let path_cstr = crate::dirent::to_absolute_cstring(local_abspath)?;
         let cl_cstr = changelist
             .map(|s| std::ffi::CString::new(s).expect("changelist name must be valid UTF-8"));
 
@@ -4136,8 +4127,7 @@ impl Context {
         changelist_filter: &[String],
         mut callback: impl FnMut(&str, Option<&str>) -> Result<(), Error<'static>>,
     ) -> Result<(), Error<'static>> {
-        let path_cstr =
-            std::ffi::CString::new(local_abspath.to_str().expect("path must be valid UTF-8"))?;
+        let path_cstr = crate::dirent::to_absolute_cstring(local_abspath)?;
 
         let scratch_pool = apr::Pool::new();
 
@@ -4207,8 +4197,7 @@ impl Context {
         &mut self,
         local_abspath: &std::path::Path,
     ) -> Result<Status<'static>, Error<'static>> {
-        let path_cstr =
-            std::ffi::CString::new(local_abspath.to_str().expect("path must be valid UTF-8"))?;
+        let path_cstr = crate::dirent::to_absolute_cstring(local_abspath)?;
         let result_pool = apr::Pool::new();
         let mut ptr: *mut subversion_sys::svn_wc_status3_t = std::ptr::null_mut();
         with_tmp_pool(|scratch| {
@@ -4237,8 +4226,7 @@ impl Context {
         &mut self,
         local_abspath: &std::path::Path,
     ) -> Result<(bool, bool, crate::NodeKind), Error<'static>> {
-        let path_cstr =
-            std::ffi::CString::new(local_abspath.to_str().expect("path must be valid UTF-8"))?;
+        let path_cstr = crate::dirent::to_absolute_cstring(local_abspath)?;
         let mut is_wcroot: subversion_sys::svn_boolean_t = 0;
         let mut is_switched: subversion_sys::svn_boolean_t = 0;
         let mut kind: subversion_sys::svn_node_kind_t =
@@ -4269,8 +4257,7 @@ impl Context {
         local_abspath: &std::path::Path,
         use_commit_times: bool,
     ) -> Result<(), Error<'static>> {
-        let path_cstr =
-            std::ffi::CString::new(local_abspath.to_str().expect("path must be valid UTF-8"))?;
+        let path_cstr = crate::dirent::to_absolute_cstring(local_abspath)?;
         with_tmp_pool(|scratch| {
             svn_result(unsafe {
                 subversion_sys::svn_wc_restore(
@@ -4294,8 +4281,7 @@ impl Context {
         &mut self,
         local_abspath: &std::path::Path,
     ) -> Result<Vec<String>, Error<'static>> {
-        let path_cstr =
-            std::ffi::CString::new(local_abspath.to_str().expect("path must be valid UTF-8"))?;
+        let path_cstr = crate::dirent::to_absolute_cstring(local_abspath)?;
         let result_pool = apr::Pool::new();
         let mut patterns: *mut apr_sys::apr_array_header_t = std::ptr::null_mut();
         with_tmp_pool(|scratch| {
@@ -4347,8 +4333,7 @@ impl Context {
         destroy_wf: bool,
         instant_error: bool,
     ) -> Result<(), Error<'static>> {
-        let path_cstr =
-            std::ffi::CString::new(local_abspath.to_str().expect("path must be valid UTF-8"))?;
+        let path_cstr = crate::dirent::to_absolute_cstring(local_abspath)?;
         with_tmp_pool(|scratch| {
             svn_result(unsafe {
                 subversion_sys::svn_wc_remove_from_revision_control2(
@@ -4850,8 +4835,7 @@ pub fn cleanup(
     vacuum_pristines: bool,
     _include_externals: bool,
 ) -> Result<(), Error<'static>> {
-    let path_str = wc_path.to_string_lossy();
-    let path_cstr = std::ffi::CString::new(path_str.as_ref()).unwrap();
+    let path_cstr = crate::dirent::to_absolute_cstring(wc_path)?;
 
     with_tmp_pool(|pool| -> Result<(), Error<'static>> {
         let mut ctx = std::ptr::null_mut();
@@ -4898,8 +4882,7 @@ pub fn add(
     _no_autoprops: bool,
     _add_parents: bool,
 ) -> Result<(), Error<'static>> {
-    let path_str = path.to_string_lossy();
-    let path_cstr = std::ffi::CString::new(path_str.as_ref())?;
+    let path_cstr = crate::dirent::to_absolute_cstring(path)?;
 
     with_tmp_pool(|pool| unsafe {
         let err = subversion_sys::svn_wc_add_from_disk3(
@@ -4922,8 +4905,7 @@ pub fn delete(
     keep_local: bool,
     delete_unversioned_target: bool,
 ) -> Result<(), Error<'static>> {
-    let path_str = path.to_string_lossy();
-    let path_cstr = std::ffi::CString::new(path_str.as_ref())?;
+    let path_cstr = crate::dirent::to_absolute_cstring(path)?;
 
     with_tmp_pool(|pool| unsafe {
         let err = subversion_sys::svn_wc_delete4(
@@ -4950,8 +4932,7 @@ pub fn revert(
     clear_changelists: bool,
     metadata_only: bool,
 ) -> Result<(), Error<'static>> {
-    let path_str = path.to_string_lossy();
-    let path_cstr = std::ffi::CString::new(path_str.as_ref())?;
+    let path_cstr = crate::dirent::to_absolute_cstring(path)?;
 
     with_tmp_pool(|pool| unsafe {
         let err = subversion_sys::svn_wc_revert6(
@@ -5027,8 +5008,7 @@ pub fn resolve_conflict(
     resolve_tree: bool,
     conflict_choice: ConflictChoice,
 ) -> Result<(), Error<'static>> {
-    let path_str = path.to_string_lossy();
-    let path_cstr = std::ffi::CString::new(path_str.as_ref())?;
+    let path_cstr = crate::dirent::to_absolute_cstring(path)?;
 
     with_tmp_pool(|pool| unsafe {
         let err = subversion_sys::svn_wc_resolved_conflict5(
@@ -5514,7 +5494,7 @@ mod tests {
             let _repos = crate::repos::Repos::create(&repos_path).unwrap();
 
             // Prepare for checkout
-            let url = format!("file://{}", repos_path.display());
+            let url = crate::path_to_file_url(&repos_path);
             let mut client_ctx = crate::client::Context::new().unwrap();
 
             // Checkout working copy
@@ -5612,7 +5592,7 @@ mod tests {
     fn create_repo(base: &Path, name: &str) -> (PathBuf, String) {
         let repos_path = base.join(name);
         let _repos = crate::repos::Repos::create(&repos_path).unwrap();
-        let url = format!("file://{}", repos_path.display());
+        let url = crate::path_to_file_url(&repos_path);
         (repos_path, url)
     }
 
@@ -6282,7 +6262,7 @@ mod tests {
         let _repos = crate::repos::Repos::create(&repos_path).unwrap();
 
         // Create a working copy using client API
-        let url_str = format!("file://{}", repos_path.display());
+        let url_str = crate::path_to_file_url(&repos_path);
         let url = crate::uri::Uri::new(&url_str).unwrap();
         let mut client_ctx = crate::client::Context::new().unwrap();
 
@@ -6414,7 +6394,7 @@ mod tests {
         let _repos = crate::repos::Repos::create(&repos_path).unwrap();
 
         // Create a working copy using client API
-        let url_str = format!("file://{}", repos_path.display());
+        let url_str = crate::path_to_file_url(&repos_path);
         let url = crate::uri::Uri::new(&url_str).unwrap();
         let mut client_ctx = crate::client::Context::new().unwrap();
 
@@ -6575,7 +6555,7 @@ mod tests {
         // Create a repository
         let _repos = crate::repos::Repos::create(&repos_path).unwrap();
 
-        let url_str = format!("file://{}", repos_path.display());
+        let url_str = crate::path_to_file_url(&repos_path);
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         // Create first working copy
@@ -6771,7 +6751,7 @@ mod tests {
 
         // Check out working copy
         let mut client_ctx = crate::client::Context::new().unwrap();
-        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        let url_str = crate::path_to_file_url(&repo_path);
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         client_ctx
@@ -6822,7 +6802,7 @@ mod tests {
 
         // Check out working copy
         let mut client_ctx = crate::client::Context::new().unwrap();
-        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        let url_str = crate::path_to_file_url(&repo_path);
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         client_ctx
@@ -6872,7 +6852,7 @@ mod tests {
 
         // Check out working copy
         let mut client_ctx = crate::client::Context::new().unwrap();
-        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        let url_str = crate::path_to_file_url(&repo_path);
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         client_ctx
@@ -6913,7 +6893,7 @@ mod tests {
 
         // Check out working copy
         let mut client_ctx = crate::client::Context::new().unwrap();
-        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        let url_str = crate::path_to_file_url(&repo_path);
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         client_ctx
@@ -6947,7 +6927,7 @@ mod tests {
 
         // Check out working copy
         let mut client_ctx = crate::client::Context::new().unwrap();
-        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        let url_str = crate::path_to_file_url(&repo_path);
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         client_ctx
@@ -7061,7 +7041,7 @@ mod tests {
 
         // Create a test repository
         crate::repos::Repos::create(&repos_path).unwrap();
-        let url_str = format!("file://{}", repos_path.display());
+        let url_str = crate::path_to_file_url(&repos_path);
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         // Checkout
@@ -7083,7 +7063,7 @@ mod tests {
         // Move the repository to a new location (simulating repository relocation)
         let repos_path2 = tmp_dir.path().join("repo_moved");
         std::fs::rename(&repos_path, &repos_path2).unwrap();
-        let repos_url2 = format!("file://{}", repos_path2.display());
+        let repos_url2 = crate::path_to_file_url(&repos_path2);
 
         // Test relocate - should work since it's the same repository, different URL
         let mut wc_ctx = Context::new().unwrap();
@@ -7112,7 +7092,7 @@ mod tests {
 
         // Create a test repository
         crate::repos::Repos::create(&repos_path).unwrap();
-        let url_str = format!("file://{}", repos_path.display());
+        let url_str = crate::path_to_file_url(&repos_path);
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         // Checkout
@@ -7161,7 +7141,7 @@ mod tests {
 
         // Create a test repository
         crate::repos::Repos::create(&repos_path).unwrap();
-        let url_str = format!("file://{}", repos_path.display());
+        let url_str = crate::path_to_file_url(&repos_path);
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         // Checkout
@@ -7304,7 +7284,7 @@ mod tests {
         let _repos = crate::repos::Repos::create(&repos_path).unwrap();
 
         // Create a working copy
-        let url_str = format!("file://{}", repos_path.display());
+        let url_str = crate::path_to_file_url(&repos_path);
         let url = crate::uri::Uri::new(&url_str).unwrap();
         let mut client_ctx = crate::client::Context::new().unwrap();
         client_ctx
@@ -7360,7 +7340,7 @@ mod tests {
         let _repos = crate::repos::Repos::create(&repos_path).unwrap();
 
         // Create a working copy
-        let url_str = format!("file://{}", repos_path.display());
+        let url_str = crate::path_to_file_url(&repos_path);
         let url = crate::uri::Uri::new(&url_str).unwrap();
         let mut client_ctx = crate::client::Context::new().unwrap();
         client_ctx
@@ -7438,7 +7418,7 @@ mod tests {
         let _repos = crate::repos::Repos::create(&repos_path).unwrap();
 
         // Create a working copy
-        let url_str = format!("file://{}", repos_path.display());
+        let url_str = crate::path_to_file_url(&repos_path);
         let url = crate::uri::Uri::new(&url_str).unwrap();
         let mut client_ctx = crate::client::Context::new().unwrap();
         client_ctx
@@ -7514,7 +7494,7 @@ mod tests {
         let _repos = crate::repos::Repos::create(&repos_path).unwrap();
 
         // Create a working copy
-        let url_str = format!("file://{}", repos_path.display());
+        let url_str = crate::path_to_file_url(&repos_path);
         let url = crate::uri::Uri::new(&url_str).unwrap();
         let mut client_ctx = crate::client::Context::new().unwrap();
         client_ctx
@@ -7556,7 +7536,7 @@ mod tests {
         let _repos = crate::repos::Repos::create(&repos_path).unwrap();
 
         // Create a working copy
-        let url_str = format!("file://{}", repos_path.display());
+        let url_str = crate::path_to_file_url(&repos_path);
         let url = crate::uri::Uri::new(&url_str).unwrap();
         let mut client_ctx = crate::client::Context::new().unwrap();
         client_ctx
@@ -7608,7 +7588,7 @@ mod tests {
         let _repos = crate::repos::Repos::create(&repos_path).unwrap();
 
         // Create a working copy
-        let url_str = format!("file://{}", repos_path.display());
+        let url_str = crate::path_to_file_url(&repos_path);
         let url = crate::uri::Uri::new(&url_str).unwrap();
         let mut client_ctx = crate::client::Context::new().unwrap();
         client_ctx
@@ -7715,7 +7695,7 @@ mod tests {
         let _repos = crate::repos::Repos::create(&repos_path).unwrap();
 
         // Create a working copy
-        let url_str = format!("file://{}", repos_path.display());
+        let url_str = crate::path_to_file_url(&repos_path);
         let url = crate::uri::Uri::new(&url_str).unwrap();
         let mut client_ctx = crate::client::Context::new().unwrap();
         client_ctx

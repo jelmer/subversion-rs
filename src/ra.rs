@@ -2733,7 +2733,7 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let repo_path = temp_dir.path().join("test_repo");
         let repo = crate::repos::Repos::create(&repo_path).unwrap();
-        let url = format!("file://{}", repo_path.display());
+        let url = crate::path_to_file_url(&repo_path);
         (temp_dir, url, repo)
     }
 

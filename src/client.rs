@@ -3188,12 +3188,15 @@ impl Context {
     }
 
     /// Exports a versioned path to an unversioned path.
+    ///
+    /// Returns the revision that was exported, or `None` when `svn_client_export5`
+    /// does not report a specific revision (e.g. when exporting a single file).
     pub fn export(
         &mut self,
         from_path_or_url: &str,
         to_path: impl AsCanonicalDirent,
         options: &ExportOptions,
-    ) -> Result<Revnum, Error<'static>> {
+    ) -> Result<Option<Revnum>, Error<'static>> {
         let native_eol: Option<&str> = options.native_eol.into();
         let native_eol = native_eol.map(|s| std::ffi::CString::new(s).unwrap());
         let mut revnum = 0;
@@ -3219,7 +3222,7 @@ impl Context {
                 tmp_pool.as_mut_ptr(),
             );
             Error::from_raw(err)?;
-            Ok(Revnum::from_raw(revnum).unwrap())
+            Ok(Revnum::from_raw(revnum))
         })
     }
 
@@ -3704,8 +3707,12 @@ impl Context {
     }
 
     /// Vacuums pristine copies from a working copy.
-    pub fn vacuum(&mut self, path: &str, options: &VacuumOptions) -> Result<(), Error<'static>> {
-        let path = std::ffi::CString::new(path).unwrap();
+    pub fn vacuum(
+        &mut self,
+        path: impl AsCanonicalDirent,
+        options: &VacuumOptions,
+    ) -> Result<(), Error<'static>> {
+        let path = crate::dirent::to_absolute_cstring(path)?;
         with_tmp_pool(|pool| unsafe {
             let err = svn_client_vacuum(
                 path.as_ptr(),
@@ -3722,8 +3729,12 @@ impl Context {
     }
 
     /// Cleans up a working copy.
-    pub fn cleanup(&mut self, path: &str, options: &CleanupOptions) -> Result<(), Error<'static>> {
-        let path = std::ffi::CString::new(path).unwrap();
+    pub fn cleanup(
+        &mut self,
+        path: impl AsCanonicalDirent,
+        options: &CleanupOptions,
+    ) -> Result<(), Error<'static>> {
+        let path = crate::dirent::to_absolute_cstring(path)?;
         with_tmp_pool(|pool| unsafe {
             let err = svn_client_cleanup2(
                 path.as_ptr(),
@@ -6156,9 +6167,13 @@ impl Context {
     /// Mark conflicts as resolved
     ///
     /// This wraps svn_client_resolved to mark conflicts as resolved.
-    pub fn resolved(&mut self, path: &str, recursive: bool) -> Result<(), Error<'static>> {
+    pub fn resolved(
+        &mut self,
+        path: impl AsCanonicalDirent,
+        recursive: bool,
+    ) -> Result<(), Error<'static>> {
         let pool = Pool::new();
-        let path = std::ffi::CString::new(path).unwrap();
+        let path = crate::dirent::to_absolute_cstring(path)?;
 
         let err = unsafe {
             subversion_sys::svn_client_resolved(
@@ -8381,8 +8396,9 @@ mod tests {
             let _repos = crate::repos::Repos::create(&repos_path).unwrap();
 
             // Prepare URL
-            let url = format!("file://{}", repos_path.display());
-            let uri = crate::uri::Uri::new(&url).unwrap();
+            let repos_dirent = crate::dirent::Dirent::new(&repos_path).unwrap();
+            let uri = repos_dirent.to_file_url().unwrap();
+            let url = uri.to_string();
 
             // Create client context and checkout
             let mut ctx = Context::new().unwrap();
@@ -8913,7 +8929,7 @@ mod tests {
         let mut wc_ctx = crate::wc::Context::new().unwrap();
         let repo_abs_path = repo_path.canonicalize().unwrap();
         let wc_abs_path = wc_path.canonicalize().unwrap();
-        let url_str = format!("file://{}", repo_abs_path.to_str().unwrap());
+        let url_str = crate::path_to_file_url(&repo_abs_path);
 
         // Create basic .svn structure using ensure_adm
         wc_ctx
