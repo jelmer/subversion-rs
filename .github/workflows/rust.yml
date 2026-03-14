@@ -64,11 +64,15 @@ jobs:
       run: |
         svnversion=$(svn --version | grep -oP 'svn, version \K\d+\.\d+\.\d+')
         sed -i "s/^Version: \$/Version: $svnversion/" /usr/share/pkgconfig/libsvn_*.pc
+    - name: "Create clang.dll symlink for bindgen"
+      run: ln -s /usr/bin/msys-clang-*.dll /usr/bin/clang.dll
     - name: Build
       run: cargo build
       env:
+        LIBCLANG_PATH: /usr/bin
         RUSTFLAGS: -Dwarnings
     - name: Run tests
       run: cargo test
       env:
+        LIBCLANG_PATH: /usr/bin
         RUSTFLAGS: -Dwarnings
