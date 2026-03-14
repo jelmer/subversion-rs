@@ -204,7 +204,7 @@ impl<'a> Error<'a> {
 
     /// Gets the line number where the error occurred.
     pub fn line(&self) -> i64 {
-        unsafe { (*self.ptr).line }
+        unsafe { (*self.ptr).line.into() }
     }
 
     /// Gets the file name where the error occurred.

@@ -308,6 +308,25 @@ pub fn get_absolute_dirent(dirent: &Dirent) -> Result<Dirent, crate::Error<'_>> 
     })
 }
 
+/// Canonicalize and make absolute a path, returning a CString suitable for SVN APIs.
+pub fn to_absolute_cstring(
+    path: impl AsCanonicalDirent,
+) -> Result<std::ffi::CString, crate::Error<'static>> {
+    let canonical = path.as_canonical_dirent()?;
+    with_tmp_pool(|pool| unsafe {
+        let path_cstr = std::ffi::CString::new(canonical.as_str())?;
+        let mut absolute_ptr: *const std::ffi::c_char = std::ptr::null();
+        let err = subversion_sys::svn_dirent_get_absolute(
+            &mut absolute_ptr,
+            path_cstr.as_ptr(),
+            pool.as_mut_ptr(),
+        );
+        crate::Error::from_raw(err)?;
+        let absolute_cstr = std::ffi::CStr::from_ptr(absolute_ptr);
+        Ok(std::ffi::CString::new(absolute_cstr.to_str()?)?)
+    })
+}
+
 /// Get the longest common ancestor of two directory paths
 pub fn get_longest_ancestor(
     dirent1: &Dirent,

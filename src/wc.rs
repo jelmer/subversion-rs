@@ -169,76 +169,80 @@ pub fn version() -> crate::Version {
 
 // Status constants for Python compatibility
 /// Status constant indicating no status.
-pub const STATUS_NONE: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_none;
+pub const STATUS_NONE: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_none as u32;
 /// Status constant for unversioned items.
-pub const STATUS_UNVERSIONED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_unversioned;
+pub const STATUS_UNVERSIONED: u32 =
+    subversion_sys::svn_wc_status_kind_svn_wc_status_unversioned as u32;
 /// Status constant for normal versioned items.
-pub const STATUS_NORMAL: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_normal;
+pub const STATUS_NORMAL: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_normal as u32;
 /// Status constant for added items.
-pub const STATUS_ADDED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_added;
+pub const STATUS_ADDED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_added as u32;
 /// Status constant for missing items.
-pub const STATUS_MISSING: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_missing;
+pub const STATUS_MISSING: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_missing as u32;
 /// Status constant for deleted items.
-pub const STATUS_DELETED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_deleted;
+pub const STATUS_DELETED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_deleted as u32;
 /// Status constant for replaced items.
-pub const STATUS_REPLACED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_replaced;
+pub const STATUS_REPLACED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_replaced as u32;
 /// Status constant for modified items.
-pub const STATUS_MODIFIED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_modified;
+pub const STATUS_MODIFIED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_modified as u32;
 /// Status constant for merged items.
-pub const STATUS_MERGED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_merged;
+pub const STATUS_MERGED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_merged as u32;
 /// Status constant for conflicted items.
-pub const STATUS_CONFLICTED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_conflicted;
+pub const STATUS_CONFLICTED: u32 =
+    subversion_sys::svn_wc_status_kind_svn_wc_status_conflicted as u32;
 /// Status constant for ignored items.
-pub const STATUS_IGNORED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_ignored;
+pub const STATUS_IGNORED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_ignored as u32;
 /// Status constant for obstructed items.
-pub const STATUS_OBSTRUCTED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_obstructed;
+pub const STATUS_OBSTRUCTED: u32 =
+    subversion_sys::svn_wc_status_kind_svn_wc_status_obstructed as u32;
 /// Status constant for external items.
-pub const STATUS_EXTERNAL: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_external;
+pub const STATUS_EXTERNAL: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_external as u32;
 /// Status constant for incomplete items.
-pub const STATUS_INCOMPLETE: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_incomplete;
+pub const STATUS_INCOMPLETE: u32 =
+    subversion_sys::svn_wc_status_kind_svn_wc_status_incomplete as u32;
 
 // Schedule constants for Python compatibility
 /// Schedule constant for normal items.
-pub const SCHEDULE_NORMAL: u32 = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_normal;
+pub const SCHEDULE_NORMAL: u32 = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_normal as u32;
 /// Schedule constant for items to be added.
-pub const SCHEDULE_ADD: u32 = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_add;
+pub const SCHEDULE_ADD: u32 = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_add as u32;
 /// Schedule constant for items to be deleted.
-pub const SCHEDULE_DELETE: u32 = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_delete;
+pub const SCHEDULE_DELETE: u32 = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_delete as u32;
 /// Schedule constant for items to be replaced.
-pub const SCHEDULE_REPLACE: u32 = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_replace;
+pub const SCHEDULE_REPLACE: u32 = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_replace as u32;
 
 /// Working copy status types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
 pub enum StatusKind {
     /// Not under version control
-    None = subversion_sys::svn_wc_status_kind_svn_wc_status_none,
+    None = subversion_sys::svn_wc_status_kind_svn_wc_status_none as u32,
     /// Item is not versioned
-    Unversioned = subversion_sys::svn_wc_status_kind_svn_wc_status_unversioned,
+    Unversioned = subversion_sys::svn_wc_status_kind_svn_wc_status_unversioned as u32,
     /// Item is versioned and unchanged
-    Normal = subversion_sys::svn_wc_status_kind_svn_wc_status_normal,
+    Normal = subversion_sys::svn_wc_status_kind_svn_wc_status_normal as u32,
     /// Item has been added
-    Added = subversion_sys::svn_wc_status_kind_svn_wc_status_added,
+    Added = subversion_sys::svn_wc_status_kind_svn_wc_status_added as u32,
     /// Item is missing (removed by non-svn command)
-    Missing = subversion_sys::svn_wc_status_kind_svn_wc_status_missing,
+    Missing = subversion_sys::svn_wc_status_kind_svn_wc_status_missing as u32,
     /// Item has been deleted
-    Deleted = subversion_sys::svn_wc_status_kind_svn_wc_status_deleted,
+    Deleted = subversion_sys::svn_wc_status_kind_svn_wc_status_deleted as u32,
     /// Item has been replaced
-    Replaced = subversion_sys::svn_wc_status_kind_svn_wc_status_replaced,
+    Replaced = subversion_sys::svn_wc_status_kind_svn_wc_status_replaced as u32,
     /// Item has been modified
-    Modified = subversion_sys::svn_wc_status_kind_svn_wc_status_modified,
+    Modified = subversion_sys::svn_wc_status_kind_svn_wc_status_modified as u32,
     /// Item has been merged
-    Merged = subversion_sys::svn_wc_status_kind_svn_wc_status_merged,
+    Merged = subversion_sys::svn_wc_status_kind_svn_wc_status_merged as u32,
     /// Item is in conflict
-    Conflicted = subversion_sys::svn_wc_status_kind_svn_wc_status_conflicted,
+    Conflicted = subversion_sys::svn_wc_status_kind_svn_wc_status_conflicted as u32,
     /// Item is ignored
-    Ignored = subversion_sys::svn_wc_status_kind_svn_wc_status_ignored,
+    Ignored = subversion_sys::svn_wc_status_kind_svn_wc_status_ignored as u32,
     /// Item is obstructed
-    Obstructed = subversion_sys::svn_wc_status_kind_svn_wc_status_obstructed,
+    Obstructed = subversion_sys::svn_wc_status_kind_svn_wc_status_obstructed as u32,
     /// Item is an external
-    External = subversion_sys::svn_wc_status_kind_svn_wc_status_external,
+    External = subversion_sys::svn_wc_status_kind_svn_wc_status_external as u32,
     /// Item is incomplete
-    Incomplete = subversion_sys::svn_wc_status_kind_svn_wc_status_incomplete,
+    Incomplete = subversion_sys::svn_wc_status_kind_svn_wc_status_incomplete as u32,
 }
 
 impl From<subversion_sys::svn_wc_status_kind> for StatusKind {
@@ -397,13 +401,13 @@ impl<'pool> Status<'pool> {
 #[repr(u32)]
 pub enum Schedule {
     /// Nothing scheduled
-    Normal = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_normal,
+    Normal = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_normal as u32,
     /// Scheduled for addition
-    Add = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_add,
+    Add = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_add as u32,
     /// Scheduled for deletion
-    Delete = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_delete,
+    Delete = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_delete as u32,
     /// Scheduled for replacement
-    Replace = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_replace,
+    Replace = subversion_sys::svn_wc_schedule_t_svn_wc_schedule_replace as u32,
 }
 
 impl From<subversion_sys::svn_wc_schedule_t> for Schedule {
@@ -1156,7 +1160,7 @@ impl Context {
     /// Checks the working copy format version.
     pub fn check_wc(&mut self, path: &str) -> Result<i32, crate::Error<'_>> {
         let scratch_pool = apr::pool::Pool::new();
-        let path = std::ffi::CString::new(path).unwrap();
+        let path = crate::dirent::to_absolute_cstring(path)?;
         let mut wc_format = 0;
         let err = unsafe {
             subversion_sys::svn_wc_check_wc2(
@@ -1173,7 +1177,7 @@ impl Context {
     /// Checks if a file's text content has been modified.
     pub fn text_modified(&mut self, path: &str) -> Result<bool, crate::Error<'_>> {
         let scratch_pool = apr::pool::Pool::new();
-        let path = std::ffi::CString::new(path).unwrap();
+        let path = crate::dirent::to_absolute_cstring(path)?;
         let mut modified = 0;
         let err = unsafe {
             subversion_sys::svn_wc_text_modified_p2(
@@ -1191,7 +1195,7 @@ impl Context {
     /// Checks if a file's properties have been modified.
     pub fn props_modified(&mut self, path: &str) -> Result<bool, crate::Error<'_>> {
         let scratch_pool = apr::pool::Pool::new();
-        let path = std::ffi::CString::new(path).unwrap();
+        let path = crate::dirent::to_absolute_cstring(path)?;
         let mut modified = 0;
         let err = unsafe {
             subversion_sys::svn_wc_props_modified_p2(
@@ -1208,7 +1212,7 @@ impl Context {
     /// Checks if a path has conflicts (text, property, tree).
     pub fn conflicted(&mut self, path: &str) -> Result<(bool, bool, bool), crate::Error<'_>> {
         let scratch_pool = apr::pool::Pool::new();
-        let path = std::ffi::CString::new(path).unwrap();
+        let path = crate::dirent::to_absolute_cstring(path)?;
         let mut text_conflicted = 0;
         let mut prop_conflicted = 0;
         let mut tree_conflicted = 0;
@@ -1241,7 +1245,7 @@ impl Context {
         depth: crate::Depth,
     ) -> Result<(), crate::Error<'_>> {
         let scratch_pool = apr::pool::Pool::new();
-        let local_abspath = std::ffi::CString::new(local_abspath).unwrap();
+        let local_abspath = crate::dirent::to_absolute_cstring(local_abspath)?;
         let url = std::ffi::CString::new(url).unwrap();
         let repos_root_url = std::ffi::CString::new(repos_root_url).unwrap();
         let repos_uuid = std::ffi::CString::new(repos_uuid).unwrap();
@@ -1264,7 +1268,7 @@ impl Context {
     /// Checks if a path is locked in the working copy.
     /// Returns (locked_here, locked) where locked_here means locked in this working copy.
     pub fn locked(&mut self, path: &str) -> Result<(bool, bool), crate::Error<'_>> {
-        let path = std::ffi::CString::new(path).unwrap();
+        let path = crate::dirent::to_absolute_cstring(path)?;
         let mut locked = 0;
         let mut locked_here = 0;
         let scratch_pool = apr::pool::Pool::new();
@@ -1290,7 +1294,7 @@ impl Context {
 
     /// Upgrade a working copy to the latest format
     pub fn upgrade(&mut self, local_abspath: &str) -> Result<(), crate::Error<'_>> {
-        let local_abspath_cstr = std::ffi::CString::new(local_abspath)?;
+        let local_abspath_cstr = crate::dirent::to_absolute_cstring(local_abspath)?;
         let scratch_pool = apr::pool::Pool::new();
 
         let err = unsafe {
@@ -1356,7 +1360,7 @@ impl Context {
         copyfrom_url: Option<&str>,
         copyfrom_rev: Option<crate::Revnum>,
     ) -> Result<(), crate::Error<'_>> {
-        let local_abspath_cstr = std::ffi::CString::new(local_abspath)?;
+        let local_abspath_cstr = crate::dirent::to_absolute_cstring(local_abspath)?;
         let copyfrom_url_cstr = copyfrom_url.map(std::ffi::CString::new).transpose()?;
         let scratch_pool = apr::pool::Pool::new();
 
@@ -1405,8 +1409,7 @@ pub fn text_modified(
     path: &std::path::Path,
     force_comparison: bool,
 ) -> Result<bool, crate::Error<'_>> {
-    let path_str = path.to_string_lossy();
-    let path_cstr = std::ffi::CString::new(path_str.as_ref()).unwrap();
+    let path_cstr = crate::dirent::to_absolute_cstring(path)?;
     let mut modified = 0;
 
     with_tmp_pool(|pool| -> Result<(), crate::Error> {
@@ -1441,8 +1444,7 @@ pub fn text_modified(
 
 /// Check if properties are modified in a working copy file
 pub fn props_modified(path: &std::path::Path) -> Result<bool, crate::Error<'_>> {
-    let path_str = path.to_string_lossy();
-    let path_cstr = std::ffi::CString::new(path_str.as_ref()).unwrap();
+    let path_cstr = crate::dirent::to_absolute_cstring(path)?;
     let mut modified = 0;
 
     with_tmp_pool(|pool| -> Result<(), crate::Error> {
@@ -1496,7 +1498,7 @@ pub fn crawl_revisions5(
     use_commit_times: bool,
     notify_func: Option<&dyn Fn(&Notify)>,
 ) -> Result<(), crate::Error<'static>> {
-    let local_abspath_cstr = std::ffi::CString::new(local_abspath)?;
+    let local_abspath_cstr = crate::dirent::to_absolute_cstring(local_abspath)?;
 
     let notify_baton = notify_func
         .map(|f| box_notify_baton_borrowed(f))
@@ -2008,8 +2010,7 @@ pub type DirEntries = std::collections::HashMap<String, crate::DirEntry>;
 
 /// Check working copy format at path
 pub fn check_wc(path: &std::path::Path) -> Result<Option<i32>, crate::Error<'_>> {
-    let path_str = path.to_string_lossy();
-    let path_cstr = std::ffi::CString::new(path_str.as_ref()).unwrap();
+    let path_cstr = crate::dirent::to_absolute_cstring(path)?;
     let mut wc_format = 0;
 
     with_tmp_pool(|pool| -> Result<(), crate::Error> {
@@ -2054,8 +2055,7 @@ pub fn ensure_adm(
     repos_root: &str,
     revision: i64,
 ) -> Result<(), crate::Error<'static>> {
-    let path_str = path.to_string_lossy();
-    let path_cstr = std::ffi::CString::new(path_str.as_ref()).unwrap();
+    let path_cstr = crate::dirent::to_absolute_cstring(path)?;
     let uuid_cstr = std::ffi::CString::new(uuid).unwrap();
     let url_cstr = std::ffi::CString::new(url).unwrap();
     let repos_root_cstr = std::ffi::CString::new(repos_root).unwrap();
@@ -2081,7 +2081,7 @@ pub fn ensure_adm(
                 url_cstr.as_ptr(),
                 repos_root_cstr.as_ptr(),
                 uuid_cstr.as_ptr(),
-                revision,
+                revision as subversion_sys::svn_revnum_t,
                 subversion_sys::svn_depth_t_svn_depth_infinity,
                 pool.as_mut_ptr(),
             )
@@ -2111,7 +2111,7 @@ pub fn is_wc_prop(name: &str) -> bool {
 
 /// Match a path against an ignore list
 pub fn match_ignore_list(path: &str, patterns: &[&str]) -> Result<bool, crate::Error<'static>> {
-    let path_cstr = std::ffi::CString::new(path).unwrap();
+    let path_cstr = std::ffi::CString::new(path)?;
 
     with_tmp_pool(|pool| {
         // We need to keep the CStrings alive for the duration of the call
@@ -2142,8 +2142,7 @@ pub fn match_ignore_list(path: &str, patterns: &[&str]) -> Result<bool, crate::E
 
 /// Get the actual target for a path (anchor/target split)
 pub fn get_actual_target(path: &std::path::Path) -> Result<(String, String), crate::Error<'_>> {
-    let path_str = path.to_string_lossy();
-    let path_cstr = std::ffi::CString::new(path_str.as_ref()).unwrap();
+    let path_cstr = crate::dirent::to_absolute_cstring(path)?;
     let mut anchor: *const i8 = std::ptr::null();
     let mut target: *const i8 = std::ptr::null();
 
@@ -2198,8 +2197,7 @@ pub fn get_actual_target(path: &std::path::Path) -> Result<(String, String), cra
 pub fn get_pristine_contents(
     path: &std::path::Path,
 ) -> Result<Option<crate::io::Stream>, crate::Error<'_>> {
-    let path_str = path.to_string_lossy();
-    let path_cstr = std::ffi::CString::new(path_str.as_ref()).unwrap();
+    let path_cstr = crate::dirent::to_absolute_cstring(path)?;
     let mut contents: *mut subversion_sys::svn_stream_t = std::ptr::null_mut();
 
     // Create a pool that will live as long as the Stream
@@ -2245,8 +2243,7 @@ pub fn get_pristine_contents(
 pub fn get_pristine_copy_path(
     path: &std::path::Path,
 ) -> Result<std::path::PathBuf, crate::Error<'_>> {
-    let path_str = path.to_string_lossy();
-    let path_cstr = std::ffi::CString::new(path_str.as_ref()).unwrap();
+    let path_cstr = crate::dirent::to_absolute_cstring(path)?;
     let mut pristine_path: *const i8 = std::ptr::null();
 
     let pristine_path_str = with_tmp_pool(|pool| -> Result<String, crate::Error> {
@@ -2276,7 +2273,7 @@ pub fn get_pristine_copy_path(
 impl Context {
     /// Get the actual target for a path using this working copy context
     pub fn get_actual_target(&mut self, path: &str) -> Result<(String, String), crate::Error<'_>> {
-        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let path_cstr = crate::dirent::to_absolute_cstring(path)?;
         let mut anchor: *const i8 = std::ptr::null();
         let mut target: *const i8 = std::ptr::null();
 
@@ -2317,7 +2314,7 @@ impl Context {
         &mut self,
         path: &str,
     ) -> Result<Option<crate::io::Stream>, crate::Error<'_>> {
-        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let path_cstr = crate::dirent::to_absolute_cstring(path)?;
         let mut contents: *mut subversion_sys::svn_stream_t = std::ptr::null_mut();
 
         let pool = apr::Pool::new();
@@ -2346,7 +2343,7 @@ impl Context {
         &mut self,
         path: &str,
     ) -> Result<Option<std::collections::HashMap<String, Vec<u8>>>, crate::Error<'_>> {
-        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let path_cstr = crate::dirent::to_absolute_cstring(path)?;
         let mut props: *mut apr_sys::apr_hash_t = std::ptr::null_mut();
 
         let pool = apr::Pool::new();
@@ -2387,7 +2384,7 @@ impl Context {
         F: FnMut(&str, &Status<'_>) -> Result<(), Error<'static>>,
     {
         let pool = apr::Pool::new();
-        let path_cstr = std::ffi::CString::new(local_abspath.to_str().unwrap())?;
+        let path_cstr = crate::dirent::to_absolute_cstring(local_abspath)?;
 
         // Build ignore_patterns APR array if provided
         let pattern_cstrs: Vec<std::ffi::CString> = ignore_patterns
@@ -2489,7 +2486,7 @@ impl Context {
         sha1_checksum: Option<&crate::Checksum>,
     ) -> Result<(), Error<'static>> {
         let pool = apr::Pool::new();
-        let path_cstr = std::ffi::CString::new(local_abspath.to_str().unwrap())?;
+        let path_cstr = crate::dirent::to_absolute_cstring(local_abspath)?;
 
         // Build the wcprop_changes APR array if provided
         let wcprop_changes_ptr = if let Some(changes) = wcprop_changes {
@@ -2578,7 +2575,7 @@ impl Context {
         lock: &Lock,
     ) -> Result<(), Error<'static>> {
         let pool = apr::Pool::new();
-        let path_cstr = std::ffi::CString::new(local_abspath.to_str().unwrap())?;
+        let path_cstr = crate::dirent::to_absolute_cstring(local_abspath)?;
 
         unsafe {
             let err = subversion_sys::svn_wc_add_lock2(
@@ -2596,7 +2593,7 @@ impl Context {
     /// Removes lock information for the given path.
     pub fn remove_lock(&mut self, local_abspath: &std::path::Path) -> Result<(), Error<'static>> {
         let pool = apr::Pool::new();
-        let path_cstr = std::ffi::CString::new(local_abspath.to_str().unwrap())?;
+        let path_cstr = crate::dirent::to_absolute_cstring(local_abspath)?;
 
         unsafe {
             let err = subversion_sys::svn_wc_remove_lock2(
@@ -2620,7 +2617,7 @@ impl Context {
     ) -> Result<(), Error<'static>> {
         let pool = apr::Pool::new();
         let path = local_abspath.to_str().unwrap();
-        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let path_cstr = crate::dirent::to_absolute_cstring(path)?;
 
         let cancel_baton = cancel_func
             .map(box_cancel_baton_borrowed)
@@ -2667,7 +2664,7 @@ impl Context {
     ) -> Result<(), Error<'static>> {
         let pool = apr::Pool::new();
         let path = local_abspath.to_str().unwrap();
-        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let path_cstr = crate::dirent::to_absolute_cstring(path)?;
 
         let prop_cstr = resolve_property.map(|p| std::ffi::CString::new(p).unwrap());
         let prop_ptr = prop_cstr.as_ref().map_or(std::ptr::null(), |p| p.as_ptr());
@@ -2720,7 +2717,7 @@ impl Context {
         notify_func: Option<&dyn Fn(&Notify)>,
     ) -> Result<(), Error<'static>> {
         let path = local_abspath.to_str().unwrap();
-        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let path_cstr = crate::dirent::to_absolute_cstring(path)?;
         let pool = apr::Pool::new();
 
         // Build the props APR hash if provided
@@ -3186,7 +3183,7 @@ impl Context {
         notify_func: Option<&dyn Fn(&Notify)>,
     ) -> Result<(), Error<'static>> {
         let path = local_abspath.to_str().unwrap();
-        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let path_cstr = crate::dirent::to_absolute_cstring(path)?;
         let pool = apr::Pool::new();
 
         let cancel_baton = cancel_func
@@ -3243,7 +3240,7 @@ impl Context {
         name: &str,
     ) -> Result<Option<Vec<u8>>, Error<'_>> {
         let path = local_abspath.to_str().unwrap();
-        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let path_cstr = crate::dirent::to_absolute_cstring(path)?;
         let name_cstr = std::ffi::CString::new(name).unwrap();
         let result_pool = apr::Pool::new();
         let scratch_pool = apr::Pool::new();
@@ -3288,7 +3285,7 @@ impl Context {
         notify_func: Option<&dyn Fn(&Notify)>,
     ) -> Result<(), Error<'static>> {
         let path = local_abspath.to_str().unwrap();
-        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let path_cstr = crate::dirent::to_absolute_cstring(path)?;
         let name_cstr = std::ffi::CString::new(name).unwrap();
         let scratch_pool = apr::Pool::new();
 
@@ -3377,7 +3374,7 @@ impl Context {
         local_abspath: &std::path::Path,
     ) -> Result<std::collections::HashMap<String, Vec<u8>>, Error<'_>> {
         let path = local_abspath.to_str().unwrap();
-        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let path_cstr = crate::dirent::to_absolute_cstring(path)?;
         let result_pool = apr::Pool::new();
         let scratch_pool = apr::Pool::new();
 
@@ -3446,7 +3443,7 @@ impl Context {
         Error<'_>,
     > {
         let path = local_abspath.to_str().unwrap();
-        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let path_cstr = crate::dirent::to_absolute_cstring(path)?;
         let result_pool = apr::Pool::new();
         let scratch_pool = apr::Pool::new();
 
@@ -3519,7 +3516,7 @@ impl Context {
         show_hidden: bool,
     ) -> Result<crate::NodeKind, Error<'static>> {
         let path = local_abspath.to_str().unwrap();
-        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let path_cstr = crate::dirent::to_absolute_cstring(path)?;
         let scratch_pool = apr::Pool::new();
 
         let mut kind: subversion_sys::svn_node_kind_t =
@@ -3547,7 +3544,7 @@ impl Context {
     /// administrative directory.
     pub fn is_wc_root(&mut self, local_abspath: &std::path::Path) -> Result<bool, Error<'static>> {
         let path = local_abspath.to_str().unwrap();
-        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let path_cstr = crate::dirent::to_absolute_cstring(path)?;
         let scratch_pool = apr::Pool::new();
 
         let mut wc_root: i32 = 0;
@@ -3583,7 +3580,7 @@ impl Context {
         notify_func: Option<&dyn Fn(&Notify)>,
     ) -> Result<(), Error<'static>> {
         let path = local_abspath.to_str().unwrap();
-        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let path_cstr = crate::dirent::to_absolute_cstring(path)?;
         let scratch_pool = apr::Pool::new();
 
         let cancel_baton = cancel_func
@@ -3970,8 +3967,7 @@ impl Context {
         local_abspath: &std::path::Path,
         options: &RevertOptions,
     ) -> Result<(), Error<'static>> {
-        let path_cstr =
-            std::ffi::CString::new(local_abspath.to_str().expect("path must be valid UTF-8"))?;
+        let path_cstr = crate::dirent::to_absolute_cstring(local_abspath)?;
 
         let scratch_pool = apr::Pool::new();
 
@@ -4075,8 +4071,7 @@ impl Context {
         depth: crate::Depth,
         changelist_filter: &[String],
     ) -> Result<(), Error<'static>> {
-        let path_cstr =
-            std::ffi::CString::new(local_abspath.to_str().expect("path must be valid UTF-8"))?;
+        let path_cstr = crate::dirent::to_absolute_cstring(local_abspath)?;
         let cl_cstr = changelist
             .map(|s| std::ffi::CString::new(s).expect("changelist name must be valid UTF-8"));
 
@@ -4132,8 +4127,7 @@ impl Context {
         changelist_filter: &[String],
         mut callback: impl FnMut(&str, Option<&str>) -> Result<(), Error<'static>>,
     ) -> Result<(), Error<'static>> {
-        let path_cstr =
-            std::ffi::CString::new(local_abspath.to_str().expect("path must be valid UTF-8"))?;
+        let path_cstr = crate::dirent::to_absolute_cstring(local_abspath)?;
 
         let scratch_pool = apr::Pool::new();
 
@@ -4203,8 +4197,7 @@ impl Context {
         &mut self,
         local_abspath: &std::path::Path,
     ) -> Result<Status<'static>, Error<'static>> {
-        let path_cstr =
-            std::ffi::CString::new(local_abspath.to_str().expect("path must be valid UTF-8"))?;
+        let path_cstr = crate::dirent::to_absolute_cstring(local_abspath)?;
         let result_pool = apr::Pool::new();
         let mut ptr: *mut subversion_sys::svn_wc_status3_t = std::ptr::null_mut();
         with_tmp_pool(|scratch| {
@@ -4233,8 +4226,7 @@ impl Context {
         &mut self,
         local_abspath: &std::path::Path,
     ) -> Result<(bool, bool, crate::NodeKind), Error<'static>> {
-        let path_cstr =
-            std::ffi::CString::new(local_abspath.to_str().expect("path must be valid UTF-8"))?;
+        let path_cstr = crate::dirent::to_absolute_cstring(local_abspath)?;
         let mut is_wcroot: subversion_sys::svn_boolean_t = 0;
         let mut is_switched: subversion_sys::svn_boolean_t = 0;
         let mut kind: subversion_sys::svn_node_kind_t =
@@ -4265,8 +4257,7 @@ impl Context {
         local_abspath: &std::path::Path,
         use_commit_times: bool,
     ) -> Result<(), Error<'static>> {
-        let path_cstr =
-            std::ffi::CString::new(local_abspath.to_str().expect("path must be valid UTF-8"))?;
+        let path_cstr = crate::dirent::to_absolute_cstring(local_abspath)?;
         with_tmp_pool(|scratch| {
             svn_result(unsafe {
                 subversion_sys::svn_wc_restore(
@@ -4290,8 +4281,7 @@ impl Context {
         &mut self,
         local_abspath: &std::path::Path,
     ) -> Result<Vec<String>, Error<'static>> {
-        let path_cstr =
-            std::ffi::CString::new(local_abspath.to_str().expect("path must be valid UTF-8"))?;
+        let path_cstr = crate::dirent::to_absolute_cstring(local_abspath)?;
         let result_pool = apr::Pool::new();
         let mut patterns: *mut apr_sys::apr_array_header_t = std::ptr::null_mut();
         with_tmp_pool(|scratch| {
@@ -4343,8 +4333,7 @@ impl Context {
         destroy_wf: bool,
         instant_error: bool,
     ) -> Result<(), Error<'static>> {
-        let path_cstr =
-            std::ffi::CString::new(local_abspath.to_str().expect("path must be valid UTF-8"))?;
+        let path_cstr = crate::dirent::to_absolute_cstring(local_abspath)?;
         with_tmp_pool(|scratch| {
             svn_result(unsafe {
                 subversion_sys::svn_wc_remove_from_revision_control2(
@@ -4373,7 +4362,7 @@ impl Notify {
 
     /// Get the action type
     pub fn action(&self) -> u32 {
-        unsafe { (*self.ptr).action }
+        unsafe { (*self.ptr).action as u32 }
     }
 
     /// Get the path
@@ -4431,17 +4420,17 @@ impl Notify {
 
     /// Get the content state
     pub fn content_state(&self) -> u32 {
-        unsafe { (*self.ptr).content_state }
+        unsafe { (*self.ptr).content_state as u32 }
     }
 
     /// Get the property state
     pub fn prop_state(&self) -> u32 {
-        unsafe { (*self.ptr).prop_state }
+        unsafe { (*self.ptr).prop_state as u32 }
     }
 
     /// Get the lock state
     pub fn lock_state(&self) -> u32 {
-        unsafe { (*self.ptr).lock_state }
+        unsafe { (*self.ptr).lock_state as u32 }
     }
 
     /// Get the revision
@@ -4512,32 +4501,32 @@ impl Notify {
 
     /// Get the hunk original start line (for patch operations)
     pub fn hunk_original_start(&self) -> u64 {
-        unsafe { (*self.ptr).hunk_original_start }
+        unsafe { (*self.ptr).hunk_original_start.into() }
     }
 
     /// Get the hunk original length (for patch operations)
     pub fn hunk_original_length(&self) -> u64 {
-        unsafe { (*self.ptr).hunk_original_length }
+        unsafe { (*self.ptr).hunk_original_length.into() }
     }
 
     /// Get the hunk modified start line (for patch operations)
     pub fn hunk_modified_start(&self) -> u64 {
-        unsafe { (*self.ptr).hunk_modified_start }
+        unsafe { (*self.ptr).hunk_modified_start.into() }
     }
 
     /// Get the hunk modified length (for patch operations)
     pub fn hunk_modified_length(&self) -> u64 {
-        unsafe { (*self.ptr).hunk_modified_length }
+        unsafe { (*self.ptr).hunk_modified_length.into() }
     }
 
     /// Get the line at which a hunk was matched (for patch operations)
     pub fn hunk_matched_line(&self) -> u64 {
-        unsafe { (*self.ptr).hunk_matched_line }
+        unsafe { (*self.ptr).hunk_matched_line.into() }
     }
 
     /// Get the fuzz factor the hunk was applied with (for patch operations)
     pub fn hunk_fuzz(&self) -> u64 {
-        unsafe { (*self.ptr).hunk_fuzz }
+        unsafe { (*self.ptr).hunk_fuzz.into() }
     }
 }
 
@@ -4846,8 +4835,7 @@ pub fn cleanup(
     vacuum_pristines: bool,
     _include_externals: bool,
 ) -> Result<(), Error<'static>> {
-    let path_str = wc_path.to_string_lossy();
-    let path_cstr = std::ffi::CString::new(path_str.as_ref()).unwrap();
+    let path_cstr = crate::dirent::to_absolute_cstring(wc_path)?;
 
     with_tmp_pool(|pool| -> Result<(), Error<'static>> {
         let mut ctx = std::ptr::null_mut();
@@ -4894,8 +4882,7 @@ pub fn add(
     _no_autoprops: bool,
     _add_parents: bool,
 ) -> Result<(), Error<'static>> {
-    let path_str = path.to_string_lossy();
-    let path_cstr = std::ffi::CString::new(path_str.as_ref())?;
+    let path_cstr = crate::dirent::to_absolute_cstring(path)?;
 
     with_tmp_pool(|pool| unsafe {
         let err = subversion_sys::svn_wc_add_from_disk3(
@@ -4918,8 +4905,7 @@ pub fn delete(
     keep_local: bool,
     delete_unversioned_target: bool,
 ) -> Result<(), Error<'static>> {
-    let path_str = path.to_string_lossy();
-    let path_cstr = std::ffi::CString::new(path_str.as_ref())?;
+    let path_cstr = crate::dirent::to_absolute_cstring(path)?;
 
     with_tmp_pool(|pool| unsafe {
         let err = subversion_sys::svn_wc_delete4(
@@ -4946,8 +4932,7 @@ pub fn revert(
     clear_changelists: bool,
     metadata_only: bool,
 ) -> Result<(), Error<'static>> {
-    let path_str = path.to_string_lossy();
-    let path_cstr = std::ffi::CString::new(path_str.as_ref())?;
+    let path_cstr = crate::dirent::to_absolute_cstring(path)?;
 
     with_tmp_pool(|pool| unsafe {
         let err = subversion_sys::svn_wc_revert6(
@@ -5023,8 +5008,7 @@ pub fn resolve_conflict(
     resolve_tree: bool,
     conflict_choice: ConflictChoice,
 ) -> Result<(), Error<'static>> {
-    let path_str = path.to_string_lossy();
-    let path_cstr = std::ffi::CString::new(path_str.as_ref())?;
+    let path_cstr = crate::dirent::to_absolute_cstring(path)?;
 
     with_tmp_pool(|pool| unsafe {
         let err = subversion_sys::svn_wc_resolved_conflict5(
@@ -5102,8 +5086,8 @@ pub fn revision_status(
 
         let status = unsafe { *status_ptr };
         Ok((
-            status.min_rev,
-            status.max_rev,
+            status.min_rev.into(),
+            status.max_rev.into(),
             status.switched != 0,
             status.modified != 0,
         ))
@@ -5510,7 +5494,7 @@ mod tests {
             let _repos = crate::repos::Repos::create(&repos_path).unwrap();
 
             // Prepare for checkout
-            let url = format!("file://{}", repos_path.display());
+            let url = crate::path_to_file_url(&repos_path);
             let mut client_ctx = crate::client::Context::new().unwrap();
 
             // Checkout working copy
@@ -5608,7 +5592,7 @@ mod tests {
     fn create_repo(base: &Path, name: &str) -> (PathBuf, String) {
         let repos_path = base.join(name);
         let _repos = crate::repos::Repos::create(&repos_path).unwrap();
-        let url = format!("file://{}", repos_path.display());
+        let url = crate::path_to_file_url(&repos_path);
         (repos_path, url)
     }
 
@@ -5699,15 +5683,15 @@ mod tests {
         // Test StatusKind enum conversions
         assert_eq!(
             StatusKind::Normal as u32,
-            subversion_sys::svn_wc_status_kind_svn_wc_status_normal
+            subversion_sys::svn_wc_status_kind_svn_wc_status_normal as u32
         );
         assert_eq!(
             StatusKind::Added as u32,
-            subversion_sys::svn_wc_status_kind_svn_wc_status_added
+            subversion_sys::svn_wc_status_kind_svn_wc_status_added as u32
         );
         assert_eq!(
             StatusKind::Deleted as u32,
-            subversion_sys::svn_wc_status_kind_svn_wc_status_deleted
+            subversion_sys::svn_wc_status_kind_svn_wc_status_deleted as u32
         );
 
         // Test From conversion
@@ -5720,11 +5704,11 @@ mod tests {
         // Test Schedule enum conversions
         assert_eq!(
             Schedule::Normal as u32,
-            subversion_sys::svn_wc_schedule_t_svn_wc_schedule_normal
+            subversion_sys::svn_wc_schedule_t_svn_wc_schedule_normal as u32
         );
         assert_eq!(
             Schedule::Add as u32,
-            subversion_sys::svn_wc_schedule_t_svn_wc_schedule_add
+            subversion_sys::svn_wc_schedule_t_svn_wc_schedule_add as u32
         );
 
         // Test From conversion
@@ -6278,7 +6262,7 @@ mod tests {
         let _repos = crate::repos::Repos::create(&repos_path).unwrap();
 
         // Create a working copy using client API
-        let url_str = format!("file://{}", repos_path.display());
+        let url_str = crate::path_to_file_url(&repos_path);
         let url = crate::uri::Uri::new(&url_str).unwrap();
         let mut client_ctx = crate::client::Context::new().unwrap();
 
@@ -6410,7 +6394,7 @@ mod tests {
         let _repos = crate::repos::Repos::create(&repos_path).unwrap();
 
         // Create a working copy using client API
-        let url_str = format!("file://{}", repos_path.display());
+        let url_str = crate::path_to_file_url(&repos_path);
         let url = crate::uri::Uri::new(&url_str).unwrap();
         let mut client_ctx = crate::client::Context::new().unwrap();
 
@@ -6571,7 +6555,7 @@ mod tests {
         // Create a repository
         let _repos = crate::repos::Repos::create(&repos_path).unwrap();
 
-        let url_str = format!("file://{}", repos_path.display());
+        let url_str = crate::path_to_file_url(&repos_path);
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         // Create first working copy
@@ -6767,7 +6751,7 @@ mod tests {
 
         // Check out working copy
         let mut client_ctx = crate::client::Context::new().unwrap();
-        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        let url_str = crate::path_to_file_url(&repo_path);
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         client_ctx
@@ -6818,7 +6802,7 @@ mod tests {
 
         // Check out working copy
         let mut client_ctx = crate::client::Context::new().unwrap();
-        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        let url_str = crate::path_to_file_url(&repo_path);
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         client_ctx
@@ -6868,7 +6852,7 @@ mod tests {
 
         // Check out working copy
         let mut client_ctx = crate::client::Context::new().unwrap();
-        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        let url_str = crate::path_to_file_url(&repo_path);
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         client_ctx
@@ -6909,7 +6893,7 @@ mod tests {
 
         // Check out working copy
         let mut client_ctx = crate::client::Context::new().unwrap();
-        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        let url_str = crate::path_to_file_url(&repo_path);
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         client_ctx
@@ -6943,7 +6927,7 @@ mod tests {
 
         // Check out working copy
         let mut client_ctx = crate::client::Context::new().unwrap();
-        let url_str = format!("file://{}", repo_path.to_str().unwrap());
+        let url_str = crate::path_to_file_url(&repo_path);
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         client_ctx
@@ -7057,7 +7041,7 @@ mod tests {
 
         // Create a test repository
         crate::repos::Repos::create(&repos_path).unwrap();
-        let url_str = format!("file://{}", repos_path.display());
+        let url_str = crate::path_to_file_url(&repos_path);
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         // Checkout
@@ -7079,7 +7063,7 @@ mod tests {
         // Move the repository to a new location (simulating repository relocation)
         let repos_path2 = tmp_dir.path().join("repo_moved");
         std::fs::rename(&repos_path, &repos_path2).unwrap();
-        let repos_url2 = format!("file://{}", repos_path2.display());
+        let repos_url2 = crate::path_to_file_url(&repos_path2);
 
         // Test relocate - should work since it's the same repository, different URL
         let mut wc_ctx = Context::new().unwrap();
@@ -7108,7 +7092,7 @@ mod tests {
 
         // Create a test repository
         crate::repos::Repos::create(&repos_path).unwrap();
-        let url_str = format!("file://{}", repos_path.display());
+        let url_str = crate::path_to_file_url(&repos_path);
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         // Checkout
@@ -7157,7 +7141,7 @@ mod tests {
 
         // Create a test repository
         crate::repos::Repos::create(&repos_path).unwrap();
-        let url_str = format!("file://{}", repos_path.display());
+        let url_str = crate::path_to_file_url(&repos_path);
         let url = crate::uri::Uri::new(&url_str).unwrap();
 
         // Checkout
@@ -7300,7 +7284,7 @@ mod tests {
         let _repos = crate::repos::Repos::create(&repos_path).unwrap();
 
         // Create a working copy
-        let url_str = format!("file://{}", repos_path.display());
+        let url_str = crate::path_to_file_url(&repos_path);
         let url = crate::uri::Uri::new(&url_str).unwrap();
         let mut client_ctx = crate::client::Context::new().unwrap();
         client_ctx
@@ -7356,7 +7340,7 @@ mod tests {
         let _repos = crate::repos::Repos::create(&repos_path).unwrap();
 
         // Create a working copy
-        let url_str = format!("file://{}", repos_path.display());
+        let url_str = crate::path_to_file_url(&repos_path);
         let url = crate::uri::Uri::new(&url_str).unwrap();
         let mut client_ctx = crate::client::Context::new().unwrap();
         client_ctx
@@ -7434,7 +7418,7 @@ mod tests {
         let _repos = crate::repos::Repos::create(&repos_path).unwrap();
 
         // Create a working copy
-        let url_str = format!("file://{}", repos_path.display());
+        let url_str = crate::path_to_file_url(&repos_path);
         let url = crate::uri::Uri::new(&url_str).unwrap();
         let mut client_ctx = crate::client::Context::new().unwrap();
         client_ctx
@@ -7510,7 +7494,7 @@ mod tests {
         let _repos = crate::repos::Repos::create(&repos_path).unwrap();
 
         // Create a working copy
-        let url_str = format!("file://{}", repos_path.display());
+        let url_str = crate::path_to_file_url(&repos_path);
         let url = crate::uri::Uri::new(&url_str).unwrap();
         let mut client_ctx = crate::client::Context::new().unwrap();
         client_ctx
@@ -7552,7 +7536,7 @@ mod tests {
         let _repos = crate::repos::Repos::create(&repos_path).unwrap();
 
         // Create a working copy
-        let url_str = format!("file://{}", repos_path.display());
+        let url_str = crate::path_to_file_url(&repos_path);
         let url = crate::uri::Uri::new(&url_str).unwrap();
         let mut client_ctx = crate::client::Context::new().unwrap();
         client_ctx
@@ -7604,7 +7588,7 @@ mod tests {
         let _repos = crate::repos::Repos::create(&repos_path).unwrap();
 
         // Create a working copy
-        let url_str = format!("file://{}", repos_path.display());
+        let url_str = crate::path_to_file_url(&repos_path);
         let url = crate::uri::Uri::new(&url_str).unwrap();
         let mut client_ctx = crate::client::Context::new().unwrap();
         client_ctx
@@ -7711,7 +7695,7 @@ mod tests {
         let _repos = crate::repos::Repos::create(&repos_path).unwrap();
 
         // Create a working copy
-        let url_str = format!("file://{}", repos_path.display());
+        let url_str = crate::path_to_file_url(&repos_path);
         let url = crate::uri::Uri::new(&url_str).unwrap();
         let mut client_ctx = crate::client::Context::new().unwrap();
         client_ctx

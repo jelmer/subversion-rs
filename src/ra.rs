@@ -2183,7 +2183,7 @@ impl<'a> Session<'a> {
         let path_cstr = std::ffi::CString::new(path).unwrap();
 
         let mut props: *mut apr::hash::apr_hash_t = std::ptr::null_mut();
-        let mut fetched_rev: i64 = 0;
+        let mut fetched_rev: subversion_sys::svn_revnum_t = 0;
 
         // Use svn_ra_get_dir2 with dirent_fields set to 0 to skip entries
         let err = unsafe {
@@ -2208,7 +2208,7 @@ impl<'a> Session<'a> {
             prop_hash.to_hashmap()
         };
 
-        Ok((properties, Revnum(fetched_rev)))
+        Ok((properties, Revnum(fetched_rev as _)))
     }
 
     /// Set or delete a revision property (with optional old value check)
@@ -2733,7 +2733,7 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let repo_path = temp_dir.path().join("test_repo");
         let repo = crate::repos::Repos::create(&repo_path).unwrap();
-        let url = format!("file://{}", repo_path.display());
+        let url = crate::path_to_file_url(&repo_path);
         (temp_dir, url, repo)
     }
 
