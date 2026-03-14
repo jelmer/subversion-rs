@@ -38,7 +38,7 @@ fn create_svn_bindings(
         .header(svn_path.join("svn_x509.h").to_str().unwrap())
         .header(svn_path.join("svn_base64.h").to_str().unwrap())
         .header(svn_path.join("svn_cache_config.h").to_str().unwrap())
-        .allowlist_file(".*/svn_.*.h")
+        .allowlist_file(r".*[/\\]svn_.*.h")
         .blocklist_type("apr_.*")
         .derive_default(true)
         .raw_line("#[allow(unused_imports)]")

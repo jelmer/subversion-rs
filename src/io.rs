@@ -1409,10 +1409,9 @@ pub fn copy_dir_recursively(
     cancel_func: Option<&impl Fn() -> Result<(), Error<'static>>>,
 ) -> Result<(), Error<'static>> {
     let scratch_pool = apr::pool::Pool::new();
-    use std::os::unix::ffi::OsStrExt;
     let src = std::ffi::CString::new(src.to_str().unwrap()).unwrap();
     let dst_path = std::ffi::CString::new(dst_path.to_str().unwrap()).unwrap();
-    let dst_basename = std::ffi::CString::new(dst_basename.as_bytes()).unwrap();
+    let dst_basename = std::ffi::CString::new(dst_basename.to_str().unwrap()).unwrap();
     let err = unsafe {
         subversion_sys::svn_io_copy_dir_recursively(
             src.as_ptr(),
@@ -1758,10 +1757,9 @@ pub fn dir_file_copy(
     file: &std::ffi::OsStr,
 ) -> Result<(), Error<'static>> {
     let scratch_pool = apr::pool::Pool::new();
-    use std::os::unix::ffi::OsStrExt;
     let src_path = std::ffi::CString::new(src_path.to_str().unwrap()).unwrap();
     let dest_path = std::ffi::CString::new(dest_path.to_str().unwrap()).unwrap();
-    let file = std::ffi::CString::new(file.as_bytes()).unwrap();
+    let file = std::ffi::CString::new(file.to_str().unwrap()).unwrap();
     let err = unsafe {
         subversion_sys::svn_io_dir_file_copy(
             src_path.as_ptr(),
