@@ -56,6 +56,8 @@ jobs:
           base-devel
           pkgconf
           subversion
+          apr-devel
+          apr-util-devel
           clang
           rust
     - name: "Fix up Version: field in Subversion .pc files"
