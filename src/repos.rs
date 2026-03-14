@@ -2205,13 +2205,14 @@ impl<'a> Notify<'a> {
 
     /// Get the notification action type
     pub fn action(&self) -> u32 {
-        unsafe { (*self.ptr).action.into() }
+        unsafe { (*self.ptr).action as u32 }
     }
 
     /// Check if this is a verify_rev_end notification
     pub fn is_verify_rev_end(&self) -> bool {
         // svn_repos_notify_verify_rev_end value
-        self.action() == subversion_sys::svn_repos_notify_action_t_svn_repos_notify_verify_rev_end as u32
+        self.action()
+            == subversion_sys::svn_repos_notify_action_t_svn_repos_notify_verify_rev_end as u32
     }
 }
 
@@ -5157,7 +5158,7 @@ admin = rw
         let files = ["/file0.txt", "/file1.txt", "/file2.txt"];
         for (i, path) in files.iter().enumerate() {
             let mut txn = repo
-                .begin_txn_for_commit(crate::Revnum(i as i64), "author", "commit")
+                .begin_txn_for_commit(crate::Revnum(i as _), "author", "commit")
                 .unwrap();
             txn.root().unwrap().make_file(*path).unwrap();
             repo.commit_txn(txn).unwrap();

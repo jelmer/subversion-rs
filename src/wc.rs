@@ -171,7 +171,8 @@ pub fn version() -> crate::Version {
 /// Status constant indicating no status.
 pub const STATUS_NONE: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_none as u32;
 /// Status constant for unversioned items.
-pub const STATUS_UNVERSIONED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_unversioned as u32;
+pub const STATUS_UNVERSIONED: u32 =
+    subversion_sys::svn_wc_status_kind_svn_wc_status_unversioned as u32;
 /// Status constant for normal versioned items.
 pub const STATUS_NORMAL: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_normal as u32;
 /// Status constant for added items.
@@ -187,15 +188,18 @@ pub const STATUS_MODIFIED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_statu
 /// Status constant for merged items.
 pub const STATUS_MERGED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_merged as u32;
 /// Status constant for conflicted items.
-pub const STATUS_CONFLICTED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_conflicted as u32;
+pub const STATUS_CONFLICTED: u32 =
+    subversion_sys::svn_wc_status_kind_svn_wc_status_conflicted as u32;
 /// Status constant for ignored items.
 pub const STATUS_IGNORED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_ignored as u32;
 /// Status constant for obstructed items.
-pub const STATUS_OBSTRUCTED: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_obstructed as u32;
+pub const STATUS_OBSTRUCTED: u32 =
+    subversion_sys::svn_wc_status_kind_svn_wc_status_obstructed as u32;
 /// Status constant for external items.
 pub const STATUS_EXTERNAL: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_external as u32;
 /// Status constant for incomplete items.
-pub const STATUS_INCOMPLETE: u32 = subversion_sys::svn_wc_status_kind_svn_wc_status_incomplete as u32;
+pub const STATUS_INCOMPLETE: u32 =
+    subversion_sys::svn_wc_status_kind_svn_wc_status_incomplete as u32;
 
 // Schedule constants for Python compatibility
 /// Schedule constant for normal items.
@@ -4373,7 +4377,7 @@ impl Notify {
 
     /// Get the action type
     pub fn action(&self) -> u32 {
-        unsafe { (*self.ptr).action.into() }
+        unsafe { (*self.ptr).action as u32 }
     }
 
     /// Get the path
@@ -4431,17 +4435,17 @@ impl Notify {
 
     /// Get the content state
     pub fn content_state(&self) -> u32 {
-        unsafe { (*self.ptr).content_state.into() }
+        unsafe { (*self.ptr).content_state as u32 }
     }
 
     /// Get the property state
     pub fn prop_state(&self) -> u32 {
-        unsafe { (*self.ptr).prop_state.into() }
+        unsafe { (*self.ptr).prop_state as u32 }
     }
 
     /// Get the lock state
     pub fn lock_state(&self) -> u32 {
-        unsafe { (*self.ptr).lock_state.into() }
+        unsafe { (*self.ptr).lock_state as u32 }
     }
 
     /// Get the revision
@@ -5699,15 +5703,15 @@ mod tests {
         // Test StatusKind enum conversions
         assert_eq!(
             StatusKind::Normal as u32,
-            subversion_sys::svn_wc_status_kind_svn_wc_status_normal
+            subversion_sys::svn_wc_status_kind_svn_wc_status_normal as u32
         );
         assert_eq!(
             StatusKind::Added as u32,
-            subversion_sys::svn_wc_status_kind_svn_wc_status_added
+            subversion_sys::svn_wc_status_kind_svn_wc_status_added as u32
         );
         assert_eq!(
             StatusKind::Deleted as u32,
-            subversion_sys::svn_wc_status_kind_svn_wc_status_deleted
+            subversion_sys::svn_wc_status_kind_svn_wc_status_deleted as u32
         );
 
         // Test From conversion
@@ -5720,11 +5724,11 @@ mod tests {
         // Test Schedule enum conversions
         assert_eq!(
             Schedule::Normal as u32,
-            subversion_sys::svn_wc_schedule_t_svn_wc_schedule_normal
+            subversion_sys::svn_wc_schedule_t_svn_wc_schedule_normal as u32
         );
         assert_eq!(
             Schedule::Add as u32,
-            subversion_sys::svn_wc_schedule_t_svn_wc_schedule_add
+            subversion_sys::svn_wc_schedule_t_svn_wc_schedule_add as u32
         );
 
         // Test From conversion
