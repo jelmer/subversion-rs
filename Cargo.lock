@@ -647,7 +647,7 @@ dependencies = [
 
 [[package]]
 name = "subversion-sys"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "apr",
  "apr-sys",
