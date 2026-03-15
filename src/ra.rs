@@ -2639,7 +2639,7 @@ impl Callbacks {
         })
     }
 
-    /// Sets the authentication baton for the callbacks.
+    /// Sets the authentication baton for the callbacks (owned).
     pub fn set_auth_baton(&mut self, auth_baton: crate::auth::AuthBaton) {
         // Pin the auth_baton in a Box to get a stable address
         let mut pinned_baton = Box::pin(auth_baton);
@@ -2650,6 +2650,15 @@ impl Callbacks {
         }
         // Keep the pinned auth_baton alive
         self.auth_baton = Some(pinned_baton);
+    }
+
+    /// Sets the authentication baton for the callbacks (borrowed).
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure the AuthBaton outlives these Callbacks.
+    pub unsafe fn set_auth_baton_borrowed(&mut self, auth_baton: &mut crate::auth::AuthBaton) {
+        (*self.ptr).auth_baton = auth_baton.as_mut_ptr();
     }
 
     /// Sets the cancellation callback for the RA session.
@@ -2792,6 +2801,30 @@ mod tests {
     fn test_callbacks_creation() {
         let callbacks = Callbacks::new().unwrap();
         assert!(!callbacks.ptr.is_null());
+    }
+
+    #[test]
+    fn test_set_auth_baton_borrowed() {
+        let (_temp_dir, url, _repo) = create_test_repo();
+
+        let providers = vec![crate::auth::get_username_provider()];
+        let mut auth_baton = crate::auth::AuthBaton::open(providers).unwrap();
+        auth_baton
+            .set(crate::auth::AuthSetting::DefaultUsername("testuser"))
+            .unwrap();
+
+        let mut callbacks = Box::new(Callbacks::new().unwrap());
+
+        // Safety: auth_baton outlives callbacks and session in this test
+        unsafe { callbacks.set_auth_baton_borrowed(&mut auth_baton) };
+
+        let callbacks_ptr = &mut *callbacks as *mut Callbacks;
+        let (mut session, _, _) =
+            unsafe { Session::open(&url, None, Some(&mut *callbacks_ptr), None).unwrap() };
+
+        // Verify the session works with the borrowed auth baton
+        let latest = session.get_latest_revnum().unwrap();
+        assert_eq!(latest, Revnum(0));
     }
 
     #[test]

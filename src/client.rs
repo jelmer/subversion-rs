@@ -2755,6 +2755,15 @@ impl Context {
         }
     }
 
+    /// Sets the authentication baton for this context (borrowed, unchecked lifetime).
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure the AuthBaton outlives this Context.
+    pub unsafe fn set_auth_unchecked(&mut self, auth_baton: &mut crate::auth::AuthBaton) {
+        (*self.ptr).auth_baton = auth_baton.as_mut_ptr();
+    }
+
     /// Sets the authentication baton for this context (owned).
     ///
     /// The context takes ownership of the baton, ensuring it lives as long as the context.
@@ -8478,6 +8487,38 @@ mod tests {
     fn test_version() {
         let version = version();
         assert_eq!(version.major(), 1);
+    }
+
+    #[test]
+    fn test_set_auth_unchecked() {
+        let td = tempfile::tempdir().unwrap();
+        let repo_path = td.path().join("repo");
+        let _repos = crate::repos::Repos::create(&repo_path).unwrap();
+        let dirent = crate::dirent::Dirent::new(&repo_path).unwrap();
+        let url = dirent.to_file_url().unwrap();
+
+        let providers = vec![crate::auth::get_username_provider()];
+        let mut auth_baton = crate::auth::AuthBaton::open(providers).unwrap();
+
+        let mut ctx = Context::new().unwrap();
+        // Safety: auth_baton outlives ctx in this test
+        unsafe { ctx.set_auth_unchecked(&mut auth_baton) };
+
+        // Verify the context works with the borrowed auth baton
+        let mut found = false;
+        ctx.info(
+            url.as_str(),
+            &InfoOptions {
+                revision: Revision::Head,
+                ..Default::default()
+            },
+            &|_path, _info| {
+                found = true;
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(found);
     }
 
     #[test]
