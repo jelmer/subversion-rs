@@ -49,7 +49,7 @@ jobs:
     - name: Set build environment
       run: |
         echo "PKG_CONFIG_PATH=$(brew --prefix apr)/lib/pkgconfig:$(brew --prefix apr-util)/lib/pkgconfig" >> "$GITHUB_ENV"
-        echo "LIBRARY_PATH=$(brew --prefix gettext)/lib" >> "$GITHUB_ENV"
+        echo "LIBRARY_PATH=$(brew --prefix gettext)/lib:$(brew --prefix utf8proc)/lib" >> "$GITHUB_ENV"
     - name: Install cargo-all-features
       run: cargo install cargo-all-features
     - name: Build
