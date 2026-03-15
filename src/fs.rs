@@ -4104,6 +4104,7 @@ mod tests {
 
     #[test]
     #[allow(deprecated)]
+    #[cfg_attr(windows, ignore = "svn_fs_parse_id may not work with all FS backends")]
     fn test_node_id_parse_roundtrip() {
         let dir = tempdir().unwrap();
         let fs_path = dir.path().join("test-fs");

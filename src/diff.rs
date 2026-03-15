@@ -49,32 +49,32 @@ impl DiffHunk {
 
     /// Get the starting line number in the original file
     pub fn original_start(&self) -> u64 {
-        unsafe { subversion_sys::svn_diff_hunk_get_original_start(self.ptr) }
+        unsafe { subversion_sys::svn_diff_hunk_get_original_start(self.ptr).into() }
     }
 
     /// Get the number of lines in the original file
     pub fn original_length(&self) -> u64 {
-        unsafe { subversion_sys::svn_diff_hunk_get_original_length(self.ptr) }
+        unsafe { subversion_sys::svn_diff_hunk_get_original_length(self.ptr).into() }
     }
 
     /// Get the starting line number in the modified file
     pub fn modified_start(&self) -> u64 {
-        unsafe { subversion_sys::svn_diff_hunk_get_modified_start(self.ptr) }
+        unsafe { subversion_sys::svn_diff_hunk_get_modified_start(self.ptr).into() }
     }
 
     /// Get the number of lines in the modified file  
     pub fn modified_length(&self) -> u64 {
-        unsafe { subversion_sys::svn_diff_hunk_get_modified_length(self.ptr) }
+        unsafe { subversion_sys::svn_diff_hunk_get_modified_length(self.ptr).into() }
     }
 
     /// Get the leading context lines
     pub fn leading_context(&self) -> u64 {
-        unsafe { subversion_sys::svn_diff_hunk_get_leading_context(self.ptr) }
+        unsafe { subversion_sys::svn_diff_hunk_get_leading_context(self.ptr).into() }
     }
 
     /// Get the trailing context lines
     pub fn trailing_context(&self) -> u64 {
-        unsafe { subversion_sys::svn_diff_hunk_get_trailing_context(self.ptr) }
+        unsafe { subversion_sys::svn_diff_hunk_get_trailing_context(self.ptr).into() }
     }
 }
 

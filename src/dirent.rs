@@ -308,6 +308,43 @@ pub fn get_absolute_dirent(dirent: &Dirent) -> Result<Dirent, crate::Error<'_>> 
     })
 }
 
+/// Canonicalize and make absolute a path, returning a CString suitable for SVN APIs.
+pub fn to_absolute_cstring(
+    path: impl AsCanonicalDirent,
+) -> Result<std::ffi::CString, crate::Error<'static>> {
+    let canonical = path.as_canonical_dirent()?;
+    with_tmp_pool(|pool| unsafe {
+        let path_cstr = std::ffi::CString::new(canonical.as_str())?;
+        let mut absolute_ptr: *const std::ffi::c_char = std::ptr::null();
+        let err = subversion_sys::svn_dirent_get_absolute(
+            &mut absolute_ptr,
+            path_cstr.as_ptr(),
+            pool.as_mut_ptr(),
+        );
+        crate::Error::from_raw(err)?;
+        let absolute_cstr = std::ffi::CStr::from_ptr(absolute_ptr);
+        Ok(std::ffi::CString::new(absolute_cstr.to_str()?)?)
+    })
+}
+
+/// Canonicalize a path or URL for SVN APIs, returning a CString.
+///
+/// If the input looks like a URL (contains "://"), it is canonicalized as a URI.
+/// Otherwise, it is treated as a local path: canonicalized and made absolute.
+pub fn canonicalize_path_or_url(input: &str) -> Result<std::ffi::CString, crate::Error<'static>> {
+    if crate::path::is_url(input) {
+        with_tmp_pool(|pool| unsafe {
+            let input_cstr = std::ffi::CString::new(input)?;
+            let canonical =
+                subversion_sys::svn_uri_canonicalize(input_cstr.as_ptr(), pool.as_mut_ptr());
+            let canonical_cstr = std::ffi::CStr::from_ptr(canonical);
+            Ok(std::ffi::CString::new(canonical_cstr.to_str()?)?)
+        })
+    } else {
+        to_absolute_cstring(input)
+    }
+}
+
 /// Get the longest common ancestor of two directory paths
 pub fn get_longest_ancestor(
     dirent1: &Dirent,
@@ -448,6 +485,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_is_absolute() {
         let dirent = Dirent::new("/home/user").unwrap();
         assert!(dirent.is_absolute());
@@ -635,6 +673,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_absolute_and_relative() {
         // Absolute paths
         let abs_dirent = Dirent::new("/home/user/project").unwrap();
@@ -664,6 +703,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_get_absolute() {
         // Test with relative path
         let rel_dirent = Dirent::new("project/subdir").unwrap();
@@ -718,6 +758,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_special_paths() {
         // Root path
         let dirent = Dirent::new("/").unwrap();
@@ -821,6 +862,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_to_file_url() {
         let dirent = Dirent::new("/tmp").unwrap();
         let url = dirent.to_file_url().unwrap();
@@ -828,6 +870,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_to_file_url_root() {
         let dirent = Dirent::new("/").unwrap();
         let url = dirent.to_file_url().unwrap();
@@ -835,6 +878,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_to_file_url_nested() {
         let dirent = Dirent::new("/home/user/project").unwrap();
         let url = dirent.to_file_url().unwrap();

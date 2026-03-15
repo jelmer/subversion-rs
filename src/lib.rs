@@ -54,6 +54,10 @@
 #![deny(missing_docs)]
 #![allow(clippy::type_complexity)]
 #![allow(clippy::too_many_arguments)]
+// C type sizes differ across platforms (e.g. long is i64 on Linux, i32 on Windows),
+// so conversions that look like no-ops on one platform are needed on another.
+#![allow(clippy::unnecessary_cast)]
+#![allow(clippy::useless_conversion)]
 
 // Re-export apr_sys for internal use
 extern crate apr_sys;
@@ -331,11 +335,23 @@ impl Revnum {
 
     /// Get the raw svn_revnum_t value
     pub fn as_i64(&self) -> i64 {
-        self.0
+        self.0 as i64
     }
 }
 
 pub use error::Error;
+
+/// Convert a local filesystem path to a properly canonical `file://` URL.
+///
+/// On Windows, `format!("file://{}", path.display())` produces malformed URLs
+/// with backslashes. This function uses SVN's `svn_uri_get_file_url_from_dirent`
+/// to produce correct, canonical URLs on all platforms.
+#[cfg(test)]
+#[allow(dead_code)]
+pub(crate) fn path_to_file_url(path: &std::path::Path) -> String {
+    let dirent = crate::dirent::Dirent::new(path).unwrap();
+    dirent.to_file_url().unwrap().to_string()
+}
 
 #[cfg(test)]
 mod tests {
