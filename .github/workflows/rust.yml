@@ -46,8 +46,10 @@ jobs:
     - uses: actions/checkout@v5
     - name: Install dependencies
       run: brew install subversion pkg-config apr apr-util
-    - name: Set PKG_CONFIG_PATH
-      run: echo "PKG_CONFIG_PATH=$(brew --prefix apr)/lib/pkgconfig:$(brew --prefix apr-util)/lib/pkgconfig" >> "$GITHUB_ENV"
+    - name: Set build environment
+      run: |
+        echo "PKG_CONFIG_PATH=$(brew --prefix apr)/lib/pkgconfig:$(brew --prefix apr-util)/lib/pkgconfig" >> "$GITHUB_ENV"
+        echo "LIBRARY_PATH=$(brew --prefix gettext)/lib" >> "$GITHUB_ENV"
     - name: Install cargo-all-features
       run: cargo install cargo-all-features
     - name: Build
