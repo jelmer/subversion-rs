@@ -287,7 +287,8 @@ pub struct GetLogOptions<'a> {
     /// Whether to include merged revisions.
     pub include_merged_revisions: bool,
     /// The revision properties to retrieve.
-    pub revprops: &'a [&'a str],
+    /// `None` means return all revprops, `Some(&[])` means return none.
+    pub revprops: Option<&'a [&'a str]>,
 }
 
 impl<'a> GetLogOptions<'a> {
@@ -316,7 +317,8 @@ impl<'a> GetLogOptions<'a> {
     }
 
     /// Sets the revision properties to retrieve.
-    pub fn with_revprops(mut self, revprops: &'a [&'a str]) -> Self {
+    /// `None` means return all revprops, `Some(&[])` means return none.
+    pub fn with_revprops(mut self, revprops: Option<&'a [&'a str]>) -> Self {
         self.revprops = revprops;
         self
     }
@@ -1247,18 +1249,27 @@ impl<'a> Session<'a> {
         }
 
         // Convert revprops to proper C strings
+        // None means all revprops (pass NULL to SVN), Some(&[]) means none
         let revprop_cstrings: Vec<std::ffi::CString> = options
             .revprops
-            .iter()
-            .map(|p| std::ffi::CString::new(*p).unwrap())
-            .collect();
+            .map(|rp| {
+                rp.iter()
+                    .map(|p| std::ffi::CString::new(*p).unwrap())
+                    .collect()
+            })
+            .unwrap_or_default();
         let mut revprops_array = apr::tables::TypedArray::<*const std::os::raw::c_char>::new(
             &pool,
-            options.revprops.len() as i32,
+            revprop_cstrings.len() as i32,
         );
         for cstr in &revprop_cstrings {
             revprops_array.push(cstr.as_ptr());
         }
+        let revprops_ptr = if options.revprops.is_some() {
+            unsafe { revprops_array.as_ptr() }
+        } else {
+            std::ptr::null()
+        };
 
         // Box the reference like the original code
         let baton = Box::into_raw(Box::new(log_receiver)) as *mut std::ffi::c_void;
@@ -1273,7 +1284,7 @@ impl<'a> Session<'a> {
                 options.discover_changed_paths.into(),
                 options.strict_node_history.into(),
                 options.include_merged_revisions.into(),
-                revprops_array.as_ptr(),
+                revprops_ptr,
                 Some(crate::wrap_log_entry_receiver),
                 baton,
                 pool.as_mut_ptr(),
@@ -1315,7 +1326,9 @@ impl<'a> Session<'a> {
         let discover_changed_paths = options.discover_changed_paths;
         let strict_node_history = options.strict_node_history;
         let include_merged_revisions = options.include_merged_revisions;
-        let revprops: Vec<String> = options.revprops.iter().map(|s| s.to_string()).collect();
+        let revprops: Option<Vec<String>> = options
+            .revprops
+            .map(|rp| rp.iter().map(|s| s.to_string()).collect());
 
         // Safety: we send a raw pointer to `self` to the worker thread.
         // This is safe because:
@@ -1326,13 +1339,15 @@ impl<'a> Session<'a> {
         let handle = std::thread::spawn(move || {
             let session = unsafe { &mut *(session_addr as *mut Session) };
             let path_refs: Vec<&str> = paths.iter().map(|s| s.as_str()).collect();
-            let revprop_refs: Vec<&str> = revprops.iter().map(|s| s.as_str()).collect();
+            let revprop_refs: Option<Vec<&str>> = revprops
+                .as_ref()
+                .map(|rp| rp.iter().map(|s| s.as_str()).collect());
             let opts = GetLogOptions {
                 limit,
                 discover_changed_paths,
                 strict_node_history,
                 include_merged_revisions,
-                revprops: &revprop_refs,
+                revprops: revprop_refs.as_deref(),
             };
 
             let result = session.get_log(&path_refs, start, end, &opts, &mut |entry| {
@@ -2183,7 +2198,7 @@ impl<'a> Session<'a> {
         let path_cstr = std::ffi::CString::new(path).unwrap();
 
         let mut props: *mut apr::hash::apr_hash_t = std::ptr::null_mut();
-        let mut fetched_rev: i64 = 0;
+        let mut fetched_rev: subversion_sys::svn_revnum_t = 0;
 
         // Use svn_ra_get_dir2 with dirent_fields set to 0 to skip entries
         let err = unsafe {
@@ -2208,7 +2223,7 @@ impl<'a> Session<'a> {
             prop_hash.to_hashmap()
         };
 
-        Ok((properties, Revnum(fetched_rev)))
+        Ok((properties, Revnum(fetched_rev as _)))
     }
 
     /// Set or delete a revision property (with optional old value check)
@@ -2733,7 +2748,7 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let repo_path = temp_dir.path().join("test_repo");
         let repo = crate::repos::Repos::create(&repo_path).unwrap();
-        let url = format!("file://{}", repo_path.display());
+        let url = crate::path_to_file_url(&repo_path);
         (temp_dir, url, repo)
     }
 
@@ -3386,7 +3401,7 @@ mod tests {
                 *revisions.last().unwrap(),
                 &GetLogOptions::default()
                     .with_discover_changed_paths(true)
-                    .with_revprops(&["svn:log", "svn:author", "svn:date"]),
+                    .with_revprops(Some(&["svn:log", "svn:author", "svn:date"])),
                 &mut |log_entry| {
                     if let Some(revision) = log_entry.revision() {
                         let author = log_entry.author().unwrap_or("").to_string();
@@ -3451,7 +3466,7 @@ mod tests {
                 *revisions.last().unwrap(),
                 &GetLogOptions::default()
                     .with_discover_changed_paths(true)
-                    .with_revprops(&["svn:log", "svn:author"]),
+                    .with_revprops(Some(&["svn:log", "svn:author"])),
             )
             .map(|e| e.unwrap().revision().unwrap())
             .collect();
@@ -4227,10 +4242,20 @@ mod tests {
 
         // Create a pre-revprop-change hook to allow revprop changes
         let hooks_dir = temp_dir.path().join("test_repo/hooks");
+        #[cfg(unix)]
         let hook_path = hooks_dir.join("pre-revprop-change");
+        #[cfg(windows)]
+        let hook_path = hooks_dir.join("pre-revprop-change.bat");
         let mut hook_file = fs::File::create(&hook_path).unwrap();
-        writeln!(hook_file, "#!/bin/sh").unwrap();
-        writeln!(hook_file, "exit 0").unwrap();
+        #[cfg(unix)]
+        {
+            writeln!(hook_file, "#!/bin/sh").unwrap();
+            writeln!(hook_file, "exit 0").unwrap();
+        }
+        #[cfg(windows)]
+        {
+            writeln!(hook_file, "@exit 0").unwrap();
+        }
         drop(hook_file); // Close the file before changing permissions
                          // Make it executable
         #[cfg(unix)]

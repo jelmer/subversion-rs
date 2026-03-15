@@ -119,7 +119,8 @@ extern "C" fn wrap_status_func(
     unsafe {
         let callback =
             &mut *(baton as *mut &mut dyn FnMut(&str, &Status) -> Result<(), Error<'static>>);
-        let path_str = std::ffi::CStr::from_ptr(path).to_str().unwrap();
+        let local_path = subversion_sys::svn_dirent_local_style(path, pool);
+        let path_str = std::ffi::CStr::from_ptr(local_path).to_str().unwrap();
         let pool_handle = apr::PoolHandle::from_borrowed_raw(pool);
         let status_wrapper = Status {
             ptr: status,
@@ -331,8 +332,9 @@ impl Info {
     }
 
     /// Returns the last changed revision number.
-    pub fn last_changed_rev(&self) -> Revnum {
-        Revnum::from_raw(unsafe { (*self.0).last_changed_rev }).unwrap()
+    /// Returns `None` if the revision is invalid (e.g. for revision 0).
+    pub fn last_changed_rev(&self) -> Option<Revnum> {
+        Revnum::from_raw(unsafe { (*self.0).last_changed_rev })
     }
 
     /// Returns the last changed date.
@@ -341,10 +343,15 @@ impl Info {
     }
 
     /// Returns the last changed author.
-    pub fn last_changed_author(&self) -> &str {
+    /// Returns `None` if the author is not set (e.g. for revision 0).
+    pub fn last_changed_author(&self) -> Option<&str> {
         unsafe {
             let author = (*self.0).last_changed_author;
-            std::ffi::CStr::from_ptr(author).to_str().unwrap()
+            if author.is_null() {
+                None
+            } else {
+                Some(std::ffi::CStr::from_ptr(author).to_str().unwrap())
+            }
         }
     }
 
@@ -2827,7 +2834,7 @@ impl Context {
             // Keep CStrings alive for the duration of the function
             let path_cstrings: Vec<std::ffi::CString> = paths
                 .iter()
-                .map(|p| std::ffi::CString::new(*p).unwrap())
+                .map(|p| crate::dirent::canonicalize_path_or_url(p).unwrap())
                 .collect();
             let mut ps = apr::tables::TypedArray::new(pool, paths.len() as i32);
             for path in &path_cstrings {
@@ -2950,7 +2957,7 @@ impl Context {
             // Keep CStrings alive for the duration of the function
             let path_cstrings: Vec<std::ffi::CString> = paths
                 .iter()
-                .map(|p| std::ffi::CString::new(*p).unwrap())
+                .map(|p| crate::dirent::canonicalize_path_or_url(p).unwrap())
                 .collect();
             let mut ps = apr::tables::TypedArray::new(pool, paths.len() as i32);
             for path in &path_cstrings {
@@ -3005,7 +3012,7 @@ impl Context {
             // Keep CStrings alive for the duration of the function
             let path_cstrings: Vec<std::ffi::CString> = paths
                 .iter()
-                .map(|p| std::ffi::CString::new(*p).unwrap())
+                .map(|p| crate::dirent::canonicalize_path_or_url(p).unwrap())
                 .collect();
             let mut ps = apr::tables::TypedArray::new(pool, paths.len() as i32);
             for path in &path_cstrings {
@@ -3047,7 +3054,7 @@ impl Context {
         ) -> Result<(), Error<'static>>,
     ) -> Result<(), Error<'static>> {
         with_tmp_pool(|pool| {
-            let target_cstr = std::ffi::CString::new(target)?;
+            let target_cstr = crate::dirent::canonicalize_path_or_url(target)?;
             let changelists = options.changelists.map(|cl| {
                 cl.iter()
                     .map(|cl| std::ffi::CString::new(*cl).unwrap())
@@ -3188,19 +3195,22 @@ impl Context {
     }
 
     /// Exports a versioned path to an unversioned path.
+    ///
+    /// Returns the revision that was exported, or `None` when `svn_client_export5`
+    /// does not report a specific revision (e.g. when exporting a single file).
     pub fn export(
         &mut self,
         from_path_or_url: &str,
         to_path: impl AsCanonicalDirent,
         options: &ExportOptions,
-    ) -> Result<Revnum, Error<'static>> {
+    ) -> Result<Option<Revnum>, Error<'static>> {
         let native_eol: Option<&str> = options.native_eol.into();
         let native_eol = native_eol.map(|s| std::ffi::CString::new(s).unwrap());
         let mut revnum = 0;
         let to_path = to_path.as_canonical_dirent()?;
         with_tmp_pool(|tmp_pool| unsafe {
-            let path_cstr = std::ffi::CString::new(to_path.as_path().to_str().unwrap())?;
-            let from_cstr = std::ffi::CString::new(from_path_or_url)?;
+            let path_cstr = crate::dirent::to_absolute_cstring(to_path)?;
+            let from_cstr = crate::dirent::canonicalize_path_or_url(from_path_or_url)?;
             // Store converted revisions to avoid use-after-free
             let peg_rev_c: crate::svn_opt_revision_t = options.peg_revision.into();
             let rev_c: crate::svn_opt_revision_t = options.revision.into();
@@ -3219,7 +3229,7 @@ impl Context {
                 tmp_pool.as_mut_ptr(),
             );
             Error::from_raw(err)?;
-            Ok(Revnum::from_raw(revnum).unwrap())
+            Ok(Revnum::from_raw(revnum))
         })
     }
 
@@ -3285,7 +3295,7 @@ impl Context {
                 // Keep CStrings alive for the duration of the function
                 let target_cstrings: Vec<std::ffi::CString> = targets
                     .iter()
-                    .map(|t| std::ffi::CString::new(*t).unwrap())
+                    .map(|t| crate::dirent::canonicalize_path_or_url(t).unwrap())
                     .collect();
                 let mut ps = apr::tables::TypedArray::new(pool, targets.len() as i32);
                 for target in &target_cstrings {
@@ -3344,7 +3354,7 @@ impl Context {
         status_func: &dyn FnMut(&'_ str, &'_ Status) -> Result<(), Error<'static>>,
     ) -> Result<Option<Revnum>, Error<'static>> {
         with_tmp_pool(|pool| {
-            let path_cstr = std::ffi::CString::new(path)?;
+            let path_cstr = crate::dirent::canonicalize_path_or_url(path)?;
             let changelist_cstrings: Vec<std::ffi::CString> =
                 if let Some(changelists) = &options.changelists {
                     changelists
@@ -3404,7 +3414,7 @@ impl Context {
             // Keep CStrings alive for the duration of the function
             let target_cstrings: Vec<std::ffi::CString> = targets
                 .iter()
-                .map(|t| std::ffi::CString::new(*t).unwrap())
+                .map(|t| crate::dirent::canonicalize_path_or_url(t).unwrap())
                 .collect();
             let mut ps = apr::tables::TypedArray::new(pool, targets.len() as i32);
             for target in &target_cstrings {
@@ -3507,8 +3517,8 @@ impl Context {
         log_entry_receiver: &mut dyn FnMut(&crate::LogEntry) -> Result<(), Error<'static>>,
     ) -> Result<(), Error<'static>> {
         with_tmp_pool(|pool| {
-            let target_c = std::ffi::CString::new(target_path_or_url).unwrap();
-            let source_c = std::ffi::CString::new(source_path_or_url).unwrap();
+            let target_c = crate::dirent::canonicalize_path_or_url(target_path_or_url).unwrap();
+            let source_c = crate::dirent::canonicalize_path_or_url(source_path_or_url).unwrap();
 
             // Convert revprops to C strings and create APR array
             let revprop_cstrings: Vec<std::ffi::CString> = options
@@ -3577,7 +3587,7 @@ impl Context {
         peg_revision: &Revision,
     ) -> Result<Option<crate::mergeinfo::Mergeinfo>, Error<'_>> {
         let pool = apr::Pool::new();
-        let path_c = std::ffi::CString::new(path_or_url)?;
+        let path_c = crate::dirent::canonicalize_path_or_url(path_or_url)?;
         let mut mergeinfo_hash: *mut apr_sys::apr_hash_t = std::ptr::null_mut();
 
         let peg_rev: subversion_sys::svn_opt_revision_t = (*peg_revision).into();
@@ -3704,8 +3714,12 @@ impl Context {
     }
 
     /// Vacuums pristine copies from a working copy.
-    pub fn vacuum(&mut self, path: &str, options: &VacuumOptions) -> Result<(), Error<'static>> {
-        let path = std::ffi::CString::new(path).unwrap();
+    pub fn vacuum(
+        &mut self,
+        path: impl AsCanonicalDirent,
+        options: &VacuumOptions,
+    ) -> Result<(), Error<'static>> {
+        let path = crate::dirent::to_absolute_cstring(path)?;
         with_tmp_pool(|pool| unsafe {
             let err = svn_client_vacuum(
                 path.as_ptr(),
@@ -3722,8 +3736,12 @@ impl Context {
     }
 
     /// Cleans up a working copy.
-    pub fn cleanup(&mut self, path: &str, options: &CleanupOptions) -> Result<(), Error<'static>> {
-        let path = std::ffi::CString::new(path).unwrap();
+    pub fn cleanup(
+        &mut self,
+        path: impl AsCanonicalDirent,
+        options: &CleanupOptions,
+    ) -> Result<(), Error<'static>> {
+        let path = crate::dirent::to_absolute_cstring(path)?;
         with_tmp_pool(|pool| unsafe {
             let err = svn_client_cleanup2(
                 path.as_ptr(),
@@ -3748,7 +3766,7 @@ impl Context {
         let local_abspath = local_abspath.as_canonical_dirent()?;
         let mut conflict: *mut subversion_sys::svn_client_conflict_t = std::ptr::null_mut();
         with_tmp_pool(|tmp_pool| unsafe {
-            let path_cstr = std::ffi::CString::new(local_abspath.as_path().to_str().unwrap())?;
+            let path_cstr = crate::dirent::to_absolute_cstring(local_abspath)?;
             let err = svn_client_conflict_get(
                 &mut conflict,
                 path_cstr.as_ptr(),
@@ -3774,7 +3792,7 @@ impl Context {
         F: FnMut(Conflict) -> Result<(), Error<'static>>,
     {
         let local_abspath = local_abspath.as_canonical_dirent()?;
-        let path_cstr = std::ffi::CString::new(local_abspath.as_path().to_str().unwrap())?;
+        let path_cstr = crate::dirent::to_absolute_cstring(local_abspath)?;
 
         struct WalkBaton<'a, F: FnMut(Conflict) -> Result<(), Error<'static>>> {
             callback: &'a mut F,
@@ -3833,7 +3851,7 @@ impl Context {
         stream: &mut dyn std::io::Write,
         options: &CatOptions,
     ) -> Result<HashMap<String, Vec<u8>>, Error<'_>> {
-        let path_or_url = std::ffi::CString::new(path_or_url).unwrap();
+        let path_or_url = crate::dirent::canonicalize_path_or_url(path_or_url).unwrap();
         let mut s = crate::io::wrap_write(stream)?;
         with_tmp_pool(|result_pool| {
             with_tmp_pool(|scratch_pool| unsafe {
@@ -3922,7 +3940,7 @@ impl Context {
         let path = path.as_canonical_dirent()?;
         let mut wc_root: *const i8 = std::ptr::null();
         with_tmp_pool(|tmp_pool| unsafe {
-            let path_cstr = std::ffi::CString::new(path.as_path().to_str().unwrap())?;
+            let path_cstr = crate::dirent::to_absolute_cstring(path)?;
             let err = subversion_sys::svn_client_get_wc_root(
                 &mut wc_root,
                 path_cstr.as_ptr(),
@@ -3946,7 +3964,7 @@ impl Context {
         let mut min_revision: subversion_sys::svn_revnum_t = 0;
         let mut max_revision: subversion_sys::svn_revnum_t = 0;
         with_tmp_pool(|tmp_pool| unsafe {
-            let path_cstr = std::ffi::CString::new(local_abspath.as_path().to_str().unwrap())?;
+            let path_cstr = crate::dirent::to_absolute_cstring(local_abspath)?;
             let err = subversion_sys::svn_client_min_max_revisions(
                 &mut min_revision,
                 &mut max_revision,
@@ -3989,7 +4007,7 @@ impl Context {
         &mut self,
         path_or_url: &str,
     ) -> Result<(String, String), Error<'static>> {
-        let path_or_url = std::ffi::CString::new(path_or_url).unwrap();
+        let path_or_url = crate::dirent::canonicalize_path_or_url(path_or_url).unwrap();
         with_tmp_pool(|pool| unsafe {
             let mut repos_root: *const i8 = std::ptr::null();
             let mut repos_uuid: *const i8 = std::ptr::null();
@@ -4023,7 +4041,7 @@ impl Context {
         wri_path: &std::path::Path,
     ) -> Result<crate::ra::Session<'_>, Error<'_>> {
         let url = std::ffi::CString::new(url).unwrap();
-        let wri_path = std::ffi::CString::new(wri_path.to_str().unwrap()).unwrap();
+        let wri_path = crate::dirent::to_absolute_cstring(wri_path)?;
         let pool = apr::Pool::new();
         unsafe {
             let scratch_pool = Pool::default();
@@ -4099,7 +4117,7 @@ impl Context {
         receiver: &mut dyn FnMut(BlameInfo) -> Result<(), Error<'static>>,
     ) -> Result<(Revnum, Revnum), Error<'static>> {
         with_tmp_pool(|pool| {
-            let path_or_url = std::ffi::CString::new(path_or_url).unwrap();
+            let path_or_url = crate::dirent::canonicalize_path_or_url(path_or_url).unwrap();
 
             // Convert diff options to C strings
             // Create diff file options struct
@@ -4178,7 +4196,7 @@ impl Context {
             // Keep CStrings alive for the duration of the function
             let path_cstrings: Vec<std::ffi::CString> = sources
                 .iter()
-                .map(|(path, _)| std::ffi::CString::new(*path).unwrap())
+                .map(|(path, _)| crate::dirent::canonicalize_path_or_url(path).unwrap())
                 .collect();
 
             let sources_array = sources
@@ -4209,7 +4227,7 @@ impl Context {
                 sources_apr_array.push(*src as *const _);
             }
 
-            let dst_c = std::ffi::CString::new(dst_path).unwrap();
+            let dst_c = crate::dirent::canonicalize_path_or_url(dst_path)?;
 
             // Handle externals_to_pin
             let externals_hash = options.externals_to_pin.as_ref().map(|ext| {
@@ -4284,7 +4302,7 @@ impl Context {
         with_tmp_pool(|pool| {
             let paths_c: Vec<_> = paths
                 .iter()
-                .map(|p| std::ffi::CString::new(*p).unwrap())
+                .map(|p| crate::dirent::canonicalize_path_or_url(p).unwrap())
                 .collect();
             let mut paths_array = apr::tables::TypedArray::<*const i8>::new(pool, 0);
             for path in paths_c.iter() {
@@ -4345,27 +4363,8 @@ impl Context {
         actual_revnum: Option<&mut Revnum>,
     ) -> Result<std::collections::HashMap<String, Vec<u8>>, Error<'_>> {
         with_tmp_pool(|pool| {
-            // Convert to absolute path if needed (SVN C API requires absolute paths for local files)
-            let target_path = if target.starts_with("http://")
-                || target.starts_with("https://")
-                || target.starts_with("svn://")
-                || target.starts_with("file://")
-                || std::path::Path::new(target).is_absolute()
-            {
-                target.to_string()
-            } else {
-                std::env::current_dir()
-                    .map_err(|e| {
-                        Error::from_message(&format!("Failed to get current directory: {}", e))
-                    })?
-                    .join(target)
-                    .to_str()
-                    .ok_or_else(|| Error::from_message("Path contains invalid UTF-8"))?
-                    .to_string()
-            };
-
             let propname_c = std::ffi::CString::new(propname).unwrap();
-            let target_c = std::ffi::CString::new(target_path).unwrap();
+            let target_c = crate::dirent::canonicalize_path_or_url(target)?;
 
             // Convert changelists if provided
             let (changelists_array, list_cstrings) = if let Some(lists) = &options.changelists {
@@ -4448,7 +4447,7 @@ impl Context {
     > {
         with_tmp_pool(|pool| {
             let propname_c = std::ffi::CString::new(propname).unwrap();
-            let target_c = std::ffi::CString::new(target).unwrap();
+            let target_c = crate::dirent::canonicalize_path_or_url(target).unwrap();
 
             // Convert changelists if provided
             let (changelists_array, list_cstrings) = if let Some(lists) = &options.changelists {
@@ -4557,7 +4556,7 @@ impl Context {
     ) -> Result<(), Error<'static>> {
         with_tmp_pool(|pool| {
             let propname_c = std::ffi::CString::new(propname).unwrap();
-            let target_c = std::ffi::CString::new(target).unwrap();
+            let target_c = crate::dirent::canonicalize_path_or_url(target).unwrap();
 
             // propset_local expects an array of targets
             let mut targets_array = apr::tables::TypedArray::<*const i8>::new(pool, 0);
@@ -4683,7 +4682,7 @@ impl Context {
         ) -> Result<(), Error<'static>>,
     ) -> Result<(), Error<'static>> {
         with_tmp_pool(|pool| {
-            let target_c = std::ffi::CString::new(target).unwrap();
+            let target_c = crate::dirent::canonicalize_path_or_url(target).unwrap();
 
             let changelists = options.changelists.map(|cl| {
                 let mut array = apr::tables::TypedArray::<*const i8>::new(pool, 0);
@@ -4754,8 +4753,8 @@ impl Context {
         options: &DiffOptions,
     ) -> Result<(), Error<'static>> {
         with_tmp_pool(|pool| {
-            let path1_c = std::ffi::CString::new(path_or_url1).unwrap();
-            let path2_c = std::ffi::CString::new(path_or_url2).unwrap();
+            let path1_c = crate::dirent::canonicalize_path_or_url(path_or_url1).unwrap();
+            let path2_c = crate::dirent::canonicalize_path_or_url(path_or_url2).unwrap();
             let header_encoding_c =
                 std::ffi::CString::new(options.header_encoding.as_str()).unwrap();
 
@@ -4838,7 +4837,7 @@ impl Context {
         options: &DiffOptions,
     ) -> Result<(), Error<'static>> {
         with_tmp_pool(|pool| {
-            let path_c = std::ffi::CString::new(path_or_url).unwrap();
+            let path_c = crate::dirent::canonicalize_path_or_url(path_or_url).unwrap();
             let header_encoding_c =
                 std::ffi::CString::new(options.header_encoding.as_str()).unwrap();
             let relative_to_dir_c = relative_to_dir.map(|s| std::ffi::CString::new(s).unwrap());
@@ -4945,8 +4944,8 @@ impl Context {
         summarize_func: &mut dyn FnMut(DiffSummary) -> Result<(), Error<'static>>,
     ) -> Result<(), Error<'static>> {
         with_tmp_pool(|pool| {
-            let path1_c = std::ffi::CString::new(path_or_url1).unwrap();
-            let path2_c = std::ffi::CString::new(path_or_url2).unwrap();
+            let path1_c = crate::dirent::canonicalize_path_or_url(path_or_url1).unwrap();
+            let path2_c = crate::dirent::canonicalize_path_or_url(path_or_url2).unwrap();
 
             // Build changelists array if provided
             let (changelists_array, _list_cstrings) = if let Some(lists) = &options.changelists {
@@ -5015,7 +5014,7 @@ impl Context {
         summarize_func: &mut dyn FnMut(DiffSummary) -> Result<(), Error<'static>>,
     ) -> Result<(), Error<'static>> {
         with_tmp_pool(|pool| {
-            let path_c = std::ffi::CString::new(path_or_url).unwrap();
+            let path_c = crate::dirent::canonicalize_path_or_url(path_or_url).unwrap();
 
             // Convert changelists if provided
             let (changelists_array, list_cstrings) = if let Some(lists) = &options.changelists {
@@ -5085,7 +5084,7 @@ impl Context {
         ) -> Result<(), Error<'static>>,
     ) -> Result<(), Error<'static>> {
         with_tmp_pool(|pool| {
-            let path_or_url_c = std::ffi::CString::new(path_or_url).unwrap();
+            let path_or_url_c = crate::dirent::canonicalize_path_or_url(path_or_url).unwrap();
 
             // Keep CStrings alive for the duration of the function
             let pattern_cstrings: Vec<std::ffi::CString> = options
@@ -5174,7 +5173,7 @@ impl Context {
         conflict_choice: crate::ConflictChoice,
     ) -> Result<(), Error<'static>> {
         with_tmp_pool(|pool| {
-            let path_c = std::ffi::CString::new(path).unwrap();
+            let path_c = crate::dirent::canonicalize_path_or_url(path).unwrap();
 
             let err = unsafe {
                 subversion_sys::svn_client_resolve(
@@ -6112,7 +6111,7 @@ impl Context {
         let mut paths_array = apr::tables::TypedArray::<*const i8>::new(&pool, paths.len() as i32);
         let path_cstrings: Vec<_> = paths
             .iter()
-            .map(|p| std::ffi::CString::new(*p).unwrap())
+            .map(|p| crate::dirent::canonicalize_path_or_url(p).unwrap())
             .collect();
         for cstring in &path_cstrings {
             paths_array.push(cstring.as_ptr());
@@ -6156,9 +6155,13 @@ impl Context {
     /// Mark conflicts as resolved
     ///
     /// This wraps svn_client_resolved to mark conflicts as resolved.
-    pub fn resolved(&mut self, path: &str, recursive: bool) -> Result<(), Error<'static>> {
+    pub fn resolved(
+        &mut self,
+        path: impl AsCanonicalDirent,
+        recursive: bool,
+    ) -> Result<(), Error<'static>> {
         let pool = Pool::new();
-        let path = std::ffi::CString::new(path).unwrap();
+        let path = crate::dirent::to_absolute_cstring(path)?;
 
         let err = unsafe {
             subversion_sys::svn_client_resolved(
@@ -6191,7 +6194,7 @@ impl Context {
             apr::tables::TypedArray::<*const i8>::new(&pool, targets.len() as i32);
         let target_cstrings: Vec<_> = targets
             .iter()
-            .map(|t| std::ffi::CString::new(*t).unwrap())
+            .map(|t| crate::dirent::canonicalize_path_or_url(t).unwrap())
             .collect();
         for cstring in &target_cstrings {
             targets_array.push(cstring.as_ptr());
@@ -6243,7 +6246,7 @@ impl Context {
             apr::tables::TypedArray::<*const i8>::new(&pool, targets.len() as i32);
         let target_cstrings: Vec<_> = targets
             .iter()
-            .map(|t| std::ffi::CString::new(*t).unwrap())
+            .map(|t| crate::dirent::canonicalize_path_or_url(t).unwrap())
             .collect();
         for cstring in &target_cstrings {
             targets_array.push(cstring.as_ptr());
@@ -6291,7 +6294,7 @@ impl Context {
         receiver: &mut dyn FnMut(&str, &str) -> Result<(), Error<'static>>,
     ) -> Result<(), Error<'static>> {
         let pool = Pool::new();
-        let path_cstr = std::ffi::CString::new(path).unwrap();
+        let path_cstr = crate::dirent::canonicalize_path_or_url(path).unwrap();
 
         // Convert changelists if provided - must keep cstrings alive until after the call
         let cstrings: Vec<_> = changelists
@@ -6345,9 +6348,9 @@ impl Context {
         options: &MergeSourcesOptions,
     ) -> Result<(), Error<'static>> {
         let pool = Pool::new();
-        let source1 = std::ffi::CString::new(source1).unwrap();
-        let source2 = std::ffi::CString::new(source2).unwrap();
-        let target_wcpath = std::ffi::CString::new(target_wcpath).unwrap();
+        let source1 = crate::dirent::canonicalize_path_or_url(source1).unwrap();
+        let source2 = crate::dirent::canonicalize_path_or_url(source2).unwrap();
+        let target_wcpath = crate::dirent::to_absolute_cstring(target_wcpath)?;
 
         // Convert merge_options to APR array if provided
         let merge_opts_array = options.merge_options.as_ref().map(|opts| {
@@ -6412,8 +6415,8 @@ impl Context {
         options: &MergeSourcesOptions,
     ) -> Result<(), Error<'static>> {
         let pool = Pool::new();
-        let source = std::ffi::CString::new(source)?;
-        let target_wcpath = std::ffi::CString::new(target_wcpath)?;
+        let source = crate::dirent::canonicalize_path_or_url(source)?;
+        let target_wcpath = crate::dirent::to_absolute_cstring(target_wcpath)?;
 
         // Convert revision ranges to APR array
         let ranges_array = if ranges_to_merge.is_empty() {
@@ -6505,9 +6508,9 @@ impl Context {
         options: &MergeSourcesOptions,
     ) -> Result<(), Error<'static>> {
         let pool = Pool::new();
-        let source1 = std::ffi::CString::new(source1)?;
-        let source2 = std::ffi::CString::new(source2)?;
-        let target_wcpath = std::ffi::CString::new(target_wcpath)?;
+        let source1 = crate::dirent::canonicalize_path_or_url(source1)?;
+        let source2 = crate::dirent::canonicalize_path_or_url(source2)?;
+        let target_wcpath = crate::dirent::to_absolute_cstring(target_wcpath)?;
 
         // Convert merge_options to APR array if provided
         let merge_opts_array = options.merge_options.as_ref().map(|opts| {
@@ -6613,8 +6616,8 @@ impl Context {
         let result_pool = apr::Pool::new();
         let scratch_pool = apr::Pool::new();
 
-        let source_c = std::ffi::CString::new(source_path_or_url)?;
-        let target_c = std::ffi::CString::new(target_path_or_url)?;
+        let source_c = crate::dirent::canonicalize_path_or_url(source_path_or_url)?;
+        let target_c = crate::dirent::canonicalize_path_or_url(target_path_or_url)?;
 
         let source_rev: subversion_sys::svn_opt_revision_t = (*source_revision).into();
         let target_rev: subversion_sys::svn_opt_revision_t = (*target_revision).into();
@@ -6698,13 +6701,13 @@ impl Context {
             Ok((
                 needs_reintegration != 0,
                 yca_url_str,
-                yca_rev,
+                yca_rev.into(),
                 base_url_str,
-                base_rev,
+                base_rev.into(),
                 right_url_str,
-                right_rev,
+                right_rev.into(),
                 target_url_str,
-                target_rev_out,
+                target_rev_out.into(),
                 repos_root_url_str,
             ))
         }
@@ -6726,13 +6729,13 @@ impl Context {
             apr::tables::TypedArray::<*const i8>::new(&pool, src_paths.len() as i32);
         let src_cstrings: Vec<_> = src_paths
             .iter()
-            .map(|p| std::ffi::CString::new(*p).unwrap())
+            .map(|p| crate::dirent::canonicalize_path_or_url(p).unwrap())
             .collect();
         for cstring in &src_cstrings {
             src_paths_array.push(cstring.as_ptr());
         }
 
-        let dst_path = std::ffi::CString::new(dst_path).unwrap();
+        let dst_path = crate::dirent::canonicalize_path_or_url(dst_path)?;
 
         // Convert revprop table if provided
         let mut revprop_hash = std::ptr::null_mut();
@@ -6818,8 +6821,8 @@ impl Context {
         options: &mut PatchOptions,
     ) -> Result<(), Error<'static>> {
         let pool = apr::Pool::new();
-        let patch_path_cstr = std::ffi::CString::new(patch_path.to_str().unwrap())?;
-        let wc_dir_path_cstr = std::ffi::CString::new(wc_dir_path.to_str().unwrap())?;
+        let patch_path_cstr = crate::dirent::to_absolute_cstring(patch_path)?;
+        let wc_dir_path_cstr = crate::dirent::to_absolute_cstring(wc_dir_path)?;
 
         // Create C-compatible callback wrapper for patch_func
         extern "C" fn c_patch_callback(
@@ -6902,7 +6905,7 @@ impl Context {
     ) -> Result<(), Error<'static>> {
         let pool = apr::Pool::new();
         let source_url_cstr = std::ffi::CString::new(source_url)?;
-        let target_wcpath_cstr = std::ffi::CString::new(target_wcpath.to_str().unwrap())?;
+        let target_wcpath_cstr = crate::dirent::to_absolute_cstring(target_wcpath)?;
 
         // Convert merge options to APR array
         let merge_options_array = unsafe {
@@ -6969,7 +6972,7 @@ impl Context {
     /// Get the UUID of a repository from a working copy path
     /// Returns the UUID string of the repository the working copy is connected to
     pub fn uuid_from_path(&mut self, path: &std::path::Path) -> Result<String, Error<'static>> {
-        let path_cstr = std::ffi::CString::new(path.to_string_lossy().as_ref())?;
+        let path_cstr = crate::dirent::to_absolute_cstring(path)?;
         let pool = apr::Pool::new();
         let mut uuid_ptr = std::ptr::null();
 
@@ -7009,7 +7012,7 @@ impl Context {
         ignore_externals: bool,
     ) -> Result<(), Error<'static>> {
         let pool = apr::Pool::new();
-        let wcroot_path_cstr = std::ffi::CString::new(wcroot_path.to_str().unwrap())?;
+        let wcroot_path_cstr = crate::dirent::to_absolute_cstring(wcroot_path)?;
         let from_prefix_cstr = std::ffi::CString::new(from_prefix)?;
         let to_prefix_cstr = std::ffi::CString::new(to_prefix)?;
 
@@ -7213,7 +7216,7 @@ impl Context {
         peg_revision: &Revision,
     ) -> Result<Vec<String>, Error<'_>> {
         let pool = apr::Pool::new();
-        let path_or_url_cstr = std::ffi::CString::new(path_or_url)?;
+        let path_or_url_cstr = crate::dirent::canonicalize_path_or_url(path_or_url)?;
         let mut sources_array = std::ptr::null_mut();
 
         unsafe {
@@ -7247,7 +7250,7 @@ impl Context {
     /// Upgrade a working copy to a newer format
     pub fn upgrade(&mut self, wcroot_path: &std::path::Path) -> Result<(), Error<'static>> {
         let pool = apr::Pool::new();
-        let wcroot_path_cstr = std::ffi::CString::new(wcroot_path.to_str().unwrap())?;
+        let wcroot_path_cstr = crate::dirent::to_absolute_cstring(wcroot_path)?;
 
         unsafe {
             let err = subversion_sys::svn_client_upgrade(
@@ -7278,6 +7281,22 @@ impl Status {
             std::ffi::CStr::from_ptr((*self.ptr).local_abspath)
                 .to_str()
                 .unwrap()
+        }
+    }
+
+    /// Returns the local absolute path in the native OS style.
+    ///
+    /// On Unix this is the same as [`local_abspath()`](Self::local_abspath).
+    /// On Windows, SVN stores paths with forward slashes internally;
+    /// this method converts them to native backslash style.
+    pub fn local_abspath_native(&self) -> std::path::PathBuf {
+        unsafe {
+            let pool = apr::Pool::new();
+            let local = subversion_sys::svn_dirent_local_style(
+                (*self.ptr).local_abspath,
+                pool.as_mut_ptr(),
+            );
+            std::path::PathBuf::from(std::ffi::CStr::from_ptr(local).to_str().unwrap())
         }
     }
 
@@ -8363,7 +8382,6 @@ mod tests {
 
     /// Test fixture for client tests with repository and working copy.
     struct ClientTestFixture {
-        pub repos_path: PathBuf,
         pub wc_path: PathBuf,
         pub url: String,
         pub ctx: Context,
@@ -8381,8 +8399,9 @@ mod tests {
             let _repos = crate::repos::Repos::create(&repos_path).unwrap();
 
             // Prepare URL
-            let url = format!("file://{}", repos_path.display());
-            let uri = crate::uri::Uri::new(&url).unwrap();
+            let repos_dirent = crate::dirent::Dirent::new(&repos_path).unwrap();
+            let uri = repos_dirent.to_file_url().unwrap();
+            let url = uri.to_string();
 
             // Create client context and checkout
             let mut ctx = Context::new().unwrap();
@@ -8390,7 +8409,6 @@ mod tests {
                 .unwrap();
 
             Self {
-                repos_path,
                 wc_path,
                 url,
                 ctx,
@@ -8913,7 +8931,7 @@ mod tests {
         let mut wc_ctx = crate::wc::Context::new().unwrap();
         let repo_abs_path = repo_path.canonicalize().unwrap();
         let wc_abs_path = wc_path.canonicalize().unwrap();
-        let url_str = format!("file://{}", repo_abs_path.to_str().unwrap());
+        let url_str = crate::path_to_file_url(&repo_abs_path);
 
         // Create basic .svn structure using ensure_adm
         wc_ctx
@@ -11149,7 +11167,6 @@ mod tests {
         fixture.commit();
 
         let trunk_url = fixture.url.clone();
-        let repos_path_str = fixture.repos_path.to_str().unwrap().to_string();
 
         // Create a branch
         let branch_url = format!("{}/branch", trunk_url);
@@ -11221,7 +11238,7 @@ mod tests {
         // YCA URL should be valid
         assert!(!yca_url.is_empty(), "Should have YCA URL");
         assert!(
-            yca_url.contains(&repos_path_str),
+            yca_url.starts_with(&fixture.url),
             "YCA URL should reference the repository"
         );
 
@@ -11869,17 +11886,24 @@ mod tests {
         fixture
             .ctx
             .status(
-                fixture.wc_path.to_str().expect("path should be valid UTF-8"),
+                fixture
+                    .wc_path
+                    .to_str()
+                    .expect("path should be valid UTF-8"),
                 &StatusOptions::default(),
                 &mut |path, status| {
                     if path == test_file_str {
-                        let abspath = status.local_abspath();
+                        let abspath = status.local_abspath_native();
                         assert_eq!(
-                            abspath, test_file_str,
-                            "Status::local_abspath() should return the actual file path, not 'xyzzy'"
+                            abspath,
+                            std::path::Path::new(test_file_str),
+                            "Status::local_abspath_native() should return the actual file path"
                         );
-                        assert!(!abspath.is_empty(), "local_abspath should not be empty");
-                        assert_ne!(abspath, "xyzzy", "local_abspath should not be 'xyzzy'");
+                        assert_ne!(
+                            status.local_abspath(),
+                            "xyzzy",
+                            "local_abspath should not be 'xyzzy'"
+                        );
                         got_status = true;
                     }
                     Ok(())
