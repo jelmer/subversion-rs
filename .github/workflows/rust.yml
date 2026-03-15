@@ -38,6 +38,29 @@ jobs:
     - name: Check formatting
       run: cargo fmt -- --check
 
+  build-macos:
+
+    runs-on: macos-latest
+
+    steps:
+    - uses: actions/checkout@v5
+    - name: Install dependencies
+      run: brew install subversion pkg-config apr apr-util
+    - name: Set build environment
+      run: |
+        echo "PKG_CONFIG_PATH=$(brew --prefix apr)/lib/pkgconfig:$(brew --prefix apr-util)/lib/pkgconfig" >> "$GITHUB_ENV"
+        echo "LIBRARY_PATH=$(brew --prefix gettext)/lib:$(brew --prefix utf8proc)/lib" >> "$GITHUB_ENV"
+    - name: Install cargo-all-features
+      run: cargo install cargo-all-features
+    - name: Build
+      run: cargo build-all-features
+      env:
+        RUSTFLAGS: -Dwarnings
+    - name: Run tests
+      run: cargo test-all-features
+      env:
+        RUSTFLAGS: -Dwarnings
+
   build-windows:
 
     runs-on: windows-latest
