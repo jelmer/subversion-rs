@@ -4777,7 +4777,9 @@ impl Context {
                 diff_options_array.push(opt.as_ptr());
             }
 
-            let relative_to_dir_c = relative_to_dir.map(|d| std::ffi::CString::new(d).unwrap());
+            let relative_to_dir_c = relative_to_dir
+                .map(|d| crate::dirent::to_absolute_cstring(d))
+                .transpose()?;
 
             // Convert changelists if provided
             let (changelists_array, list_cstrings) = if let Some(lists) = &options.changelists {
@@ -4849,7 +4851,9 @@ impl Context {
             let path_c = crate::dirent::canonicalize_path_or_url(path_or_url).unwrap();
             let header_encoding_c =
                 std::ffi::CString::new(options.header_encoding.as_str()).unwrap();
-            let relative_to_dir_c = relative_to_dir.map(|s| std::ffi::CString::new(s).unwrap());
+            let relative_to_dir_c = relative_to_dir
+                .map(|d| crate::dirent::to_absolute_cstring(d))
+                .transpose()?;
 
             // Create diff file options struct
             let diff_file_options =
@@ -8810,6 +8814,33 @@ mod tests {
 
         // Should succeed even with no differences
         diff_result.unwrap();
+    }
+
+    #[test]
+    fn test_diff_relative_to_dir() {
+        let mut fixture = ClientTestFixture::new();
+        let test_file = fixture.add_file("test.txt", "line1\n");
+        fixture.commit();
+
+        // Modify file
+        std::fs::write(&test_file, "line1\nline2\n").unwrap();
+
+        let mut out_stream = crate::io::Stream::buffered();
+        let mut err_stream = crate::io::Stream::buffered();
+
+        // Test diff with relative_to_dir as a relative path
+        let wc_path = fixture.wc_path.to_str().unwrap();
+        let result = fixture.ctx.diff(
+            wc_path,
+            &Revision::Number(Revnum(1)),
+            wc_path,
+            &Revision::Working,
+            Some(wc_path),
+            &mut out_stream,
+            &mut err_stream,
+            &DiffOptions::new().with_depth(Depth::Infinity),
+        );
+        result.unwrap();
     }
 
     #[test]
