@@ -3232,7 +3232,7 @@ impl Context {
                 options.overwrite as i32,
                 options.ignore_externals as i32,
                 options.ignore_keywords as i32,
-                options.depth as i32,
+                options.depth.into(),
                 native_eol.map(|s| s.as_ptr()).unwrap_or(std::ptr::null()),
                 self.ptr,
                 tmp_pool.as_mut_ptr(),
@@ -10172,17 +10172,87 @@ mod tests {
             "Top-level file should be exported"
         );
 
-        // With depth=Files, when exporting from a working copy path, SVN exports the entire
-        // tree that exists in the working copy. The depth parameter affects how the export
-        // operation traverses the repository, not what content gets copied from the WC.
-        // This matches the behavior of `svn export --depth files` on a WC path.
+        // With depth=Files, only top-level files are exported, not subdirectories.
         assert!(
-            export_path3.join("subdir").exists(),
-            "Subdirectory is exported with depth=Files from WC"
+            !export_path3.join("subdir").exists(),
+            "Subdirectory should not be exported with depth=Files"
         );
         assert!(
-            export_path3.join("subdir/file2.txt").exists(),
-            "Files in subdirectories are exported with depth=Files from WC"
+            !export_path3.join("subdir/file2.txt").exists(),
+            "Files in subdirectories should not be exported with depth=Files"
+        );
+    }
+
+    #[test]
+    fn test_export_depth_infinity_honors_externals() {
+        // Regression test: Depth::Infinity was being passed as its Rust
+        // discriminant (5) rather than the C svn_depth_infinity value (2).
+        // Since svn_client_export5 only processes externals when depth is
+        // svn_depth_infinity, this caused ignore_externals=false to be
+        // silently ignored.
+        let mut fixture = ClientTestFixture::new();
+
+        // Create content in the repo to serve as an external target.
+        fixture.add_dir("ext-source");
+        let ext_file = fixture.wc_path.join("ext-source/ext-file.txt");
+        std::fs::write(&ext_file, "external content").unwrap();
+        fixture.ctx.add(&ext_file, &AddOptions::new()).unwrap();
+        fixture.commit();
+
+        // Update the working copy so it is not out of date.
+        let wc_path_str = fixture.wc_path_str().to_string();
+        let update_opts = UpdateOptions {
+            depth: crate::Depth::Infinity,
+            depth_is_sticky: false,
+            ignore_externals: true,
+            allow_unver_obstructions: false,
+            adds_as_modifications: false,
+            make_parents: false,
+        };
+        fixture
+            .ctx
+            .update(&[&wc_path_str], crate::Revision::Head, &update_opts)
+            .unwrap();
+
+        // Set svn:externals on the root to pull ext-source as "ext-link".
+        let externals_val = format!("{}/ext-source ext-link", fixture.url);
+        fixture
+            .ctx
+            .propset(
+                "svn:externals",
+                Some(externals_val.as_bytes()),
+                &wc_path_str,
+                &PropSetOptions::default(),
+            )
+            .unwrap();
+        fixture.commit();
+
+        // Export from the repository URL with depth=Infinity and
+        // ignore_externals=false so that externals should be fetched.
+        let export_path = fixture.temp_dir.path().join("export-ext");
+        let export_opts = ExportOptions {
+            peg_revision: crate::Revision::Head,
+            revision: crate::Revision::Head,
+            overwrite: false,
+            ignore_externals: false,
+            ignore_keywords: false,
+            depth: crate::Depth::Infinity,
+            native_eol: crate::NativeEOL::Standard,
+        };
+
+        fixture
+            .ctx
+            .export(&fixture.url, &export_path, &export_opts)
+            .unwrap();
+
+        // The external should have been exported.
+        assert!(
+            export_path.join("ext-link").exists(),
+            "External directory should be exported when depth=Infinity and ignore_externals=false"
+        );
+        assert_eq!(
+            std::fs::read_to_string(export_path.join("ext-link/ext-file.txt")).unwrap(),
+            "external content"
         );
     }
 
