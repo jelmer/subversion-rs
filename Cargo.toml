@@ -3,7 +3,7 @@ members = [".", "subversion-sys"]
 
 [package]
 name = "subversion"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 authors = ["Jelmer Vernooĳ <jelmer@apache.org>"]
 repository = "https://github.com/jelmer/subversion-rs.git"
