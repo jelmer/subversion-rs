@@ -377,6 +377,16 @@ impl<'pool> Status<'pool> {
             }
         }
     }
+
+    /// Duplicate this status into a new owned pool, producing a `Status<'static>`.
+    pub fn dup(&self) -> Status<'static> {
+        let pool = apr::pool::Pool::new();
+        let ptr = unsafe { subversion_sys::svn_wc_dup_status3(self.ptr, pool.as_mut_ptr()) };
+        Status {
+            ptr,
+            _pool: apr::pool::PoolHandle::Owned(pool),
+        }
+    }
 }
 
 /// Working copy schedule types
@@ -8630,6 +8640,36 @@ mod tests {
             .expect("status() should succeed for a modified file");
 
         assert_eq!(status.node_status(), StatusKind::Modified);
+    }
+
+    #[test]
+    fn test_status_dup() {
+        let mut fixture = SvnTestFixture::new();
+        let file_path = fixture.add_file("hello.txt", "hello\n");
+        fixture.commit();
+
+        // Modify the file so we get an interesting status.
+        std::fs::write(&file_path, "modified\n").unwrap();
+
+        let mut wc_ctx = Context::new().unwrap();
+        let status = wc_ctx.status(&file_path).expect("status() should succeed");
+
+        let duped = status.dup();
+
+        assert_eq!(duped.node_status(), status.node_status());
+        assert_eq!(duped.text_status(), status.text_status());
+        assert_eq!(duped.copied(), status.copied());
+        assert_eq!(duped.switched(), status.switched());
+        assert_eq!(duped.locked(), status.locked());
+        assert_eq!(duped.versioned(), status.versioned());
+        assert_eq!(duped.revision(), status.revision());
+        assert_eq!(duped.changed_rev(), status.changed_rev());
+        assert_eq!(duped.repos_relpath(), status.repos_relpath());
+        assert_eq!(duped.repos_uuid(), status.repos_uuid());
+        assert_eq!(duped.repos_root_url(), status.repos_root_url());
+        assert_eq!(duped.kind(), status.kind());
+        assert_eq!(duped.depth(), status.depth());
+        assert_eq!(duped.filesize(), status.filesize());
     }
 
     #[test]
