@@ -4282,14 +4282,10 @@ mod tests {
         use std::fs;
         use std::io::Write;
 
-        let (temp_dir, repo, mut session, _callbacks) = create_test_repo_with_session();
+        let (_temp_dir, repo, mut session, _callbacks) = create_test_repo_with_session();
 
         // Create a pre-revprop-change hook to allow revprop changes
-        let hooks_dir = temp_dir.path().join("test_repo/hooks");
-        #[cfg(unix)]
-        let hook_path = hooks_dir.join("pre-revprop-change");
-        #[cfg(windows)]
-        let hook_path = hooks_dir.join("pre-revprop-change.bat");
+        let hook_path = repo.pre_revprop_change_hook_path();
         let mut hook_file = fs::File::create(&hook_path).unwrap();
         #[cfg(unix)]
         {
@@ -4300,6 +4296,7 @@ mod tests {
         {
             writeln!(hook_file, "@exit 0").unwrap();
         }
+        hook_file.sync_all().unwrap();
         drop(hook_file); // Close the file before changing permissions
                          // Make it executable
         #[cfg(unix)]
