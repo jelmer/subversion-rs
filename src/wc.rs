@@ -1239,8 +1239,10 @@ impl Context {
     ) -> Result<(), crate::Error<'_>> {
         let scratch_pool = apr::pool::Pool::new();
         let local_abspath = crate::dirent::to_absolute_cstring(local_abspath)?;
-        let url = std::ffi::CString::new(url).unwrap();
-        let repos_root_url = std::ffi::CString::new(repos_root_url).unwrap();
+        let url = crate::uri::canonicalize_uri(url)?;
+        let url = std::ffi::CString::new(url.as_str()).unwrap();
+        let repos_root_url = crate::uri::canonicalize_uri(repos_root_url)?;
+        let repos_root_url = std::ffi::CString::new(repos_root_url.as_str()).unwrap();
         let repos_uuid = std::ffi::CString::new(repos_uuid).unwrap();
         let err = unsafe {
             subversion_sys::svn_wc_ensure_adm4(
@@ -2050,8 +2052,10 @@ pub fn ensure_adm(
 ) -> Result<(), crate::Error<'static>> {
     let path_cstr = crate::dirent::to_absolute_cstring(path)?;
     let uuid_cstr = std::ffi::CString::new(uuid).unwrap();
-    let url_cstr = std::ffi::CString::new(url).unwrap();
-    let repos_root_cstr = std::ffi::CString::new(repos_root).unwrap();
+    let url = crate::uri::canonicalize_uri(url)?;
+    let url_cstr = std::ffi::CString::new(url.as_str()).unwrap();
+    let repos_root = crate::uri::canonicalize_uri(repos_root)?;
+    let repos_root_cstr = std::ffi::CString::new(repos_root.as_str()).unwrap();
 
     with_tmp_pool(|pool| -> Result<(), crate::Error> {
         let mut ctx = std::ptr::null_mut();

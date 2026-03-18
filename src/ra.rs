@@ -394,7 +394,8 @@ impl<'a> Session<'a> {
         // Ensure SVN libraries are initialized
         crate::init::initialize()?;
 
-        let url = std::ffi::CString::new(url).unwrap();
+        let url = crate::uri::canonicalize_uri(url)?;
+        let url = std::ffi::CString::new(url.as_str()).unwrap();
         let mut corrected_url = std::ptr::null();
         let mut redirect_url = std::ptr::null();
         let pool = Pool::new();
@@ -468,7 +469,8 @@ impl<'a> Session<'a> {
 
     /// Changes the session to point to a different URL.
     pub fn reparent(&mut self, url: &str) -> Result<(), Error<'static>> {
-        let url = std::ffi::CString::new(url).unwrap();
+        let url = crate::uri::canonicalize_uri(url)?;
+        let url = std::ffi::CString::new(url.as_str()).unwrap();
         with_tmp_pool(|pool| {
             let err = unsafe {
                 subversion_sys::svn_ra_reparent(self.ptr, url.as_ptr(), pool.as_mut_ptr())
@@ -949,7 +951,8 @@ impl<'a> Session<'a> {
         editor: &mut crate::delta::WrapEditor,
     ) -> Result<Box<dyn Reporter + Send + 's>, Error<'s>> {
         let switch_target = std::ffi::CString::new(switch_target)?;
-        let switch_url = std::ffi::CString::new(switch_url)?;
+        let switch_url = crate::uri::canonicalize_uri(switch_url)?;
+        let switch_url = std::ffi::CString::new(switch_url.as_str())?;
         let pool = Pool::new();
         let scratch_pool = Pool::new();
         let mut reporter = std::ptr::null();
@@ -2154,7 +2157,8 @@ impl<'a> Session<'a> {
         let mut report_baton: *mut std::ffi::c_void = std::ptr::null_mut();
 
         let diff_target_cstr = std::ffi::CString::new(diff_target).unwrap();
-        let versus_url_cstr = std::ffi::CString::new(options.versus_url).unwrap();
+        let versus_url = crate::uri::canonicalize_uri(options.versus_url)?;
+        let versus_url_cstr = std::ffi::CString::new(versus_url.as_str()).unwrap();
 
         let (editor_ptr, editor_baton) = options.diff_editor.as_raw_parts();
         let err = unsafe {
