@@ -590,6 +590,13 @@ impl<'a> Session<'a> {
 
     /// Gets the property list for a revision.
     pub fn rev_proplist(&mut self, rev: Revnum) -> Result<HashMap<String, Vec<u8>>, Error<'_>> {
+        if rev.0 < 0 {
+            return Err(Error::with_raw_status(
+                subversion_sys::svn_errno_t_SVN_ERR_CLIENT_BAD_REVISION as i32,
+                None,
+                "Invalid revision number",
+            ));
+        }
         let pool = Pool::new();
         let mut props = std::ptr::null_mut();
         let err = unsafe {
