@@ -1169,6 +1169,89 @@ impl Adm {
             svn_result(err)
         })
     }
+
+    /// Add a path to the working copy.
+    #[deprecated(note = "Use svn_wc_context_t based APIs where possible")]
+    pub fn add(
+        &self,
+        path: &str,
+        copyfrom_url: Option<&str>,
+        copyfrom_rev: Option<crate::Revnum>,
+    ) -> Result<(), crate::Error<'static>> {
+        let path_cstr = crate::dirent::to_absolute_cstring(path)?;
+        let copyfrom_url_cstr = copyfrom_url.map(std::ffi::CString::new).transpose()?;
+        let copyfrom_rev_raw = copyfrom_rev.map(|r| r.0).unwrap_or(-1);
+        with_tmp_pool(|scratch_pool| {
+            let err = unsafe {
+                subversion_sys::svn_wc_add3(
+                    path_cstr.as_ptr(),
+                    self.ptr,
+                    subversion_sys::svn_depth_t_svn_depth_infinity,
+                    copyfrom_url_cstr
+                        .as_ref()
+                        .map_or(std::ptr::null(), |c| c.as_ptr()),
+                    copyfrom_rev_raw,
+                    None,                 // cancel_func
+                    std::ptr::null_mut(), // cancel_baton
+                    None,                 // notify_func
+                    std::ptr::null_mut(), // notify_baton
+                    scratch_pool.as_mut_ptr(),
+                )
+            };
+            svn_result(err)
+        })
+    }
+
+    /// Delete a path from the working copy.
+    #[deprecated(note = "Use svn_wc_context_t based APIs where possible")]
+    pub fn delete(
+        &self,
+        path: &str,
+        keep_local: bool,
+    ) -> Result<(), crate::Error<'static>> {
+        let path_cstr = crate::dirent::to_absolute_cstring(path)?;
+        with_tmp_pool(|scratch_pool| {
+            let err = unsafe {
+                subversion_sys::svn_wc_delete3(
+                    path_cstr.as_ptr(),
+                    self.ptr,
+                    None,                 // cancel_func
+                    std::ptr::null_mut(), // cancel_baton
+                    None,                 // notify_func
+                    std::ptr::null_mut(), // notify_baton
+                    if keep_local { 1 } else { 0 },
+                    scratch_pool.as_mut_ptr(),
+                )
+            };
+            svn_result(err)
+        })
+    }
+
+    /// Copy a path within the working copy.
+    #[deprecated(note = "Use svn_wc_context_t based APIs where possible")]
+    pub fn copy(
+        &self,
+        src: &str,
+        dst_basename: &str,
+    ) -> Result<(), crate::Error<'static>> {
+        let src_cstr = crate::dirent::to_absolute_cstring(src)?;
+        let dst_cstr = std::ffi::CString::new(dst_basename)?;
+        with_tmp_pool(|scratch_pool| {
+            let err = unsafe {
+                subversion_sys::svn_wc_copy2(
+                    src_cstr.as_ptr(),
+                    self.ptr,
+                    dst_cstr.as_ptr(),
+                    None,                 // cancel_func
+                    std::ptr::null_mut(), // cancel_baton
+                    None,                 // notify_func
+                    std::ptr::null_mut(), // notify_baton
+                    scratch_pool.as_mut_ptr(),
+                )
+            };
+            svn_result(err)
+        })
+    }
 }
 
 #[allow(deprecated)]
