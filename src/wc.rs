@@ -1086,6 +1086,103 @@ impl Drop for Context {
     }
 }
 
+/// Working copy administrative access baton.
+///
+/// Provides write locking for working copy operations. The `svn_wc_*`
+/// functions that modify the working copy require a write lock, which
+/// is acquired by opening an `Adm` with `write_lock=true`.
+#[deprecated(note = "Use svn_wc_context_t based APIs where possible")]
+pub struct Adm {
+    ptr: *mut subversion_sys::svn_wc_adm_access_t,
+    _pool: apr::Pool<'static>,
+}
+
+#[allow(deprecated)]
+impl Adm {
+    /// Open an access baton for a working copy directory.
+    ///
+    /// If `write_lock` is true, acquire a write lock on the directory.
+    /// `levels_to_lock` controls depth: 0 = just this dir, -1 = infinite.
+    #[deprecated(note = "Use svn_wc_context_t based APIs where possible")]
+    pub fn open(
+        path: &str,
+        write_lock: bool,
+        levels_to_lock: i32,
+    ) -> Result<Self, crate::Error<'static>> {
+        let pool = apr::Pool::new();
+        let path_cstr = crate::dirent::to_absolute_cstring(path)?;
+        let mut adm_access: *mut subversion_sys::svn_wc_adm_access_t = std::ptr::null_mut();
+        with_tmp_pool(|scratch_pool| {
+            let err = unsafe {
+                subversion_sys::svn_wc_adm_open3(
+                    &mut adm_access,
+                    std::ptr::null_mut(), // associated
+                    path_cstr.as_ptr(),
+                    if write_lock { 1 } else { 0 },
+                    levels_to_lock,
+                    None,                 // cancel_func
+                    std::ptr::null_mut(), // cancel_baton
+                    pool.as_mut_ptr(),
+                )
+            };
+            svn_result(err)
+        })?;
+        Ok(Adm {
+            ptr: adm_access,
+            _pool: pool,
+        })
+    }
+
+    /// Check whether this baton holds a write lock.
+    pub fn is_locked(&self) -> bool {
+        unsafe { subversion_sys::svn_wc_adm_locked(self.ptr) != 0 }
+    }
+
+    /// Set a property on a path in the working copy.
+    #[deprecated(note = "Use svn_wc_context_t based APIs where possible")]
+    pub fn prop_set(
+        &self,
+        name: &str,
+        value: Option<&[u8]>,
+        path: &str,
+    ) -> Result<(), crate::Error<'static>> {
+        let name_cstr = std::ffi::CString::new(name).unwrap();
+        let path_cstr = crate::dirent::to_absolute_cstring(path)?;
+        let value_svn = value.map(|v| crate::string::BStr::from_bytes(v, &self._pool));
+        let value_ptr = value_svn
+            .as_ref()
+            .map(|v| v.as_ptr() as *const subversion_sys::svn_string_t)
+            .unwrap_or(std::ptr::null());
+        with_tmp_pool(|scratch_pool| {
+            let err = unsafe {
+                subversion_sys::svn_wc_prop_set3(
+                    name_cstr.as_ptr(),
+                    value_ptr,
+                    path_cstr.as_ptr(),
+                    self.ptr,
+                    0, // skip_checks
+                    None, // notify_func
+                    std::ptr::null_mut(), // notify_baton
+                    scratch_pool.as_mut_ptr(),
+                )
+            };
+            svn_result(err)
+        })
+    }
+}
+
+#[allow(deprecated)]
+impl Drop for Adm {
+    fn drop(&mut self) {
+        if !self.ptr.is_null() {
+            unsafe {
+                subversion_sys::svn_wc_adm_close2(self.ptr, self._pool.as_mut_ptr());
+            }
+            self.ptr = std::ptr::null_mut();
+        }
+    }
+}
+
 impl Context {
     /// Get a reference to the underlying pool
     pub fn pool(&self) -> &apr::Pool<'_> {
