@@ -4285,14 +4285,10 @@ mod tests {
         let (_temp_dir, repo, mut session, _callbacks) = create_test_repo_with_session();
 
         // Create a pre-revprop-change hook to allow revprop changes
-        let hook_path = repo.pre_revprop_change_hook_path();
+        let mut hook_path = repo.pre_revprop_change_hook_path();
         // On Windows, SVN looks for hooks with a .bat extension
         #[cfg(windows)]
-        let hook_path = {
-            let mut s = hook_path.into_os_string();
-            s.push(".bat");
-            std::path::PathBuf::from(s)
-        };
+        hook_path.set_extension("bat");
         let mut hook_file = fs::File::create(&hook_path).unwrap();
         #[cfg(unix)]
         {

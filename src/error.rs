@@ -214,7 +214,7 @@ impl<'a> Error<'a> {
             if file.is_null() {
                 None
             } else {
-                Some(std::ffi::CStr::from_ptr(file).to_str().unwrap())
+                std::ffi::CStr::from_ptr(file).to_str().ok()
             }
         }
     }
@@ -250,7 +250,31 @@ impl<'a> Error<'a> {
             if message.is_null() {
                 None
             } else {
-                Some(std::ffi::CStr::from_ptr(message).to_str().unwrap())
+                std::ffi::CStr::from_ptr(message).to_str().ok()
+            }
+        }
+    }
+
+    /// Gets the error message, lossily converting non-UTF-8 bytes.
+    fn message_lossy(&self) -> Option<std::borrow::Cow<'_, str>> {
+        unsafe {
+            let message = (*self.ptr).message;
+            if message.is_null() {
+                None
+            } else {
+                Some(std::ffi::CStr::from_ptr(message).to_string_lossy())
+            }
+        }
+    }
+
+    /// Gets the file name, lossily converting non-UTF-8 bytes.
+    fn file_lossy(&self) -> Option<std::borrow::Cow<'_, str>> {
+        unsafe {
+            let file = (*self.ptr).file;
+            if file.is_null() {
+                None
+            } else {
+                Some(std::ffi::CStr::from_ptr(file).to_string_lossy())
             }
         }
     }
@@ -550,18 +574,26 @@ impl std::fmt::Debug for Error<'_> {
         writeln!(
             f,
             "{}:{}: {}",
-            self.file().unwrap_or("<unspecified>"),
+            self.file_lossy()
+                .as_deref()
+                .unwrap_or("<unspecified>"),
             self.line(),
-            self.message().unwrap_or("<no message>")
+            self.message_lossy()
+                .as_deref()
+                .unwrap_or("<no message>")
         )?;
         let mut n = self.child();
         while let Some(err) = n {
             writeln!(
                 f,
                 "{}:{}: {}",
-                err.file().unwrap_or("<unspecified>"),
+                err.file_lossy()
+                    .as_deref()
+                    .unwrap_or("<unspecified>"),
                 err.line(),
-                err.message().unwrap_or("<no message>")
+                err.message_lossy()
+                    .as_deref()
+                    .unwrap_or("<no message>")
             )?;
             n = err.child();
         }
