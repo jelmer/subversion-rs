@@ -79,7 +79,7 @@ fn box_cancel_baton_borrowed(f: &dyn Fn() -> Result<(), Error<'static>>) -> *mut
     Box::into_raw(Box::new(f)) as *mut std::ffi::c_void
 }
 
-fn box_notify_baton_borrowed(f: &dyn Fn(&Notify)) -> *mut std::ffi::c_void {
+pub(crate) fn box_notify_baton_borrowed(f: &dyn Fn(&Notify)) -> *mut std::ffi::c_void {
     Box::into_raw(Box::new(f)) as *mut std::ffi::c_void
 }
 
@@ -141,7 +141,7 @@ unsafe fn drop_cancel_baton_borrowed(baton: *mut std::ffi::c_void) {
     ));
 }
 
-unsafe fn drop_notify_baton_borrowed(baton: *mut std::ffi::c_void) {
+pub(crate) unsafe fn drop_notify_baton_borrowed(baton: *mut std::ffi::c_void) {
     drop(Box::from_raw(baton as *mut &dyn Fn(&Notify)));
 }
 
@@ -1085,6 +1085,10 @@ impl Drop for Context {
         }
     }
 }
+
+pub mod adm;
+#[allow(deprecated)]
+pub use adm::Adm;
 
 impl Context {
     /// Get a reference to the underlying pool
@@ -4615,7 +4619,7 @@ extern "C" fn wrap_external_func(
 }
 
 /// Wrapper for notify callbacks
-extern "C" fn wrap_notify_func(
+pub(crate) extern "C" fn wrap_notify_func(
     baton: *mut std::ffi::c_void,
     notify: *const subversion_sys::svn_wc_notify_t,
     _pool: *mut apr_sys::apr_pool_t,
