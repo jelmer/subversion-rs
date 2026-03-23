@@ -8929,4 +8929,56 @@ mod tests {
         assert_eq!(lock.path(), Some("/trunk/file.txt"));
         assert_eq!(lock.token(), None);
     }
+
+    #[test]
+    #[allow(deprecated)]
+    fn test_adm_relocate_without_validator() {
+        let fixture = SvnTestFixture::new();
+        let old_url = fixture.url.clone();
+
+        // Create a second repository to relocate to
+        let (_repos_path2, new_url) = create_repo(fixture.temp_dir.path(), "repos2");
+
+        // Open the working copy with a write lock
+        let adm = Adm::open(fixture.wc_path_str(), true, -1).unwrap();
+
+        // Relocate without a validator (this previously passed a null function pointer)
+        let result = adm.relocate(fixture.wc_path_str(), &old_url, &new_url, true, None);
+        assert!(
+            result.is_ok(),
+            "Adm::relocate() with no validator should succeed: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn test_adm_relocate_with_validator() {
+        let fixture = SvnTestFixture::new();
+        let old_url = fixture.url.clone();
+
+        // Create a second repository to relocate to
+        let (_repos_path2, new_url) = create_repo(fixture.temp_dir.path(), "repos2");
+
+        // Open the working copy with a write lock
+        let adm = Adm::open(fixture.wc_path_str(), true, -1).unwrap();
+
+        // Relocate with a validator that accepts everything
+        let validator = |_uuid: &str,
+                         _url: &str,
+                         _root_url: &str|
+         -> Result<(), crate::Error<'static>> { Ok(()) };
+        let result = adm.relocate(
+            fixture.wc_path_str(),
+            &old_url,
+            &new_url,
+            true,
+            Some(&validator),
+        );
+        assert!(
+            result.is_ok(),
+            "Adm::relocate() with validator should succeed: {:?}",
+            result.err()
+        );
+    }
 }

@@ -1011,6 +1011,16 @@ impl Adm {
             }
         }
 
+        unsafe extern "C" fn noop_validator(
+            _baton: *mut std::ffi::c_void,
+            _uuid: *const std::ffi::c_char,
+            _url: *const std::ffi::c_char,
+            _root_url: *const std::ffi::c_char,
+            _pool: *mut apr_sys::apr_pool_t,
+        ) -> *mut subversion_sys::svn_error_t {
+            std::ptr::null_mut()
+        }
+
         let (func, baton): (
             subversion_sys::svn_wc_relocation_validator3_t,
             *mut std::ffi::c_void,
@@ -1019,7 +1029,7 @@ impl Adm {
                 Some(validator_trampoline),
                 v as *const _ as *mut std::ffi::c_void,
             ),
-            None => (None, std::ptr::null_mut()),
+            None => (Some(noop_validator), std::ptr::null_mut()),
         };
 
         with_tmp_pool(|scratch_pool| {
