@@ -4571,10 +4571,7 @@ impl Context {
             let mut targets_array = apr::tables::TypedArray::<*const i8>::new(pool, 0);
             targets_array.push(target_c.as_ptr());
 
-            let propval_svn = propval.map(|val| subversion_sys::svn_string_t {
-                data: val.as_ptr() as *mut i8,
-                len: val.len(),
-            });
+            let propval_ptr = propval.map(|val| crate::svn_string_ncreate(val, pool));
 
             // Convert changelists if provided
             let (changelists_array, list_cstrings) = if let Some(lists) = &options.changelists {
@@ -4594,9 +4591,9 @@ impl Context {
             let err = unsafe {
                 subversion_sys::svn_client_propset_local(
                     propname_c.as_ptr(),
-                    propval_svn
-                        .as_ref()
-                        .map_or(std::ptr::null(), |v| v as *const _),
+                    propval_ptr
+                        .map(|p| p as *const _)
+                        .unwrap_or(std::ptr::null()),
                     targets_array.as_ptr(),
                     options.depth.into(),
                     options.skip_checks as i32,
@@ -4628,10 +4625,7 @@ impl Context {
             let propname_c = std::ffi::CString::new(propname).unwrap();
             let url_c = std::ffi::CString::new(url).unwrap();
 
-            let propval_svn = propval.map(|val| subversion_sys::svn_string_t {
-                data: val.as_ptr() as *mut i8,
-                len: val.len(),
-            });
+            let propval_ptr = propval.map(|val| crate::svn_string_ncreate(val, pool));
 
             // Handle revprop_table
             let revprop_hash = options.revprop_table.as_ref().map(|rp| {
@@ -4661,9 +4655,9 @@ impl Context {
 
                 let err = subversion_sys::svn_client_propset_remote(
                     propname_c.as_ptr(),
-                    propval_svn
-                        .as_ref()
-                        .map_or(std::ptr::null(), |v| v as *const _),
+                    propval_ptr
+                        .map(|p| p as *const _)
+                        .unwrap_or(std::ptr::null()),
                     url_c.as_ptr(),
                     options.skip_checks as i32,
                     options.base_revision_for_url.0,
