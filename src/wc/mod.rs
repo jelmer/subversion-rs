@@ -1071,18 +1071,24 @@ pub struct Context {
     _phantom: PhantomData<*mut ()>, // !Send + !Sync
 }
 
-impl Drop for Context {
-    fn drop(&mut self) {
+impl Context {
+    /// Explicitly destroy the context, releasing all resources and locks.
+    ///
+    /// After calling this, the context is no longer usable.
+    /// This is safe to call multiple times.
+    pub fn close(&mut self) {
         if !self.ptr.is_null() {
-            // svn_wc_context_destroy() releases any resources acquired by the
-            // context beyond those held by its pool.  The pool will still be
-            // freed when `self.pool` drops, but calling destroy explicitly is
-            // the documented way to release the context.
             unsafe {
                 subversion_sys::svn_wc_context_destroy(self.ptr);
             }
             self.ptr = std::ptr::null_mut();
         }
+    }
+}
+
+impl Drop for Context {
+    fn drop(&mut self) {
+        self.close();
     }
 }
 
@@ -4722,7 +4728,7 @@ impl CommittedQueue {
         Self { ptr, _pool: pool }
     }
 
-    fn as_mut_ptr(&mut self) -> *mut subversion_sys::svn_wc_committed_queue_t {
+    pub(crate) fn as_mut_ptr(&mut self) -> *mut subversion_sys::svn_wc_committed_queue_t {
         self.ptr
     }
 }
@@ -5583,6 +5589,21 @@ mod tests {
     fn test_context_creation() {
         let context = Context::new().unwrap();
         assert!(!context.ptr.is_null());
+    }
+
+    #[test]
+    fn test_context_close() {
+        let mut context = Context::new().unwrap();
+        assert!(!context.ptr.is_null());
+        context.close();
+        assert!(context.ptr.is_null());
+    }
+
+    #[test]
+    fn test_context_close_idempotent() {
+        let mut context = Context::new().unwrap();
+        context.close();
+        context.close(); // should not panic
     }
 
     #[test]
@@ -8978,6 +8999,136 @@ mod tests {
         assert!(
             result.is_ok(),
             "Adm::relocate() with validator should succeed: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn test_adm_close() {
+        let fixture = SvnTestFixture::new();
+        let mut adm = Adm::open(fixture.wc_path_str(), true, -1).unwrap();
+        adm.close();
+        // Drop after close should not panic
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn test_adm_close_idempotent() {
+        let fixture = SvnTestFixture::new();
+        let mut adm = Adm::open(fixture.wc_path_str(), true, -1).unwrap();
+        adm.close();
+        adm.close(); // should not panic
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn test_adm_queue_committed() {
+        let mut fixture = SvnTestFixture::new();
+        fixture.add_file("test.txt", "hello");
+        fixture.commit();
+
+        let adm = Adm::open(fixture.wc_path_str(), true, -1).unwrap();
+        let mut queue = CommittedQueue::new();
+
+        let file_path = fixture.wc_path.join("test.txt");
+        let result = adm.queue_committed(
+            file_path.to_str().unwrap(),
+            &mut queue,
+            false,
+            false,
+            false,
+            None,
+        );
+        assert!(result.is_ok(), "queue_committed failed: {:?}", result.err());
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn test_adm_queue_committed_with_digest() {
+        let mut fixture = SvnTestFixture::new();
+        fixture.add_file("test.txt", "hello");
+        fixture.commit();
+
+        let adm = Adm::open(fixture.wc_path_str(), true, -1).unwrap();
+        let mut queue = CommittedQueue::new();
+        let digest: [u8; 16] = [0; 16];
+
+        let file_path = fixture.wc_path.join("test.txt");
+        let result = adm.queue_committed(
+            file_path.to_str().unwrap(),
+            &mut queue,
+            false,
+            false,
+            false,
+            Some(&digest),
+        );
+        assert!(
+            result.is_ok(),
+            "queue_committed with digest failed: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn test_adm_process_committed_queue() {
+        let mut fixture = SvnTestFixture::new();
+        fixture.add_file("test.txt", "hello");
+        fixture.commit();
+
+        let adm = Adm::open(fixture.wc_path_str(), true, -1).unwrap();
+        let mut queue = CommittedQueue::new();
+
+        let file_path = fixture.wc_path.join("test.txt");
+        adm.queue_committed(
+            file_path.to_str().unwrap(),
+            &mut queue,
+            false,
+            false,
+            false,
+            None,
+        )
+        .unwrap();
+
+        let result = adm.process_committed_queue(
+            &mut queue,
+            crate::Revnum(2),
+            Some("2026-03-24T00:00:00.000000Z"),
+            Some("testuser"),
+        );
+        assert!(
+            result.is_ok(),
+            "process_committed_queue failed: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn test_adm_process_committed_queue_no_date_or_author() {
+        let mut fixture = SvnTestFixture::new();
+        fixture.add_file("test.txt", "hello");
+        fixture.commit();
+
+        let adm = Adm::open(fixture.wc_path_str(), true, -1).unwrap();
+        let mut queue = CommittedQueue::new();
+
+        let file_path = fixture.wc_path.join("test.txt");
+        adm.queue_committed(
+            file_path.to_str().unwrap(),
+            &mut queue,
+            false,
+            false,
+            false,
+            None,
+        )
+        .unwrap();
+
+        let result = adm.process_committed_queue(&mut queue, crate::Revnum(2), None, None);
+        assert!(
+            result.is_ok(),
+            "process_committed_queue with no date/author failed: {:?}",
             result.err()
         );
     }

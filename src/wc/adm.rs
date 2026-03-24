@@ -5,7 +5,7 @@
 
 #[cfg(feature = "ra")]
 use super::{box_notify_baton_borrowed, drop_notify_baton_borrowed, wrap_notify_func, Notify};
-use super::{ConflictChoice, Lock, PropChange};
+use super::{CommittedQueue, ConflictChoice, Lock, PropChange};
 use crate::{svn_result, with_tmp_pool};
 use std::collections::HashMap;
 
@@ -1526,16 +1526,92 @@ impl Adm {
             Ok(state as u32)
         })
     }
+
+    /// Queue a path for post-commit processing using this access baton.
+    ///
+    /// This calls the deprecated `svn_wc_queue_committed` which takes
+    /// an `svn_wc_adm_access_t` rather than an `svn_wc_context_t`.
+    #[deprecated(note = "Use svn_wc_context_t based APIs where possible")]
+    pub fn queue_committed(
+        &self,
+        path: &str,
+        committed_queue: &mut CommittedQueue,
+        recurse: bool,
+        remove_lock: bool,
+        remove_changelist: bool,
+        digest: Option<&[u8; 16]>,
+    ) -> Result<(), crate::Error<'static>> {
+        let path_cstr = crate::dirent::to_absolute_cstring(path)?;
+        let mut queue_ptr = committed_queue.as_mut_ptr();
+        with_tmp_pool(|scratch_pool| {
+            let err = unsafe {
+                subversion_sys::svn_wc_queue_committed(
+                    &mut queue_ptr,
+                    path_cstr.as_ptr(),
+                    self.ptr,
+                    if recurse { 1 } else { 0 },
+                    std::ptr::null(), // wcprop_changes
+                    if remove_lock { 1 } else { 0 },
+                    if remove_changelist { 1 } else { 0 },
+                    digest.map(|d| d.as_ptr()).unwrap_or(std::ptr::null()),
+                    scratch_pool.as_mut_ptr(),
+                )
+            };
+            svn_result(err)
+        })
+    }
+
+    /// Process a committed queue using this access baton.
+    ///
+    /// This calls the deprecated `svn_wc_process_committed_queue` which takes
+    /// an `svn_wc_adm_access_t` rather than an `svn_wc_context_t`.
+    #[deprecated(note = "Use svn_wc_context_t based APIs where possible")]
+    pub fn process_committed_queue(
+        &self,
+        committed_queue: &mut CommittedQueue,
+        new_revnum: crate::Revnum,
+        rev_date: Option<&str>,
+        rev_author: Option<&str>,
+    ) -> Result<(), crate::Error<'static>> {
+        let rev_date_cstr = rev_date.map(std::ffi::CString::new).transpose()?;
+        let rev_author_cstr = rev_author.map(std::ffi::CString::new).transpose()?;
+
+        with_tmp_pool(|scratch_pool| {
+            let err = unsafe {
+                subversion_sys::svn_wc_process_committed_queue(
+                    committed_queue.as_mut_ptr(),
+                    self.ptr,
+                    new_revnum.0,
+                    rev_date_cstr
+                        .as_ref()
+                        .map_or(std::ptr::null(), |s| s.as_ptr()),
+                    rev_author_cstr
+                        .as_ref()
+                        .map_or(std::ptr::null(), |s| s.as_ptr()),
+                    scratch_pool.as_mut_ptr(),
+                )
+            };
+            svn_result(err)
+        })
+    }
 }
 
 #[allow(deprecated)]
-impl Drop for Adm {
-    fn drop(&mut self) {
+impl Adm {
+    /// Explicitly close the access baton, releasing all resources and locks.
+    pub fn close(&mut self) {
         if !self.ptr.is_null() {
             unsafe {
                 subversion_sys::svn_wc_adm_close2(self.ptr, self._pool.as_mut_ptr());
             }
             self.ptr = std::ptr::null_mut();
         }
+    }
+}
+
+#[allow(deprecated)]
+impl Drop for Adm {
+    fn drop(&mut self) {
+        self.close();
     }
 }
