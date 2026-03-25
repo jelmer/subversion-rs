@@ -1747,6 +1747,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(feature = "repos")]
     #[allow(deprecated)]
     fn test_add_repos_file() {
         use std::io::Cursor;
@@ -1790,6 +1791,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "repos")]
     #[allow(deprecated)]
     fn test_probe_try_versioned_dir() {
         let temp_dir = tempfile::tempdir().unwrap();
@@ -1824,6 +1826,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "repos")]
     #[allow(deprecated)]
     fn test_probe_try_unversioned_file() {
         let temp_dir = tempfile::tempdir().unwrap();
