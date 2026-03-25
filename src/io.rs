@@ -448,8 +448,8 @@ impl Stream {
         Ok(Self {
             ptr: stream,
             _pool: pool,
-            backend: None,     // Backend is managed by close_trampoline, not by Drop
-            needs_close: true, // Ensure close_trampoline runs to free the backend
+            backend: None,      // Backend is managed by close_trampoline, not by Drop
+            needs_close: false, // SVN C code closes the stream; avoid double-close/free
             _phantom: PhantomData,
         })
     }
@@ -2210,6 +2210,31 @@ mod tests {
         let n = stream.read(&mut buf).unwrap();
         assert_eq!(n, 15);
         assert_eq!(&buf, b"Write test data");
+    }
+
+    #[test]
+    fn test_from_backend_no_double_close() {
+        use crate::io::backend::BufferBackend;
+
+        // Verify that a stream created via from_backend can be read from
+        // and then dropped without double-close issues.
+        // The close_trampoline frees the backend; Drop must not close again.
+        let backend = BufferBackend::from_vec(b"no double close".to_vec());
+        let mut stream = Stream::from_backend(backend).unwrap();
+
+        // needs_close should be false for backend-created streams
+        assert!(!stream.needs_close);
+
+        let mut buf = vec![0u8; 15];
+        let n = stream.read(&mut buf).unwrap();
+        assert_eq!(n, 15);
+        assert_eq!(&buf, b"no double close");
+
+        // Explicitly close the stream (simulating what SVN C code would do)
+        stream.close().unwrap();
+
+        // Drop should be safe now (no double-close)
+        drop(stream);
     }
 
     #[test]
