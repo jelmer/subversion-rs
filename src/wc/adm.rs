@@ -1747,6 +1747,7 @@ impl Drop for Adm<'_> {
 #[cfg(all(test, feature = "client"))]
 #[allow(deprecated)]
 mod tests {
+    #[cfg(feature = "repos")]
     use super::*;
 
     /// Create a repository and check out a working copy; return the temp dir
