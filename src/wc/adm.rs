@@ -1744,6 +1744,7 @@ impl Drop for Adm<'_> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "repos")]
     use super::*;
 
     #[test]
