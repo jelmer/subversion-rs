@@ -221,13 +221,16 @@ impl Status {
 /// functions that modify the working copy require a write lock, which
 /// is acquired by opening an `Adm` with `write_lock=true`.
 #[deprecated(note = "Use svn_wc_context_t based APIs where possible")]
-pub struct Adm {
+pub struct Adm<'a> {
     ptr: *mut subversion_sys::svn_wc_adm_access_t,
-    _pool: apr::Pool<'static>,
+    /// Pool that owns the baton. `Some` for root adms, `None` for sub-adms
+    /// obtained via `probe_try` (whose baton lives in the parent's pool).
+    _pool: Option<apr::Pool<'static>>,
+    _marker: std::marker::PhantomData<&'a ()>,
 }
 
 #[allow(deprecated)]
-impl Adm {
+impl Adm<'_> {
     /// Open an access baton for a working copy directory.
     ///
     /// If `write_lock` is true, acquire a write lock on the directory.
@@ -237,7 +240,7 @@ impl Adm {
         path: &str,
         write_lock: bool,
         levels_to_lock: i32,
-    ) -> Result<Self, crate::Error<'static>> {
+    ) -> Result<Adm<'static>, crate::Error<'static>> {
         let pool = apr::Pool::new();
         let path_cstr = crate::dirent::to_absolute_cstring(path)?;
         let mut adm_access: *mut subversion_sys::svn_wc_adm_access_t = std::ptr::null_mut();
@@ -258,7 +261,8 @@ impl Adm {
         })?;
         Ok(Adm {
             ptr: adm_access,
-            _pool: pool,
+            _pool: Some(pool),
+            _marker: std::marker::PhantomData,
         })
     }
 
@@ -290,7 +294,8 @@ impl Adm {
     ) -> Result<(), crate::Error<'static>> {
         let name_cstr = std::ffi::CString::new(name).unwrap();
         let path_cstr = crate::dirent::to_absolute_cstring(path)?;
-        let value_svn = value.map(|v| crate::string::BStr::from_bytes(v, &self._pool));
+        let value_pool = apr::Pool::new();
+        let value_svn = value.map(|v| crate::string::BStr::from_bytes(v, &value_pool));
         let value_ptr = value_svn
             .as_ref()
             .map(|v| v.as_ptr() as *const subversion_sys::svn_string_t)
@@ -407,6 +412,80 @@ impl Adm {
                     path_cstr.as_ptr(),
                     self.ptr,
                     subversion_sys::svn_depth_t_svn_depth_infinity,
+                    copyfrom_url_cstr
+                        .as_ref()
+                        .map_or(std::ptr::null(), |c| c.as_ptr()),
+                    copyfrom_rev_raw,
+                    None,                 // cancel_func
+                    std::ptr::null_mut(), // cancel_baton
+                    None,                 // notify_func
+                    std::ptr::null_mut(), // notify_baton
+                    scratch_pool.as_mut_ptr(),
+                )
+            };
+            svn_result(err)
+        })
+    }
+
+    /// Add a file from the repository to the working copy, installing
+    /// its pristine text.
+    ///
+    /// This wraps the deprecated `svn_wc_add_repos_file3` which takes
+    /// an `svn_wc_adm_access_t` and installs the pristine content into
+    /// the WC's pristine store.
+    ///
+    /// `new_base_props` are the unmodified properties from the repository.
+    /// `new_props` are the actual working copy properties (or `None` to
+    /// use the base props).
+    #[deprecated(note = "Use svn_wc_context_t based APIs where possible")]
+    pub fn add_repos_file(
+        &self,
+        path: &str,
+        new_base_contents: &mut crate::io::Stream,
+        new_contents: Option<&mut crate::io::Stream>,
+        new_base_props: &std::collections::HashMap<String, Vec<u8>>,
+        new_props: Option<&std::collections::HashMap<String, Vec<u8>>>,
+        copyfrom_url: Option<&str>,
+        copyfrom_rev: Option<crate::Revnum>,
+    ) -> Result<(), crate::Error<'static>> {
+        let path_cstr = std::ffi::CString::new(path)?;
+        let copyfrom_url_cstr = copyfrom_url.map(std::ffi::CString::new).transpose()?;
+        let copyfrom_rev_raw = copyfrom_rev.map(|r| r.0).unwrap_or(-1);
+        with_tmp_pool(|scratch_pool| {
+            let mut base_props_hash = apr::hash::Hash::new(scratch_pool);
+            for (key, value) in new_base_props {
+                let svn_str = crate::string::BStr::from_bytes(value, scratch_pool);
+                unsafe {
+                    base_props_hash
+                        .insert(key.as_bytes(), svn_str.as_ptr() as *mut std::ffi::c_void);
+                }
+            }
+
+            let mut props_hash_storage;
+            let props_ptr = if let Some(props) = new_props {
+                props_hash_storage = apr::hash::Hash::new(scratch_pool);
+                for (key, value) in props {
+                    let svn_str = crate::string::BStr::from_bytes(value, scratch_pool);
+                    unsafe {
+                        props_hash_storage
+                            .insert(key.as_bytes(), svn_str.as_ptr() as *mut std::ffi::c_void);
+                    }
+                }
+                unsafe { props_hash_storage.as_mut_ptr() }
+            } else {
+                std::ptr::null_mut()
+            };
+
+            let err = unsafe {
+                subversion_sys::svn_wc_add_repos_file3(
+                    path_cstr.as_ptr(),
+                    self.ptr,
+                    new_base_contents.as_mut_ptr(),
+                    new_contents
+                        .map(|s| s.as_mut_ptr())
+                        .unwrap_or(std::ptr::null_mut()),
+                    base_props_hash.as_mut_ptr(),
+                    props_ptr,
                     copyfrom_url_cstr
                         .as_ref()
                         .map_or(std::ptr::null(), |c| c.as_ptr()),
@@ -1527,6 +1606,46 @@ impl Adm {
         })
     }
 
+    /// Try to obtain an access baton for a path, using this baton as the
+    /// associated (parent) baton.
+    ///
+    /// Returns `None` if the path is not a versioned directory.
+    /// The returned baton is tied to this baton's lifetime.
+    #[deprecated(note = "Use svn_wc_context_t based APIs where possible")]
+    pub fn probe_try(
+        &mut self,
+        path: &str,
+        write_lock: bool,
+        levels_to_lock: i32,
+    ) -> Result<Option<Adm<'_>>, crate::Error<'static>> {
+        let path_cstr = crate::dirent::to_absolute_cstring(path)?;
+        let mut adm_access: *mut subversion_sys::svn_wc_adm_access_t = std::ptr::null_mut();
+        with_tmp_pool(|scratch_pool| {
+            let err = unsafe {
+                subversion_sys::svn_wc_adm_probe_try3(
+                    &mut adm_access,
+                    self.ptr,
+                    path_cstr.as_ptr(),
+                    if write_lock { 1 } else { 0 },
+                    levels_to_lock,
+                    None,                 // cancel_func
+                    std::ptr::null_mut(), // cancel_baton
+                    scratch_pool.as_mut_ptr(),
+                )
+            };
+            svn_result(err)?;
+            if adm_access.is_null() {
+                Ok(None)
+            } else {
+                Ok(Some(Adm {
+                    ptr: adm_access,
+                    _pool: None,
+                    _marker: std::marker::PhantomData,
+                }))
+            }
+        })
+    }
+
     /// Queue a path for post-commit processing using this access baton.
     ///
     /// This calls the deprecated `svn_wc_queue_committed` which takes
@@ -1597,12 +1716,19 @@ impl Adm {
 }
 
 #[allow(deprecated)]
-impl Adm {
+impl Adm<'_> {
     /// Explicitly close the access baton, releasing all resources and locks.
     pub fn close(&mut self) {
         if !self.ptr.is_null() {
-            unsafe {
-                subversion_sys::svn_wc_adm_close2(self.ptr, self._pool.as_mut_ptr());
+            match &mut self._pool {
+                Some(pool) => unsafe {
+                    subversion_sys::svn_wc_adm_close2(self.ptr, pool.as_mut_ptr());
+                },
+                None => {
+                    with_tmp_pool(|scratch_pool| unsafe {
+                        subversion_sys::svn_wc_adm_close2(self.ptr, scratch_pool.as_mut_ptr());
+                    });
+                }
             }
             self.ptr = std::ptr::null_mut();
         }
@@ -1610,8 +1736,122 @@ impl Adm {
 }
 
 #[allow(deprecated)]
-impl Drop for Adm {
+impl Drop for Adm<'_> {
     fn drop(&mut self) {
         self.close();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(feature = "repos")]
+    use super::*;
+
+    #[test]
+    #[cfg(feature = "repos")]
+    #[allow(deprecated)]
+    fn test_add_repos_file() {
+        use std::io::Cursor;
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let wc_path = temp_dir.path().join("wc");
+        let repo_path = temp_dir.path().join("repo");
+
+        // Create repo and checkout
+        crate::repos::Repos::create(&repo_path).unwrap();
+        let repo_url = format!("file://{}", repo_path.display());
+        std::process::Command::new("svn")
+            .args(["checkout", &repo_url, wc_path.to_str().unwrap()])
+            .output()
+            .unwrap();
+
+        // Create a file on disk
+        let file_path = wc_path.join("test.txt");
+        let content = b"hello world";
+        std::fs::write(&file_path, content).unwrap();
+
+        // Add via Adm.add_repos_file
+        let mut adm = Adm::open(wc_path.to_str().unwrap(), true, -1).unwrap();
+
+        let backend = crate::io::ReadOnlyBackend::new(Cursor::new(content.to_vec()));
+        let mut stream = crate::io::Stream::from_backend(backend).unwrap();
+        let base_props = std::collections::HashMap::new();
+
+        adm.add_repos_file(
+            file_path.to_str().unwrap(),
+            &mut stream,
+            None,
+            &base_props,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        adm.close();
+    }
+
+    #[test]
+    #[cfg(feature = "repos")]
+    #[allow(deprecated)]
+    fn test_probe_try_versioned_dir() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let wc_path = temp_dir.path().join("wc");
+        let repo_path = temp_dir.path().join("repo");
+
+        // Create repo and checkout
+        crate::repos::Repos::create(&repo_path).unwrap();
+        let repo_url = format!("file://{}", repo_path.display());
+        std::process::Command::new("svn")
+            .args(["checkout", &repo_url, wc_path.to_str().unwrap()])
+            .output()
+            .unwrap();
+
+        // Create and add a subdirectory
+        let sub_dir = wc_path.join("subdir");
+        std::fs::create_dir(&sub_dir).unwrap();
+        std::process::Command::new("svn")
+            .args(["add", sub_dir.to_str().unwrap()])
+            .output()
+            .unwrap();
+
+        let mut adm = Adm::open(wc_path.to_str().unwrap(), true, -1).unwrap();
+
+        // probe_try on the versioned subdirectory should return Some
+        let sub_adm = adm.probe_try(sub_dir.to_str().unwrap(), true, 0).unwrap();
+        assert!(sub_adm.is_some());
+
+        // Drop sub_adm before parent
+        drop(sub_adm);
+        adm.close();
+    }
+
+    #[test]
+    #[cfg(feature = "repos")]
+    #[allow(deprecated)]
+    fn test_probe_try_unversioned_file() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let wc_path = temp_dir.path().join("wc");
+        let repo_path = temp_dir.path().join("repo");
+
+        // Create repo and checkout
+        crate::repos::Repos::create(&repo_path).unwrap();
+        let repo_url = format!("file://{}", repo_path.display());
+        std::process::Command::new("svn")
+            .args(["checkout", &repo_url, wc_path.to_str().unwrap()])
+            .output()
+            .unwrap();
+
+        let mut adm = Adm::open(wc_path.to_str().unwrap(), true, -1).unwrap();
+
+        // probe_try on an unversioned file probes the closest versioned
+        // directory, which is the WC root itself — so it returns Some.
+        let probed = adm
+            .probe_try(wc_path.join("nonexistent").to_str().unwrap(), false, 0)
+            .unwrap();
+        assert!(probed.is_some());
+        drop(probed);
+
+        adm.close();
     }
 }
