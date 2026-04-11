@@ -4774,7 +4774,7 @@ impl Context {
             }
 
             let relative_to_dir_c = relative_to_dir
-                .map(|d| crate::dirent::to_absolute_cstring(d))
+                .map(crate::dirent::to_absolute_cstring)
                 .transpose()?;
 
             // Convert changelists if provided
@@ -4848,7 +4848,7 @@ impl Context {
             let header_encoding_c =
                 std::ffi::CString::new(options.header_encoding.as_str()).unwrap();
             let relative_to_dir_c = relative_to_dir
-                .map(|d| crate::dirent::to_absolute_cstring(d))
+                .map(crate::dirent::to_absolute_cstring)
                 .transpose()?;
 
             // Create diff file options struct

@@ -2049,6 +2049,124 @@ mod tests {
     }
 
     #[test]
+    fn test_from_backend_drop_without_close() {
+        // Stream is dropped without anyone calling close().
+        // Backend should still be freed (no leak).
+        use crate::io::backend::ReadOnlyBackend;
+        use std::io::Cursor;
+
+        let data = b"drop without close";
+        let backend = ReadOnlyBackend::new(Cursor::new(data.to_vec()));
+        let mut stream = Stream::from_backend(backend).unwrap();
+
+        let mut buf = vec![0u8; 18];
+        let n = stream.read(&mut buf).unwrap();
+        assert_eq!(n, 18);
+        assert_eq!(&buf, &b"drop without close"[..]);
+
+        // Just drop — no explicit close
+        drop(stream);
+    }
+
+    #[test]
+    fn test_from_backend_svn_close_then_drop() {
+        // Simulates SVN C code closing the stream, then Rust dropping it.
+        // Must not double-free.
+        use crate::io::backend::BufferBackend;
+
+        let backend = BufferBackend::from_vec(b"svn close then drop".to_vec());
+        let mut stream = Stream::from_backend(backend).unwrap();
+
+        let mut buf = vec![0u8; 19];
+        let n = stream.read(&mut buf).unwrap();
+        assert_eq!(n, 19);
+
+        // SVN calls svn_stream_close
+        stream.close().unwrap();
+
+        // Rust drops — must be safe
+        drop(stream);
+    }
+
+    #[test]
+    fn test_from_backend_read_eof() {
+        // Read past EOF returns 0 bytes.
+        use crate::io::backend::ReadOnlyBackend;
+        use std::io::Cursor;
+
+        let backend = ReadOnlyBackend::new(Cursor::new(b"short".to_vec()));
+        let mut stream = Stream::from_backend(backend).unwrap();
+
+        let mut buf = vec![0u8; 100];
+        let n = stream.read(&mut buf).unwrap();
+        assert_eq!(n, 5);
+        assert_eq!(&buf[..5], b"short");
+
+        // Read again — should get 0 (EOF)
+        let n = stream.read(&mut buf).unwrap();
+        assert_eq!(n, 0);
+    }
+
+    #[test]
+    fn test_from_backend_empty_stream() {
+        use crate::io::backend::ReadOnlyBackend;
+        use std::io::Cursor;
+
+        let backend = ReadOnlyBackend::new(Cursor::new(Vec::new()));
+        let mut stream = Stream::from_backend(backend).unwrap();
+
+        let mut buf = vec![0u8; 10];
+        let n = stream.read(&mut buf).unwrap();
+        assert_eq!(n, 0);
+
+        drop(stream);
+    }
+
+    #[test]
+    fn test_from_backend_write_then_close() {
+        use crate::io::backend::BufferBackend;
+
+        let backend = BufferBackend::new();
+        let mut stream = Stream::from_backend(backend).unwrap();
+
+        stream.write(b"hello ").unwrap();
+        stream.write(b"world").unwrap();
+
+        stream.reset().unwrap();
+        let mut buf = vec![0u8; 11];
+        let n = stream.read(&mut buf).unwrap();
+        assert_eq!(n, 11);
+        assert_eq!(&buf, b"hello world");
+
+        stream.close().unwrap();
+        drop(stream);
+    }
+
+    #[test]
+    fn test_from_backend_multiple_reads() {
+        use crate::io::backend::ReadOnlyBackend;
+        use std::io::Cursor;
+
+        let backend = ReadOnlyBackend::new(Cursor::new(b"abcdefghij".to_vec()));
+        let mut stream = Stream::from_backend(backend).unwrap();
+
+        let mut buf = vec![0u8; 3];
+        assert_eq!(stream.read(&mut buf).unwrap(), 3);
+        assert_eq!(&buf, b"abc");
+
+        assert_eq!(stream.read(&mut buf).unwrap(), 3);
+        assert_eq!(&buf, b"def");
+
+        assert_eq!(stream.read(&mut buf).unwrap(), 3);
+        assert_eq!(&buf, b"ghi");
+
+        assert_eq!(stream.read(&mut buf).unwrap(), 1);
+        assert_eq!(&buf[..1], b"j");
+
+        assert_eq!(stream.read(&mut buf).unwrap(), 0);
+    }
+
+    #[test]
     fn test_copy_perms_actually_copies() {
         // Test that copy_perms() actually copies file permissions
         let td = tempfile::tempdir().unwrap();

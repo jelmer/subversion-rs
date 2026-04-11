@@ -1611,6 +1611,9 @@ impl Adm<'_> {
     ///
     /// Returns `None` if the path is not a versioned directory.
     /// The returned baton is tied to this baton's lifetime.
+    ///
+    /// `levels_to_lock` controls how deep to lock: 0 = just this dir,
+    /// -1 = infinite depth.
     #[deprecated(note = "Use svn_wc_context_t based APIs where possible")]
     pub fn probe_try(
         &mut self,
@@ -1637,6 +1640,10 @@ impl Adm<'_> {
             if adm_access.is_null() {
                 Ok(None)
             } else {
+                // Return a borrowed Adm (pool=None) that does NOT
+                // close on drop. The sub-access baton is owned by
+                // the parent Adm; closing it would release the
+                // parent's write lock on this directory.
                 Ok(Some(Adm {
                     ptr: adm_access,
                     _pool: None,
@@ -1662,22 +1669,24 @@ impl Adm<'_> {
     ) -> Result<(), crate::Error<'static>> {
         let path_cstr = crate::dirent::to_absolute_cstring(path)?;
         let mut queue_ptr = committed_queue.as_mut_ptr();
-        with_tmp_pool(|scratch_pool| {
-            let err = unsafe {
-                subversion_sys::svn_wc_queue_committed(
-                    &mut queue_ptr,
-                    path_cstr.as_ptr(),
-                    self.ptr,
-                    if recurse { 1 } else { 0 },
-                    std::ptr::null(), // wcprop_changes
-                    if remove_lock { 1 } else { 0 },
-                    if remove_changelist { 1 } else { 0 },
-                    digest.map(|d| d.as_ptr()).unwrap_or(std::ptr::null()),
-                    scratch_pool.as_mut_ptr(),
-                )
-            };
-            svn_result(err)
-        })
+        // Use the queue's pool, not a temporary pool: svn_wc_queue_committed
+        // stores pointers into the pool passed here (via svn_dirent_get_absolute
+        // and svn_dirent_skip_ancestor), and they must survive until
+        // process_committed_queue is called.
+        let err = unsafe {
+            subversion_sys::svn_wc_queue_committed(
+                &mut queue_ptr,
+                path_cstr.as_ptr(),
+                self.ptr,
+                if recurse { 1 } else { 0 },
+                std::ptr::null(), // wcprop_changes
+                if remove_lock { 1 } else { 0 },
+                if remove_changelist { 1 } else { 0 },
+                digest.map(|d| d.as_ptr()).unwrap_or(std::ptr::null()),
+                committed_queue.pool_mut_ptr(),
+            )
+        };
+        svn_result(err)
     }
 
     /// Process a committed queue using this access baton.
@@ -1722,12 +1731,13 @@ impl Adm<'_> {
         if !self.ptr.is_null() {
             match &mut self._pool {
                 Some(pool) => unsafe {
+                    // Owned Adm — close the access baton and release locks.
                     subversion_sys::svn_wc_adm_close2(self.ptr, pool.as_mut_ptr());
                 },
                 None => {
-                    with_tmp_pool(|scratch_pool| unsafe {
-                        subversion_sys::svn_wc_adm_close2(self.ptr, scratch_pool.as_mut_ptr());
-                    });
+                    // Borrowed Adm (from probe_try) — do NOT close.
+                    // The parent Adm owns this access baton and will
+                    // release its locks when it closes.
                 }
             }
             self.ptr = std::ptr::null_mut();

@@ -34,6 +34,13 @@ use std::collections::HashMap;
 use std::marker::PhantomData;
 use subversion_sys::svn_ra_session_t;
 
+/// Callback for receiving txdelta windows from [`Session::get_file_revs`].
+///
+/// Called with `Some(window)` for each delta window, and `None` to signal
+/// end-of-delta. The handler is freed automatically after the final `None` call.
+pub type TxDeltaHandler =
+    Box<dyn FnMut(Option<&crate::delta::TxDeltaWindowRef<'_>>) -> Result<(), Error<'static>>>;
+
 /// A canonical relative path for use with RA (Repository Access) functions.
 ///
 /// This type ensures that paths are properly formatted for SVN's RA layer,
@@ -1921,14 +1928,23 @@ impl<'a> Session<'a> {
         )
     }
 
-    /// Get the history of a file as revisions
+    /// Get the history of a file as revisions.
+    ///
+    /// Calls `file_rev_handler` for each revision that modified the file.
+    /// The handler receives the path, revision, revision properties,
+    /// whether this is from a merge, and the property diffs for that revision.
+    ///
+    /// To receive the text delta for a revision, return `Some(handler)` where
+    /// `handler` is a [`TxDeltaHandler`] that will be called with each delta
+    /// window (and a final `None` to signal end-of-delta). Return `None` to
+    /// skip the text delta for that revision.
     pub fn get_file_revs(
         &mut self,
         path: impl TryInto<RelPath, Error = Error<'static>>,
         start: Revnum,
         end: Revnum,
         include_merged_revisions: bool,
-        file_rev_handler: impl FnMut(
+        mut file_rev_handler: impl FnMut(
             &str,
             Revnum,
             &HashMap<String, Vec<u8>>,
@@ -1936,28 +1952,60 @@ impl<'a> Session<'a> {
             Option<(&str, Revnum)>,
             Option<(&str, Revnum)>,
             &HashMap<String, Vec<u8>>,
-        ) -> Result<(), Error<'static>>,
+        ) -> Result<Option<TxDeltaHandler>, Error<'static>>,
     ) -> Result<(), Error<'static>> {
         let relpath = path.try_into()?;
         let path_cstr = std::ffi::CString::new(relpath.as_str())?;
         let pool = Pool::new();
 
-        // Double-box: trait object pointers are fat pointers (128 bits) and can't
-        // be passed through C APIs which expect thin pointers (64 bits).
-        // Solution: Box<dyn FnMut> is a fat pointer, so we box it again to get
-        // a thin pointer to the fat pointer.
-        let handler_box: Box<
-            dyn FnMut(
-                &str,
-                Revnum,
-                &HashMap<String, Vec<u8>>,
-                bool,
-                Option<(&str, Revnum)>,
-                Option<(&str, Revnum)>,
-                &HashMap<String, Vec<u8>>,
-            ) -> Result<(), Error<'static>>,
-        > = Box::new(file_rev_handler);
-        let handler_ptr = Box::into_raw(Box::new(handler_box));
+        type HandlerFn = dyn FnMut(
+            &str,
+            Revnum,
+            &HashMap<String, Vec<u8>>,
+            bool,
+            Option<(&str, Revnum)>,
+            Option<(&str, Revnum)>,
+            &HashMap<String, Vec<u8>>,
+        ) -> Result<Option<TxDeltaHandler>, Error<'static>>;
+
+        // Box a &mut dyn reference (like lock/get_log) — no 'static needed.
+        // The cast to &mut HandlerFn creates a trait object whose lifetime is
+        // tied to this function scope, which is safe because svn_ra_get_file_revs2
+        // is synchronous and the pointer is freed before we return.
+        let handler_ref: &mut dyn FnMut(
+            &str,
+            Revnum,
+            &HashMap<String, Vec<u8>>,
+            bool,
+            Option<(&str, Revnum)>,
+            Option<(&str, Revnum)>,
+            &HashMap<String, Vec<u8>>,
+        ) -> Result<Option<TxDeltaHandler>, Error<'static>> = &mut file_rev_handler;
+        let baton = Box::into_raw(Box::new(handler_ref)) as *mut std::ffi::c_void;
+
+        extern "C" fn txdelta_trampoline(
+            window: *mut subversion_sys::svn_txdelta_window_t,
+            baton: *mut std::ffi::c_void,
+        ) -> *mut subversion_sys::svn_error_t {
+            let handler = unsafe { &mut *(baton as *mut TxDeltaHandler) };
+            if window.is_null() {
+                let result = handler(None);
+                // NULL window = end of delta; free the handler
+                unsafe {
+                    drop(Box::from_raw(baton as *mut TxDeltaHandler));
+                }
+                match result {
+                    Ok(()) => std::ptr::null_mut(),
+                    Err(e) => unsafe { e.into_raw() },
+                }
+            } else {
+                let win = unsafe { crate::delta::TxDeltaWindowRef::from_raw(window) };
+                match handler(Some(&win)) {
+                    Ok(()) => std::ptr::null_mut(),
+                    Err(e) => unsafe { e.into_raw() },
+                }
+            }
+        }
 
         extern "C" fn file_rev_handler_wrapper(
             baton: *mut std::ffi::c_void,
@@ -1965,28 +2013,15 @@ impl<'a> Session<'a> {
             rev: subversion_sys::svn_revnum_t,
             rev_props: *mut apr_sys::apr_hash_t,
             result_of_merge: subversion_sys::svn_boolean_t,
-            txdelta_handler: *mut subversion_sys::svn_txdelta_window_handler_t,
-            txdelta_baton: *mut *mut std::ffi::c_void,
+            txdelta_handler_out: *mut subversion_sys::svn_txdelta_window_handler_t,
+            txdelta_baton_out: *mut *mut std::ffi::c_void,
             prop_diffs: *mut apr_sys::apr_array_header_t,
             _pool: *mut apr_sys::apr_pool_t,
         ) -> *mut subversion_sys::svn_error_t {
-            // Cast the baton back - we double-boxed it so cast to *mut Box<dyn FnMut>
-            type HandlerFn = dyn FnMut(
-                &str,
-                Revnum,
-                &HashMap<String, Vec<u8>>,
-                bool,
-                Option<(&str, Revnum)>,
-                Option<(&str, Revnum)>,
-                &HashMap<String, Vec<u8>>,
-            ) -> Result<(), Error<'static>>;
-
-            let handler_box: &mut Box<HandlerFn> = unsafe { &mut *(baton as *mut Box<HandlerFn>) };
-            let handler: &mut HandlerFn = &mut **handler_box;
+            let handler: &mut &mut HandlerFn = unsafe { &mut *(baton as *mut &mut HandlerFn) };
 
             let path_str = unsafe { std::ffi::CStr::from_ptr(path).to_str().unwrap() };
 
-            // Convert rev_props hash to HashMap
             let rev_props_hash = if rev_props.is_null() {
                 HashMap::new()
             } else {
@@ -1994,11 +2029,9 @@ impl<'a> Session<'a> {
                 prop_hash.to_hashmap()
             };
 
-            // Convert prop_diffs array to HashMap
             let prop_diffs_map = if prop_diffs.is_null() {
                 HashMap::new()
             } else {
-                // prop_diffs is an array of svn_prop_t
                 let array = unsafe {
                     std::slice::from_raw_parts(
                         (*prop_diffs).elts as *const subversion_sys::svn_prop_t,
@@ -2023,27 +2056,35 @@ impl<'a> Session<'a> {
                 props
             };
 
-            // We don't have copyfrom info in svn_ra_get_file_revs2, so pass None
-            // The handler would need to be adjusted to not include copyfrom parameters
             match handler(
                 path_str,
                 Revnum::from_raw(rev).unwrap(),
                 &rev_props_hash,
                 result_of_merge != 0,
-                None, // copyfrom_path, copyfrom_rev
-                None, // merged_path, merged_rev
+                None,
+                None,
                 &prop_diffs_map,
             ) {
-                Ok(()) => {
-                    // Set txdelta handlers to NULL - we don't want the text delta
-                    // Note: txdelta_handler and txdelta_baton can be NULL if the caller
-                    // doesn't want text delta information, so check before dereferencing
-                    unsafe {
-                        if !txdelta_handler.is_null() {
-                            *txdelta_handler = None;
+                Ok(Some(delta_handler)) => {
+                    // Only install the handler if SVN wants delta info;
+                    // otherwise drop it to avoid leaking the Box.
+                    if !txdelta_handler_out.is_null() && !txdelta_baton_out.is_null() {
+                        let delta_ptr =
+                            Box::into_raw(Box::new(delta_handler)) as *mut std::ffi::c_void;
+                        unsafe {
+                            *txdelta_handler_out = Some(txdelta_trampoline);
+                            *txdelta_baton_out = delta_ptr;
                         }
-                        if !txdelta_baton.is_null() {
-                            *txdelta_baton = std::ptr::null_mut();
+                    }
+                    std::ptr::null_mut()
+                }
+                Ok(None) => {
+                    unsafe {
+                        if !txdelta_handler_out.is_null() {
+                            *txdelta_handler_out = None;
+                        }
+                        if !txdelta_baton_out.is_null() {
+                            *txdelta_baton_out = std::ptr::null_mut();
                         }
                     }
                     std::ptr::null_mut()
@@ -2060,15 +2101,29 @@ impl<'a> Session<'a> {
                 end.into(),
                 include_merged_revisions.into(),
                 Some(file_rev_handler_wrapper),
-                handler_ptr as *mut std::ffi::c_void,
+                baton,
                 pool.as_mut_ptr(),
             )
         };
 
-        // Clean up the handler box
-        unsafe {
-            let _ = Box::from_raw(handler_ptr);
-        }
+        // Clean up the boxed reference.
+        // SAFETY: baton was created from Box::into_raw above and the FFI
+        // call is synchronous, so the pointer is still valid.
+        let _ = unsafe {
+            Box::from_raw(
+                baton
+                    as *mut &mut dyn FnMut(
+                        &str,
+                        Revnum,
+                        &HashMap<String, Vec<u8>>,
+                        bool,
+                        Option<(&str, Revnum)>,
+                        Option<(&str, Revnum)>,
+                        &HashMap<String, Vec<u8>>,
+                    )
+                        -> Result<Option<TxDeltaHandler>, Error<'static>>,
+            )
+        };
 
         Error::from_raw(err)?;
         Ok(())
@@ -2301,12 +2356,7 @@ impl<'a> Session<'a> {
 /// Returns a string listing all available repository access modules.
 pub fn modules() -> Result<String, Error<'static>> {
     let pool = Pool::new();
-    let buf = unsafe {
-        subversion_sys::svn_stringbuf_create(
-            std::ffi::CStr::from_bytes_with_nul(b"\0").unwrap().as_ptr(),
-            pool.as_mut_ptr(),
-        )
-    };
+    let buf = unsafe { subversion_sys::svn_stringbuf_create(c"".as_ptr(), pool.as_mut_ptr()) };
 
     let err = unsafe { subversion_sys::svn_ra_print_modules(buf, pool.as_mut_ptr()) };
 
@@ -3313,7 +3363,7 @@ mod tests {
             false,
             |_path, _rev, _rev_props, _result_of_merge, _copyfrom, _merged, _prop_diffs| {
                 handler_called = true;
-                Ok(())
+                Ok(None)
             },
         );
 
@@ -3374,9 +3424,8 @@ mod tests {
             false,
             |_path, rev, _rev_props, _result_of_merge, _copyfrom, _merged, prop_diffs| {
                 revisions_seen.push(rev.0);
-                // Verify prop_diffs is accessible
-                let _ = prop_diffs.len(); // Verify prop_diffs is accessible
-                Ok(())
+                let _ = prop_diffs.len();
+                Ok(None)
             },
         );
 
@@ -3414,7 +3463,7 @@ mod tests {
             false,
             |_path, _rev, _rev_props, _result_of_merge, _copyfrom, _merged, _prop_diffs| {
                 handler_called = true;
-                Ok(())
+                Ok(None)
             },
         );
 

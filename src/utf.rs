@@ -223,6 +223,7 @@ impl ToUtf8 for String {
 }
 
 /// Trait for converting UTF-8 strings to native encoding
+#[allow(clippy::wrong_self_convention)]
 pub trait FromUtf8 {
     /// Convert from UTF-8 to native encoding
     fn from_utf8(&self) -> Result<String, Error<'static>>;

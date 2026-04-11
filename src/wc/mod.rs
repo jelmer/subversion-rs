@@ -2494,36 +2494,45 @@ impl Context {
         remove_changelist: bool,
         sha1_checksum: Option<&crate::Checksum>,
     ) -> Result<(), Error<'static>> {
-        let pool = apr::Pool::new();
         let path_cstr = crate::dirent::to_absolute_cstring(local_abspath)?;
+        // Use the queue's pool: svn_wc_queue_committed4 stores pointers
+        // into pool-allocated strings (via svn_dirent_skip_ancestor) that
+        // must survive until process_committed_queue is called.
+        let queue_pool = committed_queue.pool_mut_ptr();
 
-        // Build the wcprop_changes APR array if provided
+        // Build the wcprop_changes APR array if provided.
+        // The pool, CStrings, and array must all outlive the FFI call.
+        let scratch_pool = apr::Pool::new();
+        let prop_name_cstrs: Vec<std::ffi::CString>;
+        let mut arr_storage;
         let wcprop_changes_ptr = if let Some(changes) = wcprop_changes {
-            let prop_name_cstrs: Vec<std::ffi::CString> = changes
+            prop_name_cstrs = changes
                 .iter()
                 .map(|c| std::ffi::CString::new(c.name.as_str()).expect("prop name valid UTF-8"))
                 .collect();
-            let mut arr = apr::tables::TypedArray::<subversion_sys::svn_prop_t>::new(
-                &pool,
+            arr_storage = apr::tables::TypedArray::<subversion_sys::svn_prop_t>::new(
+                &scratch_pool,
                 changes.len() as i32,
             );
             for (change, name_cstr) in changes.iter().zip(prop_name_cstrs.iter()) {
-                arr.push(subversion_sys::svn_prop_t {
+                arr_storage.push(subversion_sys::svn_prop_t {
                     name: name_cstr.as_ptr(),
                     value: if let Some(v) = &change.value {
-                        crate::svn_string_helpers::svn_string_ncreate(v, &pool)
+                        crate::svn_string_helpers::svn_string_ncreate(v, &scratch_pool)
                     } else {
                         std::ptr::null()
                     },
                 });
             }
-            unsafe { arr.as_ptr() }
+            unsafe { arr_storage.as_ptr() }
         } else {
             std::ptr::null()
         };
 
         let sha1_ptr = sha1_checksum.map(|c| c.ptr).unwrap_or(std::ptr::null());
 
+        // All temporaries (scratch_pool, prop_name_cstrs, arr_storage) are
+        // still alive here, so wcprop_changes_ptr is valid.
         unsafe {
             let err = subversion_sys::svn_wc_queue_committed4(
                 committed_queue.as_mut_ptr(),
@@ -2535,7 +2544,7 @@ impl Context {
                 remove_lock as i32,
                 remove_changelist as i32,
                 sha1_ptr,
-                pool.as_mut_ptr(),
+                queue_pool,
             );
             Error::from_raw(err)
         }
@@ -2797,13 +2806,13 @@ impl Context {
         new_contents: Option<&mut crate::io::Stream>,
         new_base_props: &std::collections::HashMap<String, Vec<u8>>,
         new_props: Option<&std::collections::HashMap<String, Vec<u8>>>,
-        copyfrom_url: Option<&str>,
-        copyfrom_rev: crate::Revnum,
+        copyfrom: Option<(&str, crate::Revnum)>,
         cancel_func: Option<Box<dyn Fn() -> Result<(), Error<'static>>>>,
     ) -> Result<(), Error<'static>> {
         let path_cstr = crate::dirent::to_absolute_cstring(local_abspath)?;
-        let copyfrom_url_cstr = copyfrom_url
-            .map(|u| std::ffi::CString::new(u).expect("copyfrom_url must be valid UTF-8"));
+        let copyfrom_url_cstr = copyfrom
+            .map(|(url, _)| std::ffi::CString::new(url))
+            .transpose()?;
 
         let scratch_pool = apr::Pool::new();
 
@@ -2845,7 +2854,7 @@ impl Context {
                 copyfrom_url_cstr
                     .as_ref()
                     .map_or(std::ptr::null(), |c| c.as_ptr()),
-                copyfrom_rev.0,
+                copyfrom.map(|(_, rev)| rev.0).unwrap_or(-1),
                 if has_cancel {
                     Some(crate::wrap_cancel_func)
                 } else {
@@ -4731,6 +4740,14 @@ impl CommittedQueue {
     pub(crate) fn as_mut_ptr(&mut self) -> *mut subversion_sys::svn_wc_committed_queue_t {
         self.ptr
     }
+
+    /// Get a mutable pointer to the queue's pool.
+    ///
+    /// This is needed by `queue_committed` to allocate paths that must
+    /// survive until `process_committed_queue` is called.
+    pub(crate) fn pool_mut_ptr(&mut self) -> *mut apr_sys::apr_pool_t {
+        self._pool.as_mut_ptr()
+    }
 }
 
 /// Represents a lock in the working copy
@@ -5885,7 +5902,6 @@ mod tests {
             &base_props,
             None,
             None,
-            crate::Revnum(-1),
             None,
         );
         // Should fail because the path is not inside a versioned working copy.
