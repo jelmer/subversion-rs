@@ -574,16 +574,28 @@ impl<'a> Session<'a> {
             data: new_value.as_ptr() as *mut _,
             len: new_value.len(),
         };
+        // old_value_p is `const svn_string_t **`: NULL means "no atomicity
+        // check", while a non-NULL pointer to a NULL inner pointer means "assert
+        // the property currently has no value". Keep both the svn_string_t and
+        // the inner pointer in locals so they outlive the call.
         let old_value = old_value.map(|v| subversion_sys::svn_string_t {
             data: v.as_ptr() as *mut _,
             len: v.len(),
         });
+        let old_value_inner: *const subversion_sys::svn_string_t = old_value
+            .as_ref()
+            .map_or(std::ptr::null(), |v| v as *const _);
+        let old_value_p = if old_value.is_some() {
+            &old_value_inner as *const *const subversion_sys::svn_string_t
+        } else {
+            std::ptr::null()
+        };
         let err = unsafe {
             subversion_sys::svn_ra_change_rev_prop2(
                 self.ptr,
                 rev.into(),
                 name.as_ptr(),
-                &old_value.map_or(std::ptr::null(), |v| &v),
+                old_value_p,
                 &new_value,
                 pool.as_mut_ptr(),
             )
@@ -4412,9 +4424,27 @@ mod tests {
         );
         assert_eq!(props.get(prop_name).unwrap(), prop_value);
 
-        // Try to change with wrong old value - should fail
-        let result =
-            session.change_revprop(rev, prop_name, Some(b"wrong old value"), b"another value");
+        // A None old value means "no atomicity check": it overwrites even
+        // though the property already has a value.
+        session
+            .change_revprop(rev, prop_name, None, b"overwritten")
+            .unwrap();
+        assert_eq!(
+            session.rev_proplist(rev).unwrap().get(prop_name).unwrap(),
+            b"overwritten"
+        );
+
+        // A matching old value succeeds the atomicity check.
+        session
+            .change_revprop(rev, prop_name, Some(b"overwritten"), b"matched")
+            .unwrap();
+        assert_eq!(
+            session.rev_proplist(rev).unwrap().get(prop_name).unwrap(),
+            b"matched"
+        );
+
+        // A wrong old value fails the atomicity check.
+        let result = session.change_revprop(rev, prop_name, Some(b"wrong old value"), b"another");
         assert!(
             result.is_err(),
             "change_revprop with wrong old value should fail"
