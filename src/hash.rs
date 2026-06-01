@@ -673,20 +673,6 @@ mod tests {
     }
 
     #[test]
-    fn test_path_change_hash_len() {
-        let pool = apr::Pool::new();
-        unsafe {
-            let empty = PathChangeHash::from_ptr(apr_sys::apr_hash_make(pool.as_mut_ptr()));
-            assert!(empty.is_empty());
-            assert_eq!(empty.len(), 0);
-
-            let one = PathChangeHash::from_ptr(hash_with_one_dummy_entry(&pool));
-            assert!(!one.is_empty());
-            assert_eq!(one.len(), 1);
-        }
-    }
-
-    #[test]
     fn test_fs_dirent_hash_len() {
         let pool = apr::Pool::new();
         unsafe {
@@ -754,50 +740,6 @@ impl<'a> DirentHash<'a> {
     }
 
     /// Get the number of dirents
-    pub fn len(&self) -> usize {
-        self.inner.len()
-    }
-}
-
-/// A safe wrapper for APR hashes containing path -> svn_fs_path_change2_t mappings
-///
-/// This wrapper encapsulates the common pattern of working with changed path
-/// hashes from Subversion's FS API.
-pub struct PathChangeHash<'a> {
-    inner: apr::hash::Hash<'a>,
-}
-
-impl<'a> PathChangeHash<'a> {
-    /// Create a PathChangeHash from a raw APR hash pointer
-    ///
-    /// # Safety
-    /// The caller must ensure that:
-    /// - `ptr` is a valid APR hash containing svn_fs_path_change2_t values
-    /// - The hash and its contents remain valid for the lifetime of this wrapper
-    pub unsafe fn from_ptr(ptr: *mut apr_sys::apr_hash_t) -> Self {
-        Self {
-            inner: apr::hash::Hash::from_ptr(ptr),
-        }
-    }
-
-    /// Convert the path changes to a HashMap<String, FsPathChange>
-    pub fn to_hashmap(&self) -> HashMap<String, crate::fs::FsPathChange> {
-        let mut result = HashMap::new();
-        for (k, v) in self.inner.iter() {
-            let path = String::from_utf8_lossy(k).into_owned();
-            let change =
-                crate::fs::FsPathChange::from_raw(v as *mut subversion_sys::svn_fs_path_change2_t);
-            result.insert(path, change);
-        }
-        result
-    }
-
-    /// Check if the hash is empty
-    pub fn is_empty(&self) -> bool {
-        self.inner.is_empty()
-    }
-
-    /// Get the number of path changes
     pub fn len(&self) -> usize {
         self.inner.len()
     }

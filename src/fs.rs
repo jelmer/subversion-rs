@@ -188,77 +188,18 @@ impl std::fmt::Display for FsPath {
     }
 }
 
-/// Represents a change to a path in the filesystem
-pub struct FsPathChange {
-    ptr: *const subversion_sys::svn_fs_path_change2_t,
-}
-
-impl FsPathChange {
-    /// Creates an FsPathChange from a raw pointer.
-    pub fn from_raw(ptr: *mut subversion_sys::svn_fs_path_change2_t) -> Self {
-        Self { ptr }
-    }
-
-    /// Gets the kind of change for this path.
-    pub fn change_kind(&self) -> crate::FsPathChangeKind {
-        unsafe { (*self.ptr).change_kind.into() }
-    }
-
-    /// Gets the node kind (file, directory, etc.).
-    pub fn node_kind(&self) -> crate::NodeKind {
-        unsafe { (*self.ptr).node_kind.into() }
-    }
-
-    /// Checks if the text content was modified.
-    pub fn text_modified(&self) -> bool {
-        unsafe { (*self.ptr).text_mod != 0 }
-    }
-
-    /// Checks if properties were modified.
-    pub fn props_modified(&self) -> bool {
-        unsafe { (*self.ptr).prop_mod != 0 }
-    }
-
-    /// Gets the path this was copied from, if any.
-    pub fn copyfrom_path(&self) -> Option<String> {
-        unsafe {
-            if (*self.ptr).copyfrom_path.is_null() {
-                None
-            } else {
-                Some(
-                    std::ffi::CStr::from_ptr((*self.ptr).copyfrom_path)
-                        .to_string_lossy()
-                        .into_owned(),
-                )
-            }
-        }
-    }
-
-    /// Gets the revision this was copied from, if any.
-    pub fn copyfrom_rev(&self) -> Option<Revnum> {
-        unsafe {
-            let rev = (*self.ptr).copyfrom_rev;
-            if rev == -1 {
-                // SVN_INVALID_REVNUM is typically -1
-                None
-            } else {
-                Some(Revnum(rev))
-            }
-        }
-    }
-}
-
-/// Represents a path change in the filesystem (version 3 API).
+/// A single change to a path under a filesystem root.
 ///
-/// This is a more modern API than [`FsPathChange`] and uses an iterator
-/// pattern for memory efficiency.
-pub struct FsPathChange3<'a> {
+/// This is a thin borrowed view over SVN's `svn_fs_path_change3_t`; the
+/// lifetime ties it to whatever keeps the underlying change alive (the
+/// `for_each` callback invocation, or the owning [`PathChangeIterator`]).
+pub struct FsPathChange<'a> {
     ptr: *const subversion_sys::svn_fs_path_change3_t,
     _marker: PhantomData<&'a ()>,
 }
 
-impl<'a> FsPathChange3<'a> {
-    /// Creates an FsPathChange3 from a raw pointer.
+impl FsPathChange<'_> {
+    /// Wrap a raw change pointer. The caller guarantees it stays valid for `'a`.
     unsafe fn from_raw(ptr: *const subversion_sys::svn_fs_path_change3_t) -> Self {
         Self {
             ptr,
@@ -320,41 +261,44 @@ impl<'a> FsPathChange3<'a> {
     /// Gets the revision this was copied from, if any.
     pub fn copyfrom_rev(&self) -> Option<Revnum> {
         unsafe {
-            if (*self.ptr).copyfrom_known == 0 {
+            if (*self.ptr).copyfrom_known == 0 || (*self.ptr).copyfrom_rev == -1 {
                 None
             } else {
-                let rev = (*self.ptr).copyfrom_rev;
-                if rev == -1 {
-                    None
-                } else {
-                    Some(Revnum(rev))
-                }
+                Some(Revnum((*self.ptr).copyfrom_rev))
             }
         }
     }
 }
 
-/// Iterator over path changes in a filesystem root.
+/// Iterator over the paths changed under a filesystem root.
 ///
-/// This iterator provides efficient access to changed paths using the
-/// svn_fs_paths_changed3 API.
+/// Returned by [`Root::paths_changed`]. `svn_fs_path_change_get` reuses its
+/// change buffer on every step, so each change is duplicated into a pool this
+/// iterator owns. That keeps every yielded [`FsPathChange`] valid for the
+/// iterator's lifetime, so they may be collected. For a lower-overhead, no-copy
+/// traversal see [`Root::for_each_change`].
 pub struct PathChangeIterator<'a> {
     iter_ptr: *mut subversion_sys::svn_fs_path_change_iterator_t,
+    pool: apr::Pool<'static>,
     _marker: PhantomData<&'a ()>,
 }
 
-impl<'a> PathChangeIterator<'a> {
-    /// Creates a new iterator from a raw pointer.
-    unsafe fn from_raw(iter_ptr: *mut subversion_sys::svn_fs_path_change_iterator_t) -> Self {
+impl PathChangeIterator<'_> {
+    /// Creates a new iterator, taking ownership of the pool it lives in.
+    unsafe fn from_raw(
+        iter_ptr: *mut subversion_sys::svn_fs_path_change_iterator_t,
+        pool: apr::Pool<'static>,
+    ) -> Self {
         Self {
             iter_ptr,
+            pool,
             _marker: PhantomData,
         }
     }
 }
 
 impl<'a> Iterator for PathChangeIterator<'a> {
-    type Item = Result<FsPathChange3<'a>, Error<'static>>;
+    type Item = Result<FsPathChange<'a>, Error<'static>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         unsafe {
@@ -368,7 +312,11 @@ impl<'a> Iterator for PathChangeIterator<'a> {
             if change_ptr.is_null() {
                 None
             } else {
-                Some(Ok(FsPathChange3::from_raw(change_ptr)))
+                // The change buffer is reused on the next step, so duplicate it
+                // into the iterator's pool to keep this entry valid.
+                let dup =
+                    subversion_sys::svn_fs_path_change3_dup(change_ptr, self.pool.as_mut_ptr());
+                Some(Ok(FsPathChange::from_raw(dup)))
             }
         }
     }
@@ -2177,59 +2125,76 @@ impl<'fs> Root<'fs> {
         })
     }
 
-    /// Get paths changed in this root (for revision roots)
-    pub fn paths_changed(
-        &self,
-    ) -> Result<std::collections::HashMap<String, FsPathChange>, Error<'_>> {
-        with_tmp_pool(|pool| unsafe {
-            let mut changed_paths = std::ptr::null_mut();
-            let err = subversion_sys::svn_fs_paths_changed2(
-                &mut changed_paths,
-                self.ptr,
-                pool.as_mut_ptr(),
-            );
-            svn_result(err)?;
+    /// Visit every path changed under this root, without copying.
+    ///
+    /// `f` is called once per change with a short-lived [`FsPathChange`] that is
+    /// only valid for the duration of that call (the underlying SVN buffer is
+    /// reused on the next step), so it cannot escape the closure. Return
+    /// `Err(..)` from `f` to stop early. The iteration order is undefined.
+    ///
+    /// For an owning iterator whose entries can be collected, use
+    /// [`Root::paths_changed`].
+    ///
+    /// Wraps `svn_fs_paths_changed3` / `svn_fs_path_change_get`.
+    pub fn for_each_change<F>(&mut self, mut f: F) -> Result<(), Error<'static>>
+    where
+        F: FnMut(&FsPathChange<'_>) -> Result<(), Error<'static>>,
+    {
+        with_tmp_pool(|result_pool| {
+            with_tmp_pool(|scratch_pool| unsafe {
+                let mut iter_ptr: *mut subversion_sys::svn_fs_path_change_iterator_t =
+                    std::ptr::null_mut();
+                let err = subversion_sys::svn_fs_paths_changed3(
+                    &mut iter_ptr,
+                    self.ptr,
+                    result_pool.as_mut_ptr(),
+                    scratch_pool.as_mut_ptr(),
+                );
+                svn_result(err)?;
 
-            if changed_paths.is_null() {
-                Ok(std::collections::HashMap::new())
-            } else {
-                let hash = crate::hash::PathChangeHash::from_ptr(changed_paths);
-                Ok(hash.to_hashmap())
-            }
+                loop {
+                    let mut change_ptr: *mut subversion_sys::svn_fs_path_change3_t =
+                        std::ptr::null_mut();
+                    let err = subversion_sys::svn_fs_path_change_get(&mut change_ptr, iter_ptr);
+                    svn_result(err)?;
+                    if change_ptr.is_null() {
+                        break;
+                    }
+                    f(&FsPathChange::from_raw(change_ptr))?;
+                }
+                Ok(())
+            })
         })
     }
 
     /// Get an iterator over all paths changed under this root.
     ///
-    /// This is the modern, memory-efficient API for iterating over changed paths.
-    /// Each path change is retrieved one at a time, rather than loading all changes
-    /// into memory at once.
+    /// Each change is duplicated into a pool the iterator owns, so the yielded
+    /// [`FsPathChange`] values stay valid for the iterator's lifetime and may be
+    /// collected. The iteration order is undefined and may vary even for the
+    /// same root. For a no-copy traversal, use [`Root::for_each_change`].
     ///
-    /// The iteration order is undefined and may vary even for the same root.
-    ///
-    /// # Lifetimes
-    ///
-    /// The returned iterator is tied to this Root's lifetime, as the iterator
-    /// becomes invalid if the root is dropped.
+    /// The returned iterator borrows this root, which must outlive it.
     ///
     /// Wraps `svn_fs_paths_changed3`.
-    pub fn paths_changed3(&mut self) -> Result<PathChangeIterator<'_>, Error<'static>> {
+    pub fn paths_changed(&mut self) -> Result<PathChangeIterator<'_>, Error<'static>> {
+        // The iterator is allocated in result_pool and must outlive this call,
+        // so the iterator owns that pool. It also doubles as the pool the
+        // per-change dups are copied into.
         let result_pool = apr::Pool::new();
-        let scratch_pool = apr::Pool::new();
-
         let mut iter_ptr: *mut subversion_sys::svn_fs_path_change_iterator_t = std::ptr::null_mut();
 
-        let err = unsafe {
+        let err = with_tmp_pool(|scratch_pool| unsafe {
             subversion_sys::svn_fs_paths_changed3(
                 &mut iter_ptr,
                 self.ptr,
                 result_pool.as_mut_ptr(),
                 scratch_pool.as_mut_ptr(),
             )
-        };
+        });
         svn_result(err)?;
 
-        Ok(unsafe { PathChangeIterator::from_raw(iter_ptr) })
+        Ok(unsafe { PathChangeIterator::from_raw(iter_ptr, result_pool) })
     }
 
     /// Return the revision number to which this root belongs, for revision
@@ -4226,16 +4191,132 @@ mod tests {
     }
 
     #[test]
-    fn test_root_paths_changed() {
+    fn test_root_paths_changed_empty() {
         let dir = tempdir().unwrap();
-        let fs_path = dir.path().join("test-fs");
+        let fs = Fs::create(&dir.path().join("test-fs")).unwrap();
+        let mut root = fs.revision_root(crate::Revnum(0)).unwrap();
 
-        let fs = Fs::create(&fs_path).unwrap();
-        let root = fs.revision_root(crate::Revnum(0)).unwrap();
+        // The initial revision has no changes.
+        assert_eq!(root.paths_changed().unwrap().count(), 0);
+        let mut seen = 0;
+        root.for_each_change(|_| {
+            seen += 1;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(seen, 0);
+    }
 
-        // Initial revision should have no changes
-        let changes = root.paths_changed().unwrap();
-        assert!(changes.is_empty());
+    /// Commit `/a.txt` (rev 1), then either copy it to `/b.txt` or make a
+    /// property-only change to it (rev 2), and return the filesystem.
+    fn fs_with_changes(copy: bool) -> (tempfile::TempDir, Fs<'static>) {
+        let dir = tempdir().unwrap();
+        let fs = Fs::create(&dir.path().join("fs")).unwrap();
+
+        let mut txn = fs.begin_txn(crate::Revnum(0), 0).unwrap();
+        {
+            let mut root = txn.root().unwrap();
+            root.make_file("/a.txt").unwrap();
+        }
+        txn.commit().unwrap();
+
+        let mut txn = fs.begin_txn(crate::Revnum(1), 0).unwrap();
+        {
+            let mut root = txn.root().unwrap();
+            if copy {
+                let src = fs.revision_root(crate::Revnum(1)).unwrap();
+                root.copy(&src, "/a.txt", "/b.txt").unwrap();
+            } else {
+                root.change_node_prop("/a.txt", "myprop", b"val").unwrap();
+            }
+        }
+        txn.commit().unwrap();
+        (dir, fs)
+    }
+
+    #[test]
+    fn test_paths_changed_iterator_add() {
+        let dir = tempdir().unwrap();
+        let fs = Fs::create(&dir.path().join("fs")).unwrap();
+        let mut txn = fs.begin_txn(crate::Revnum(0), 0).unwrap();
+        {
+            let mut root = txn.root().unwrap();
+            root.make_file("/a.txt").unwrap();
+        }
+        txn.commit().unwrap();
+
+        let mut root = fs.revision_root(crate::Revnum(1)).unwrap();
+        // The iterator dups into its own pool, so the entries can be collected.
+        let changes: Vec<_> = root
+            .paths_changed()
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(changes.len(), 1);
+        let add = &changes[0];
+        assert_eq!(add.path(), "/a.txt");
+        assert_eq!(add.change_kind(), crate::FsPathChangeKind::Add);
+        assert_eq!(add.node_kind(), crate::NodeKind::File);
+        assert!(add.text_modified());
+        assert!(!add.props_modified());
+        // The mergeinfo-modified flag is reported for added nodes on this FS
+        // format.
+        assert!(add.mergeinfo_modified());
+        assert_eq!(add.copyfrom_path(), None);
+        assert_eq!(add.copyfrom_rev(), None);
+    }
+
+    #[test]
+    fn test_paths_changed_iterator_copyfrom() {
+        let (_dir, fs) = fs_with_changes(true);
+        let mut root = fs.revision_root(crate::Revnum(2)).unwrap();
+        let changes: Vec<_> = root
+            .paths_changed()
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        let copy = changes
+            .iter()
+            .find(|c| c.path() == "/b.txt")
+            .expect("expected /b.txt change");
+        assert_eq!(copy.copyfrom_path(), Some("/a.txt"));
+        assert_eq!(copy.copyfrom_rev(), Some(crate::Revnum(1)));
+    }
+
+    #[test]
+    fn test_for_each_change_prop_only() {
+        let (_dir, fs) = fs_with_changes(false);
+        let mut root = fs.revision_root(crate::Revnum(2)).unwrap();
+
+        // A property-only change is a Modify with props modified but text not.
+        let mut seen = None;
+        root.for_each_change(|change| {
+            if change.path() == "/a.txt" {
+                seen = Some((
+                    change.change_kind(),
+                    change.text_modified(),
+                    change.props_modified(),
+                ));
+            }
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(seen, Some((crate::FsPathChangeKind::Modify, false, true)));
+    }
+
+    #[test]
+    fn test_for_each_change_early_exit() {
+        let (_dir, fs) = fs_with_changes(true);
+        let mut root = fs.revision_root(crate::Revnum(2)).unwrap();
+
+        // Returning Err stops the traversal and propagates.
+        let mut seen = 0;
+        let result = root.for_each_change(|_| {
+            seen += 1;
+            Err(Error::from_message("stop"))
+        });
+        assert!(result.is_err());
+        assert_eq!(seen, 1);
     }
 
     #[test]
