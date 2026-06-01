@@ -967,7 +967,9 @@ mod tests {
             ranges
                 .iter()
                 .map(|r| match (r.start, r.end) {
-                    (Revision::Number(s), Revision::Number(e)) => (s.0, e.0),
+                    // svn_revnum_t is a C long (i32 on Windows, i64 elsewhere),
+                    // so cast to i64 to keep these assertions portable.
+                    (Revision::Number(s), Revision::Number(e)) => (s.0 as i64, e.0 as i64),
                     other => panic!("expected numeric ranges, got {:?}", other),
                 })
                 .collect()
@@ -991,8 +993,8 @@ mod tests {
             );
             for &(start, end, inheritable) in ranges {
                 let range: *mut subversion_sys::svn_merge_range_t = pool.calloc();
-                (*range).start = start;
-                (*range).end = end;
+                (*range).start = start as subversion_sys::svn_revnum_t;
+                (*range).end = end as subversion_sys::svn_revnum_t;
                 (*range).inheritable = inheritable as subversion_sys::svn_boolean_t;
                 let slot =
                     apr_sys::apr_array_push(ptr) as *mut *mut subversion_sys::svn_merge_range_t;
