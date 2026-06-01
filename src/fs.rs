@@ -3943,6 +3943,86 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
+    fn test_fs_path_from_canonical() {
+        // An already-canonical absolute path is accepted unchanged.
+        let p = FsPath::from_canonical("/trunk/file.txt").unwrap();
+        assert_eq!(p.as_str(), "/trunk/file.txt");
+
+        // An empty path is treated as the root.
+        assert_eq!(FsPath::from_canonical("").unwrap().as_str(), "/");
+
+        // A relative path is rejected.
+        assert!(FsPath::from_canonical("trunk/file.txt").is_err());
+
+        // A non-canonical absolute path is rejected by from_canonical.
+        assert!(FsPath::from_canonical("/trunk//file.txt").is_err());
+    }
+
+    #[test]
+    fn test_fs_path_canonicalize() {
+        // Already canonical: returned unchanged.
+        assert_eq!(
+            FsPath::canonicalize("/trunk/file.txt").unwrap().as_str(),
+            "/trunk/file.txt"
+        );
+
+        // Non-canonical (double slash, trailing slash) is canonicalized.
+        assert_eq!(
+            FsPath::canonicalize("/trunk//file.txt/").unwrap().as_str(),
+            "/trunk/file.txt"
+        );
+
+        // Empty -> root, relative -> error.
+        assert_eq!(FsPath::canonicalize("").unwrap().as_str(), "/");
+        assert!(FsPath::canonicalize("relative").is_err());
+    }
+
+    #[test]
+    fn test_fs_path_display_and_try_from() {
+        let p = FsPath::canonicalize("/a/b").unwrap();
+        assert_eq!(format!("{}", p), "/a/b");
+
+        let from_str: FsPath = "/x//y/".try_into().unwrap();
+        assert_eq!(from_str.as_str(), "/x/y");
+
+        let from_string: FsPath = String::from("/m/n").try_into().unwrap();
+        assert_eq!(from_string.as_str(), "/m/n");
+    }
+
+    #[test]
+    fn test_fs_path_and_type_accessors() {
+        let dir = tempdir().unwrap();
+        let fs_path = dir.path().join("fs");
+        let fs = Fs::create(&fs_path).unwrap();
+
+        // path() returns the filesystem's own location.
+        assert_eq!(fs.path(), fs_path);
+        // The default backend is FSFS.
+        assert_eq!(super::fs_type(&fs_path).unwrap(), "fsfs");
+        // A fresh filesystem has a 36-character UUID.
+        assert_eq!(fs.get_uuid().unwrap().len(), 36);
+    }
+
+    #[test]
+    fn test_fs_youngest_revision_after_commit() {
+        let dir = tempdir().unwrap();
+        let fs = Fs::create(&dir.path().join("fs")).unwrap();
+
+        // Empty filesystem is at revision 0.
+        assert_eq!(fs.youngest_revision().unwrap(), crate::Revnum(0));
+
+        // After committing a change, the youngest revision becomes 1, so the
+        // value is read from the filesystem rather than defaulted.
+        let mut txn = fs.begin_txn(crate::Revnum(0), 0).unwrap();
+        {
+            let mut root = txn.root().unwrap();
+            root.make_dir("/trunk").unwrap();
+        }
+        txn.commit().unwrap();
+        assert_eq!(fs.youngest_revision().unwrap(), crate::Revnum(1));
+    }
+
+    #[test]
     fn test_fs_create_and_open() {
         let dir = tempdir().unwrap();
         let fs_path = dir.path().join("test-fs");
@@ -4159,20 +4239,26 @@ mod tests {
     }
 
     #[test]
-    fn test_fs_path_change_accessors() {
-        // Test FsPathChange accessors with a mock pointer
-        // Note: This is a basic test since we can't easily create real path changes
-        // without complex repository operations
-        // We can at least test the structure exists and compiles
-        // Real integration tests would require creating actual commits
-    }
-
-    #[test]
     fn test_fs_dir_entry_accessors() {
-        // Test FsDirEntry accessors
-        // Note: This is a basic test since we need actual directory entries
-        // We can at least test the structure exists and compiles
-        // Real integration tests would require creating actual files/directories
+        let dir = tempdir().unwrap();
+        let fs = Fs::create(&dir.path().join("fs")).unwrap();
+
+        let mut txn = fs.begin_txn(crate::Revnum(0), 0).unwrap();
+        {
+            let mut root = txn.root().unwrap();
+            root.make_file("/readme.txt").unwrap();
+        }
+        txn.commit().unwrap();
+
+        let root = fs.revision_root(crate::Revnum(1)).unwrap();
+        let entries = root.dir_entries("/").unwrap();
+        let entry = entries.get("readme.txt").expect("readme.txt present");
+
+        assert_eq!(entry.name(), "readme.txt");
+        assert_eq!(entry.kind(), crate::NodeKind::File);
+        // The node id is an opaque multi-byte string, not a single byte.
+        let id = entry.id().expect("entry should have an id");
+        assert!(id.len() > 1, "node id should be multi-byte, got {:?}", id);
     }
 
     #[test]
