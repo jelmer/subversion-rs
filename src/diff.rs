@@ -1046,10 +1046,10 @@ mod tests {
     fn test_parse_patch_file_and_hunks() -> Result<(), Box<dyn std::error::Error>> {
         let temp_dir = tempdir()?;
         let patch_path = temp_dir.path().join("change.patch");
-        // One file, one hunk: insert a line between line2 and line3. Leading
+        // One file, one hunk whose every coordinate is distinct and not 0/1, so
+        // the per-accessor constant-replacement mutants are all caught. Leading
         // spaces on context lines are significant, so avoid line continuations.
-        let patch =
-            "--- a/file.txt\n+++ b/file.txt\n@@ -1,3 +1,4 @@\n line1\n line2\n+inserted\n line3\n";
+        let patch = "--- a/file.txt\n+++ b/file.txt\n@@ -5,4 +8,5 @@\n c1\n c2\n-old\n+new1\n+new2\n c3\n c4\n";
         std::fs::write(&patch_path, patch)?;
 
         let mut patch_file = PatchFile::open(&patch_path)?;
@@ -1064,18 +1064,43 @@ mod tests {
         let hunks = patch.hunks();
         assert_eq!(hunks.len(), 1);
         let hunk = &hunks[0];
-        // Header was "@@ -1,3 +1,4 @@".
-        assert_eq!(hunk.original_start(), 1);
-        assert_eq!(hunk.original_length(), 3);
-        assert_eq!(hunk.modified_start(), 1);
-        assert_eq!(hunk.modified_length(), 4);
-        // Two context lines precede the insertion, one follows it.
+        // Original side starts at line 5, modified side at line 8; two context
+        // lines lead and two trail the single changed line.
+        assert_eq!(hunk.original_start(), 5);
+        assert_eq!(hunk.original_length(), 5);
+        assert_eq!(hunk.modified_start(), 8);
+        assert_eq!(hunk.modified_length(), 6);
         assert_eq!(hunk.leading_context(), 2);
-        assert_eq!(hunk.trailing_context(), 1);
+        assert_eq!(hunk.trailing_context(), 2);
 
         // The file contains only one patch.
         assert!(patch_file.next_patch(false, false)?.is_none());
 
         Ok(())
+    }
+
+    #[test]
+    fn test_patch_operation_from() {
+        use subversion_sys::*;
+        assert_eq!(
+            PatchOperation::from(svn_diff_operation_kind_e_svn_diff_op_unchanged),
+            PatchOperation::Unchanged
+        );
+        assert_eq!(
+            PatchOperation::from(svn_diff_operation_kind_e_svn_diff_op_added),
+            PatchOperation::Added
+        );
+        assert_eq!(
+            PatchOperation::from(svn_diff_operation_kind_e_svn_diff_op_deleted),
+            PatchOperation::Deleted
+        );
+        assert_eq!(
+            PatchOperation::from(svn_diff_operation_kind_e_svn_diff_op_copied),
+            PatchOperation::Copied
+        );
+        assert_eq!(
+            PatchOperation::from(svn_diff_operation_kind_e_svn_diff_op_moved),
+            PatchOperation::Moved
+        );
     }
 }
