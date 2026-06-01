@@ -2114,6 +2114,43 @@ mod tests {
         assert_eq!(super::version().major(), 1);
     }
 
+    #[test]
+    fn test_txdelta_window_from_parts_and_accessors() {
+        // Distinct, non-default values so each accessor's constant-replacement
+        // mutant is caught.
+        let ops = [(0i32, 7u64, 3u64), (1, 0, 4)];
+        let new_data = b"abcd";
+        let window = TxDeltaWindow::from_parts(11, 5, 9, 2, &ops, new_data);
+
+        assert_eq!(window.sview_offset(), 11);
+        assert_eq!(window.sview_len(), 5);
+        assert_eq!(window.tview_len(), 9);
+        assert_eq!(window.src_ops(), 2);
+        assert_eq!(window.ops(), vec![(0, 7, 3), (1, 0, 4)]);
+        assert_eq!(window.new_data(), b"abcd");
+    }
+
+    #[test]
+    fn test_txdelta_window_empty_ops_and_data() {
+        let window = TxDeltaWindow::from_parts(0, 0, 0, 0, &[], &[]);
+        assert!(window.ops().is_empty());
+        assert_eq!(window.new_data(), b"");
+    }
+
+    #[test]
+    fn test_txdelta_window_dup_preserves_fields() {
+        let ops = [(2i32, 1u64, 6u64)];
+        let window = TxDeltaWindow::from_parts(4, 8, 12, 1, &ops, b"xy");
+        let dup = window.dup();
+
+        assert_eq!(dup.sview_offset(), 4);
+        assert_eq!(dup.sview_len(), 8);
+        assert_eq!(dup.tview_len(), 12);
+        assert_eq!(dup.src_ops(), 1);
+        assert_eq!(dup.ops(), vec![(2, 1, 6)]);
+        assert_eq!(dup.new_data(), b"xy");
+    }
+
     // Simple test editor to use in our tests
     use std::cell::RefCell;
     use std::rc::Rc;
