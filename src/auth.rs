@@ -1802,6 +1802,49 @@ mod tests {
     }
 
     #[test]
+    fn test_ssl_client_cert_credentials() {
+        let pool = apr::Pool::new();
+        let creds = SslClientCertCredentials::new("/path/to/cert.p12".to_string(), true, &pool);
+        assert_eq!(creds.cert_file(), "/path/to/cert.p12");
+        assert!(creds.may_save());
+
+        let not_saved = SslClientCertCredentials::new("/other".to_string(), false, &pool);
+        assert!(!not_saved.may_save());
+    }
+
+    #[test]
+    fn test_ssl_client_cert_credentials_downcast() {
+        let pool = apr::Pool::new();
+        let creds = SslClientCertCredentials::new("/cert".to_string(), true, &pool);
+        // The downcast accessor returns the same credentials.
+        assert_eq!(
+            creds.as_ssl_client_cert().map(|c| c.cert_file()),
+            Some("/cert")
+        );
+    }
+
+    #[test]
+    fn test_ssl_client_cert_pw_credentials() {
+        let pool = apr::Pool::new();
+        let creds = SslClientCertPwCredentials::new("secret".to_string(), true, &pool);
+        assert_eq!(creds.password(), "secret");
+        assert!(creds.may_save());
+
+        let not_saved = SslClientCertPwCredentials::new("pw".to_string(), false, &pool);
+        assert!(!not_saved.may_save());
+    }
+
+    #[test]
+    fn test_ssl_client_cert_pw_credentials_downcast() {
+        let pool = apr::Pool::new();
+        let creds = SslClientCertPwCredentials::new("secret".to_string(), true, &pool);
+        assert_eq!(
+            creds.as_ssl_client_cert_pw().map(|c| c.password()),
+            Some("secret")
+        );
+    }
+
+    #[test]
     fn test_simple_credentials_set_username() {
         let pool = apr::Pool::new();
         let mut creds =

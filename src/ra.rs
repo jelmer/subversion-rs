@@ -231,7 +231,7 @@ extern "C" fn wrap_lock_func(
 }
 
 /// Options for the do_diff operation
-pub struct DoDiffOptions<'a> {
+pub struct DoDiffOptions<'a, 'pool> {
     /// Depth of the diff operation.
     pub depth: crate::Depth,
     /// Whether to ignore ancestry.
@@ -241,12 +241,16 @@ pub struct DoDiffOptions<'a> {
     /// URL to compare against.
     pub versus_url: &'a str,
     /// Editor to receive diff callbacks.
-    pub diff_editor: &'a mut crate::delta::WrapEditor<'a>,
+    ///
+    /// The editor's own lifetime (`'pool`) is independent of the borrow
+    /// (`'a`), so holding these options does not pin the editor for its whole
+    /// lifetime.
+    pub diff_editor: &'a mut crate::delta::WrapEditor<'pool>,
 }
 
-impl<'a> DoDiffOptions<'a> {
+impl<'a, 'pool> DoDiffOptions<'a, 'pool> {
     /// Creates new diff options with default settings.
-    pub fn new(versus_url: &'a str, diff_editor: &'a mut crate::delta::WrapEditor<'a>) -> Self {
+    pub fn new(versus_url: &'a str, diff_editor: &'a mut crate::delta::WrapEditor<'pool>) -> Self {
         Self {
             depth: crate::Depth::Infinity,
             ignore_ancestry: false,
@@ -2156,7 +2160,7 @@ impl<'a> Session<'a> {
         &'s mut self,
         revision: Revnum,
         diff_target: &str,
-        options: &mut DoDiffOptions<'s>,
+        options: &mut DoDiffOptions<'_, 's>,
     ) -> Result<Box<dyn Reporter + Send + 's>, Error<'s>> {
         let pool = Pool::new();
 
@@ -2762,6 +2766,60 @@ mod tests {
     use super::*;
     use crate::mergeinfo::MergeinfoInheritance;
     use crate::{LocationSegment, Lock};
+
+    #[test]
+    fn test_relpath_canonicalize() {
+        // A leading slash is stripped and the path is canonicalized.
+        assert_eq!(RelPath::canonicalize("/a/b").unwrap().as_str(), "a/b");
+        assert_eq!(RelPath::canonicalize("a//b/").unwrap().as_str(), "a/b");
+        assert_eq!(RelPath::canonicalize("").unwrap().as_str(), "");
+    }
+
+    #[test]
+    fn test_relpath_from_canonical() {
+        // An already-canonical relative path is accepted unchanged.
+        assert_eq!(
+            RelPath::from_canonical("a/b".to_string()).unwrap().as_str(),
+            "a/b"
+        );
+        // Non-canonical (double slash) and absolute paths are rejected.
+        assert!(RelPath::from_canonical("a//b".to_string()).is_err());
+        assert!(RelPath::from_canonical("/a".to_string()).is_err());
+    }
+
+    #[test]
+    fn test_relpath_display_and_try_from() {
+        let p = RelPath::canonicalize("/x/y").unwrap();
+        assert_eq!(format!("{}", p), "x/y");
+
+        let from_str: RelPath = "a/b".try_into().unwrap();
+        assert_eq!(from_str.as_str(), "a/b");
+        let from_string: RelPath = String::from("c/d").try_into().unwrap();
+        assert_eq!(from_string.as_str(), "c/d");
+        // TryFrom uses the strict (from_canonical) path: a leading slash fails.
+        assert!(RelPath::try_from("/abs").is_err());
+    }
+
+    #[test]
+    fn test_get_log_options_builder() {
+        let opts = GetLogOptions::default()
+            .with_limit(5)
+            .with_discover_changed_paths(true)
+            .with_strict_node_history(true)
+            .with_include_merged_revisions(true)
+            .with_revprops(Some(&["svn:log"]));
+        assert_eq!(opts.limit, 5);
+        assert!(opts.discover_changed_paths);
+        assert!(opts.strict_node_history);
+        assert!(opts.include_merged_revisions);
+        assert_eq!(opts.revprops, Some(&["svn:log"][..]));
+
+        // Each setter only changes its own field.
+        let only_limit = GetLogOptions::default().with_limit(3);
+        assert_eq!(only_limit.limit, 3);
+        assert!(!only_limit.discover_changed_paths);
+        assert!(!only_limit.strict_node_history);
+    }
 
     /// Helper function to create a test repository and return its file:// URL
     fn create_test_repo() -> (tempfile::TempDir, String, crate::repos::Repos) {
@@ -4044,9 +4102,27 @@ mod tests {
     }
 
     #[test]
-    fn test_do_diff() {
-        // Test validates that the do_diff function with DoDiffOptions compiles
-        println!("do_diff function with options struct exists and has correct signature");
+    fn test_do_diff_options_builder() {
+        // DoDiffOptions decouples the borrow from the editor's own lifetime,
+        // so it can be built, inspected, and dropped in a normal scope.
+        let mut editor = crate::delta::default_editor(apr::Pool::new());
+        let opts = DoDiffOptions::new("file:///versus", &mut editor)
+            .with_depth(crate::Depth::Files)
+            .with_ignore_ancestry(true)
+            .with_text_deltas(false);
+        assert_eq!(opts.depth, crate::Depth::Files);
+        assert!(opts.ignore_ancestry);
+        assert!(!opts.text_deltas);
+        assert_eq!(opts.versus_url, "file:///versus");
+    }
+
+    #[test]
+    fn test_do_diff_options_defaults() {
+        let mut editor = crate::delta::default_editor(apr::Pool::new());
+        let opts = DoDiffOptions::new("file:///v", &mut editor);
+        assert_eq!(opts.depth, crate::Depth::Infinity);
+        assert!(!opts.ignore_ancestry);
+        assert!(opts.text_deltas);
     }
 
     #[test]

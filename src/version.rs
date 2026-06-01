@@ -392,4 +392,118 @@ mod tests {
         // Reflexivity: v == v
         assert_eq!(v, v, "Version should equal itself (reflexivity)");
     }
+
+    // Synthetic versions let us assert exact getter values independent of the
+    // linked SVN library version, so constant-replacement mutants are caught.
+    const TAG_EMPTY: &[u8] = b"\0";
+    const TAG_DEV: &[u8] = b"-dev\0";
+
+    fn make_version(major: i32, minor: i32, patch: i32, tag: &'static [u8]) -> svn_version_t {
+        svn_version_t {
+            major,
+            minor,
+            patch,
+            tag: tag.as_ptr() as *const std::os::raw::c_char,
+        }
+    }
+
+    #[test]
+    fn test_version_getters_exact() {
+        let raw = make_version(2, 7, 13, TAG_EMPTY);
+        let version = Version(&raw);
+
+        assert_eq!(version.major(), 2);
+        assert_eq!(version.minor(), 7);
+        assert_eq!(version.patch(), 13);
+        assert_eq!(version.tag(), "");
+    }
+
+    #[test]
+    fn test_version_tag_non_empty() {
+        let raw = make_version(2, 7, 13, TAG_DEV);
+        let version = Version(&raw);
+        assert_eq!(version.tag(), "-dev");
+    }
+
+    #[test]
+    fn test_version_display_without_tag() {
+        let raw = make_version(2, 7, 13, TAG_EMPTY);
+        let version = Version(&raw);
+        assert_eq!(version.to_string(), "2.7.13");
+    }
+
+    #[test]
+    fn test_version_display_with_tag() {
+        let raw = make_version(2, 7, 13, TAG_DEV);
+        let version = Version(&raw);
+        assert_eq!(version.to_string(), "2.7.13--dev");
+    }
+
+    #[test]
+    fn test_version_debug() {
+        let raw = make_version(2, 7, 13, TAG_DEV);
+        let version = Version(&raw);
+        let debug_str = format!("{:?}", version);
+        assert_eq!(
+            debug_str,
+            "Version { major: 2, minor: 7, patch: 13, tag: \"-dev\" }"
+        );
+    }
+
+    #[test]
+    fn test_version_equal_and_not_equal() {
+        let a = make_version(1, 2, 3, TAG_EMPTY);
+        let b = make_version(1, 2, 3, TAG_EMPTY);
+        let c = make_version(1, 2, 4, TAG_EMPTY);
+
+        let va = Version(&a);
+        let vb = Version(&b);
+        let vc = Version(&c);
+
+        assert!(va.equal(&vb), "Identical versions should be equal");
+        assert_eq!(va, vb);
+        assert!(!va.equal(&vc), "Differing patch should not be equal");
+        assert_ne!(va, vc);
+    }
+
+    #[test]
+    fn test_version_extended_fields_present() {
+        let ext = VersionExtended::get(true);
+
+        // SVN always records the compile date/time (via __DATE__/__TIME__) and
+        // the build/runtime host triplets, so these are reliably Some.
+        assert!(ext.build_date().is_some(), "build_date should be present");
+        assert!(ext.build_time().is_some(), "build_time should be present");
+        assert!(ext.build_host().is_some(), "build_host should be present");
+        assert!(
+            ext.runtime_host().is_some(),
+            "runtime_host should be present"
+        );
+        assert!(
+            ext.runtime_osname().is_some(),
+            "runtime_osname should be present"
+        );
+    }
+
+    #[test]
+    fn test_version_compatible_and_incompatible() {
+        // compatible(my_version, lib_version): a client built against an older
+        // same-major release is compatible with a newer library.
+        let client = make_version(1, 7, 0, TAG_EMPTY);
+        let library = make_version(1, 9, 0, TAG_EMPTY);
+        let v_client = Version(&client);
+        let v_library = Version(&library);
+        assert!(
+            v_client.compatible(&v_library),
+            "Older same-major client should be compatible with newer library"
+        );
+
+        // Different major version -> not compatible.
+        let other_major = make_version(2, 0, 0, TAG_EMPTY);
+        let v_other = Version(&other_major);
+        assert!(
+            !v_client.compatible(&v_other),
+            "Different major versions should not be compatible"
+        );
+    }
 }

@@ -745,6 +745,156 @@ mod tests {
         }
     }
 
+    fn write_temp_config(contents: &str) -> tempfile::TempPath {
+        use std::io::Write;
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(contents.as_bytes()).unwrap();
+        file.flush().unwrap();
+        file.into_temp_path()
+    }
+
+    const SAMPLE_CONFIG: &str =
+        "[miscellany]\nglobal-ignores = *.o *.tmp\nuse-commit-times = yes\n\n[helpers]\neditor-cmd = vi\n";
+
+    #[test]
+    fn test_read_config_and_get_values() {
+        let path = write_temp_config(SAMPLE_CONFIG);
+        let config = read_config(&path, true).unwrap();
+
+        assert_eq!(
+            config.get(ConfigOption::GlobalIgnores("")).unwrap(),
+            ConfigValue::String("*.o *.tmp".to_string())
+        );
+        assert_eq!(
+            config.get(ConfigOption::EditorCmd("")).unwrap(),
+            ConfigValue::String("vi".to_string())
+        );
+        // use-commit-times = yes -> Bool(true); guards the != mutant in
+        // get_bool_value (a true value must read back as true, not false).
+        assert_eq!(
+            config.get(ConfigOption::UseCommitTimes(false)).unwrap(),
+            ConfigValue::Bool(true)
+        );
+        // An unset bool falls back to its default of false.
+        assert_eq!(
+            config.get(ConfigOption::NoUnlock(false)).unwrap(),
+            ConfigValue::Bool(false)
+        );
+    }
+
+    #[test]
+    fn test_has_section() {
+        let path = write_temp_config(SAMPLE_CONFIG);
+        let config = read_config(&path, true).unwrap();
+
+        assert!(config.has_section("miscellany").unwrap());
+        assert!(config.has_section("helpers").unwrap());
+        assert!(!config.has_section("nonexistent").unwrap());
+    }
+
+    #[test]
+    fn test_set_and_get_round_trip() {
+        let path = write_temp_config(SAMPLE_CONFIG);
+        let mut config = read_config(&path, true).unwrap();
+
+        config.set(ConfigOption::EditorCmd("emacs")).unwrap();
+        assert_eq!(
+            config.get(ConfigOption::EditorCmd("")).unwrap(),
+            ConfigValue::String("emacs".to_string())
+        );
+
+        // Setting into a previously absent section creates it.
+        assert!(!config.has_section("tunnels").unwrap());
+        config
+            .set(ConfigOption::String {
+                section: "tunnels",
+                option: "ssh",
+                value: "$SVN_SSH ssh -q",
+            })
+            .unwrap();
+        assert!(config.has_section("tunnels").unwrap());
+        assert_eq!(
+            config
+                .get(ConfigOption::String {
+                    section: "tunnels",
+                    option: "ssh",
+                    value: ""
+                })
+                .unwrap(),
+            ConfigValue::String("$SVN_SSH ssh -q".to_string())
+        );
+    }
+
+    #[test]
+    fn test_enumerate_sections() {
+        let path = write_temp_config(SAMPLE_CONFIG);
+        let config = read_config(&path, true).unwrap();
+
+        let mut sections = Vec::new();
+        let count = config.enumerate_sections(|name| {
+            sections.push(name.to_string());
+            true
+        });
+        assert_eq!(count, 2);
+        sections.sort();
+        assert_eq!(sections, vec!["helpers", "miscellany"]);
+    }
+
+    #[test]
+    fn test_enumerate_sections_early_stop() {
+        let path = write_temp_config(SAMPLE_CONFIG);
+        let config = read_config(&path, true).unwrap();
+
+        let mut count_calls = 0;
+        let returned = config.enumerate_sections(|_name| {
+            count_calls += 1;
+            false // stop after first
+        });
+        assert_eq!(count_calls, 1);
+        assert_eq!(returned, 1);
+    }
+
+    #[test]
+    fn test_enumerate_options() {
+        let path = write_temp_config(SAMPLE_CONFIG);
+        let config = read_config(&path, true).unwrap();
+
+        let mut opts = Vec::new();
+        let count = config
+            .enumerate("miscellany", |name, value| {
+                opts.push((name.to_string(), value.to_string()));
+                true
+            })
+            .unwrap();
+        assert_eq!(count, 2);
+        opts.sort();
+        assert_eq!(
+            opts,
+            vec![
+                ("global-ignores".to_string(), "*.o *.tmp".to_string()),
+                ("use-commit-times".to_string(), "yes".to_string()),
+            ]
+        );
+    }
+
+    #[cfg(feature = "ra")]
+    #[test]
+    fn test_config_hash_as_mut_ptr_non_null() {
+        let mut hash = get_config_hash(None).unwrap();
+        assert!(!hash.as_mut_ptr().is_null());
+    }
+
+    #[test]
+    fn test_config_as_ptr_non_null() {
+        let path = write_temp_config(SAMPLE_CONFIG);
+        let mut config = read_config(&path, true).unwrap();
+
+        assert!(!config.as_ptr().is_null());
+        let mut_ptr = config.as_mut_ptr();
+        assert!(!mut_ptr.is_null());
+        assert_eq!(mut_ptr as *const _, config.as_ptr());
+    }
+
     #[test]
     fn test_config_value_conversions() {
         let val = ConfigValue::String("test".to_string());

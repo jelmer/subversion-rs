@@ -211,6 +211,69 @@ mod tests {
         assert!(result.is_err());
     }
 
+    // A self-signed test certificate (CN=test.example.com, O=Test Org) with
+    // subjectAltNames test.example.com and alt.example.com. Generated with
+    // `openssl req -x509`. Used to exercise the success path of cert parsing.
+    const TEST_CERT_PEM: &str = "-----BEGIN CERTIFICATE-----
+MIIDbDCCAlSgAwIBAgIUCAeaZuicutxOVaVBKFdCi/tjL7IwDQYJKoZIhvcNAQEL
+BQAwLjEZMBcGA1UEAwwQdGVzdC5leGFtcGxlLmNvbTERMA8GA1UECgwIVGVzdCBP
+cmcwHhcNMjYwNjAxMTAwNTAwWhcNMzYwNTI5MTAwNTAwWjAuMRkwFwYDVQQDDBB0
+ZXN0LmV4YW1wbGUuY29tMREwDwYDVQQKDAhUZXN0IE9yZzCCASIwDQYJKoZIhvcN
+AQEBBQADggEPADCCAQoCggEBAMDTQdPvvJqqa6wT16jiDZJUmwgs5XQ+Dxc5Xvvd
+QzWoi5uouPDbxwdbu5bBaLwabaW0IvVwec4ZmVT012EWy6q5KBbvEldlUjrH1utR
+dNi2isE1Jt5mZKeMF8ANjjpBGppt08hB18iIvgHWyE5lCd3SvvGfo1bYfmR7QMcm
+c+X6f82UJgaNwp6R6X4yjxOyrvO9PjTGOrw/CYdVuPOBUAuOa0bOOl7k7+qMTjnl
+WQh7jpj7EImRFheNvsv291zVh1U1imo17o0Q3XwsEEd8UP2zGkd9MlpuF3Dw4pJX
+MjirODGKxyw2jVqOk4PbP1Sk1EXeQvc1DYzinGem+l+oNgMCAwEAAaOBgTB/MB0G
+A1UdDgQWBBTcGCNnGHnxrsv7D3woCSzIY2OuTzAfBgNVHSMEGDAWgBTcGCNnGHnx
+rsv7D3woCSzIY2OuTzAPBgNVHRMBAf8EBTADAQH/MCwGA1UdEQQlMCOCEHRlc3Qu
+ZXhhbXBsZS5jb22CD2FsdC5leGFtcGxlLmNvbTANBgkqhkiG9w0BAQsFAAOCAQEA
+N3bhFE+mJUqwc5AU2kS0oeQ/JwupKZRFWNnb1rlIx73YD+4pKol3xLJ1H0wcLnA3
++ZeGX288ASCwZ2+EfyY56GyOujLz0j0shkV1zuyWAENHCkhRK5Hl9IQFBiAb+wNo
+3XnjQFtF+oZGs7rjvgb/ozay2YzTM2fiUqANBjARSrPNbtgDfa5U2Php1jCNxIDH
+J3HKhSFpt9jlb+3dvhq9ShlcmV2F5y/glfGVRsFZvJBW4sYO/lcT58zIylnwN2oV
+ebn+krKm/zqHOQhbSju7gb0iuY9ZFIN/+QfSJNd7n/hAfWW5IslhexkctzcGjWiW
+kgT02u0H17qYrydWSGau0A==
+-----END CERTIFICATE-----";
+
+    #[test]
+    fn test_parse_certificate_pem_success() {
+        let info = parse_certificate_pem(TEST_CERT_PEM).unwrap();
+
+        assert_eq!(info.subject, "CN=test.example.com, O=Test Org");
+        assert_eq!(info.issuer, "CN=test.example.com, O=Test Org");
+        assert_eq!(
+            info.subject_alt_names,
+            vec![
+                "test.example.com".to_string(),
+                "alt.example.com".to_string()
+            ]
+        );
+
+        // Fingerprint is 20 SHA-1 bytes rendered as colon-separated hex.
+        assert_eq!(info.fingerprint.matches(':').count(), 19);
+        assert!(!info.fingerprint.is_empty());
+
+        // Validity window: both times are after the Unix epoch and ordered.
+        assert!(info.valid_from > UNIX_EPOCH);
+        assert!(info.valid_until > UNIX_EPOCH);
+        assert!(info.valid_from < info.valid_until);
+    }
+
+    #[test]
+    fn test_parse_certificate_der_success() {
+        // Decode the PEM body ourselves and feed DER directly.
+        let base64_body: String = TEST_CERT_PEM
+            .lines()
+            .filter(|l| !l.starts_with("-----"))
+            .collect();
+        let der = crate::base64::decode(&base64_body).unwrap();
+
+        let info = parse_certificate_der(&der).unwrap();
+        assert_eq!(info.subject, "CN=test.example.com, O=Test Org");
+        assert_eq!(info.fingerprint.matches(':').count(), 19);
+    }
+
     #[test]
     fn test_calculate_fingerprint() {
         let cert_data = vec![0x30, 0x82, 0x02, 0x5c]; // Fake certificate data

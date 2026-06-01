@@ -136,4 +136,23 @@ mod tests {
         // When no revision is specified, it should remain unspecified
         assert!(matches!(revision, Revision::Unspecified));
     }
+
+    #[test]
+    fn test_resolve_revisions_url_defaults_peg_to_head() {
+        // For a URL target with an unspecified peg revision, SVN resolves the
+        // peg revision to HEAD while leaving the operative revision untouched.
+        let (peg, op) = resolve_revisions(
+            &Revision::Unspecified,
+            &Revision::Number(crate::Revnum(5)),
+            true,
+            false,
+        )
+        .unwrap();
+
+        assert!(matches!(peg, Revision::Head), "peg should resolve to Head");
+        assert!(
+            matches!(op, Revision::Number(crate::Revnum(5))),
+            "operative revision should be preserved"
+        );
+    }
 }

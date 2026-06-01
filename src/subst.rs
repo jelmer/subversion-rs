@@ -1010,4 +1010,60 @@ mod tests {
         let content = std::fs::read_to_string(&dst).unwrap();
         assert_eq!(content, "Hello\nWorld\n");
     }
+
+    #[test]
+    fn test_translate_cstring_expands_keyword() {
+        let mut keywords = HashMap::new();
+        keywords.insert("Author".to_string(), "alice".to_string());
+
+        let expanded =
+            translate_cstring("$Author$\n", Some("\n"), false, Some(&keywords), true).unwrap();
+        assert_eq!(expanded, "$Author: alice $\n");
+
+        // Without expansion the keyword is left collapsed.
+        let collapsed =
+            translate_cstring("$Author$\n", Some("\n"), false, Some(&keywords), false).unwrap();
+        assert_eq!(collapsed, "$Author$\n");
+    }
+
+    #[test]
+    fn test_translate_stream_expands_keyword() {
+        let content = b"$Author$\n";
+        let mut source = crate::io::Stream::from(&content[..]);
+        let mut stringbuf = crate::io::StringBuf::new();
+
+        let mut keywords = HashMap::new();
+        keywords.insert("Author".to_string(), "alice".to_string());
+
+        {
+            let mut dest = crate::io::Stream::from_stringbuf(&mut stringbuf);
+            translate_stream(
+                &mut source,
+                &mut dest,
+                Some("\n"),
+                false,
+                Some(&keywords),
+                true,
+            )
+            .unwrap();
+        }
+        assert_eq!(stringbuf.to_string(), "$Author: alice $\n");
+    }
+
+    #[test]
+    fn test_copy_and_translate_expands_keyword() {
+        let td = tempfile::tempdir().unwrap();
+        let src = td.path().join("src.txt");
+        let dst = td.path().join("dst.txt");
+
+        std::fs::write(&src, "$Author$\n").unwrap();
+
+        let mut keywords = HashMap::new();
+        keywords.insert("Author".to_string(), "alice".to_string());
+
+        copy_and_translate(&src, &dst, Some("\n"), false, Some(&keywords), true, false).unwrap();
+
+        let content = std::fs::read_to_string(&dst).unwrap();
+        assert_eq!(content, "$Author: alice $\n");
+    }
 }

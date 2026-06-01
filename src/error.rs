@@ -1375,8 +1375,9 @@ mod tests {
             );
         }
 
-        // Test that the function doesn't panic with various inputs
-        let _ = symbolic_name(0.into());
+        // Status 0 (SVN_NO_ERROR) always has a known symbolic name; asserting
+        // this guards against symbolic_name() degenerating to always-None.
+        assert_eq!(symbolic_name(0.into()), Some("SVN_NO_ERROR"));
         let _ = symbolic_name(999999.into());
     }
 

@@ -2368,6 +2368,187 @@ mod tests {
     }
 
     #[test]
+    fn test_load_uuid_round_trip() {
+        for variant in [LoadUUID::Default, LoadUUID::Ignore, LoadUUID::Force] {
+            let raw: subversion_sys::svn_repos_load_uuid = variant.into();
+            assert_eq!(LoadUUID::from(raw), variant);
+        }
+        // Each Rust variant maps to the matching SVN constant.
+        assert_eq!(
+            subversion_sys::svn_repos_load_uuid::from(LoadUUID::Default),
+            subversion_sys::svn_repos_load_uuid_svn_repos_load_uuid_default
+        );
+        assert_eq!(
+            subversion_sys::svn_repos_load_uuid::from(LoadUUID::Ignore),
+            subversion_sys::svn_repos_load_uuid_svn_repos_load_uuid_ignore
+        );
+        assert_eq!(
+            subversion_sys::svn_repos_load_uuid::from(LoadUUID::Force),
+            subversion_sys::svn_repos_load_uuid_svn_repos_load_uuid_force
+        );
+    }
+
+    #[test]
+    fn test_dump_options_builder() {
+        let opts = DumpOptions::new()
+            .with_start_rev(Revnum(2))
+            .with_end_rev(Revnum(7))
+            .with_incremental(true)
+            .with_use_deltas(true)
+            .with_include_revprops(true)
+            .with_include_changes(true);
+        assert_eq!(opts.start_rev, Some(Revnum(2)));
+        assert_eq!(opts.end_rev, Some(Revnum(7)));
+        assert!(opts.incremental);
+        assert!(opts.use_deltas);
+        assert!(opts.include_revprops);
+        assert!(opts.include_changes);
+
+        // Defaults, and that each setter only touches its own field.
+        let only_incremental = DumpOptions::new().with_incremental(true);
+        assert_eq!(only_incremental.start_rev, None);
+        assert!(only_incremental.incremental);
+        assert!(!only_incremental.use_deltas);
+    }
+
+    #[test]
+    fn test_load_options_builder() {
+        let opts = LoadOptions::new()
+            .with_start_rev(Revnum(1))
+            .with_end_rev(Revnum(9))
+            .with_uuid_action(LoadUUID::Force)
+            .with_parent_dir("trunk")
+            .with_use_pre_commit_hook(true)
+            .with_use_post_commit_hook(true)
+            .with_validate_props(true)
+            .with_ignore_dates(true)
+            .with_normalize_props(true);
+        assert_eq!(opts.start_rev, Some(Revnum(1)));
+        assert_eq!(opts.end_rev, Some(Revnum(9)));
+        assert_eq!(opts.uuid_action, LoadUUID::Force);
+        assert_eq!(opts.parent_dir, Some("trunk"));
+        assert!(opts.use_pre_commit_hook);
+        assert!(opts.use_post_commit_hook);
+        assert!(opts.validate_props);
+        assert!(opts.ignore_dates);
+        assert!(opts.normalize_props);
+    }
+
+    #[test]
+    fn test_verify_options_builder() {
+        let opts = VerifyOptions::new()
+            .with_start_rev(Revnum(3))
+            .with_end_rev(Revnum(5))
+            .with_check_normalization(true)
+            .with_metadata_only(true);
+        assert_eq!(opts.start_rev, Revnum(3));
+        assert_eq!(opts.end_rev, Revnum(5));
+        assert!(opts.check_normalization);
+        assert!(opts.metadata_only);
+
+        let only_meta = VerifyOptions::new().with_metadata_only(true);
+        assert!(only_meta.metadata_only);
+        assert!(!only_meta.check_normalization);
+    }
+
+    #[test]
+    fn test_authz_access_from_raw() {
+        use subversion_sys::{
+            svn_repos_authz_access_t_svn_authz_none as NONE,
+            svn_repos_authz_access_t_svn_authz_read as READ,
+            svn_repos_authz_access_t_svn_authz_write as WRITE,
+        };
+        assert_eq!(AuthzAccess::from_raw(NONE), AuthzAccess::None);
+        assert_eq!(AuthzAccess::from_raw(READ), AuthzAccess::Read);
+        assert_eq!(AuthzAccess::from_raw(WRITE), AuthzAccess::Write);
+        assert_eq!(AuthzAccess::from_raw(READ | WRITE), AuthzAccess::ReadWrite);
+    }
+
+    #[test]
+    fn test_authz_access_into_raw() {
+        use subversion_sys::{
+            svn_repos_authz_access_t_svn_authz_none as NONE,
+            svn_repos_authz_access_t_svn_authz_read as READ,
+            svn_repos_authz_access_t_svn_authz_write as WRITE,
+        };
+        assert_eq!(
+            subversion_sys::svn_repos_authz_access_t::from(AuthzAccess::None),
+            NONE
+        );
+        assert_eq!(
+            subversion_sys::svn_repos_authz_access_t::from(AuthzAccess::Read),
+            READ
+        );
+        assert_eq!(
+            subversion_sys::svn_repos_authz_access_t::from(AuthzAccess::Write),
+            WRITE
+        );
+        assert_eq!(
+            subversion_sys::svn_repos_authz_access_t::from(AuthzAccess::ReadWrite),
+            READ | WRITE
+        );
+    }
+
+    #[test]
+    fn test_repos_path_accessors() {
+        let td = tempfile::tempdir().unwrap();
+        let mut repos = super::Repos::create(td.path()).unwrap();
+        let root = repos.path();
+
+        // Every subdirectory path lies under the repository root and ends in
+        // the expected component, so each accessor must return its real value.
+        assert!(repos.db_env().starts_with(&root));
+        assert!(repos.conf_dir().starts_with(&root));
+        assert!(repos.conf_dir().ends_with("conf"));
+        assert!(repos.svnserve_conf().ends_with("svnserve.conf"));
+        assert!(repos.lock_dir().starts_with(&root));
+        assert!(repos.lock_dir().ends_with("locks"));
+        assert!(repos.db_lockfile().starts_with(&root));
+        assert!(repos.db_logs_lockfile().starts_with(&root));
+        assert!(repos.hook_dir().starts_with(&root));
+        assert!(repos.hook_dir().ends_with("hooks"));
+
+        // FSFS is the default backend.
+        assert_eq!(repos.fs_type(), "fsfs");
+    }
+
+    #[test]
+    fn test_repos_uuid_and_youngest_rev() {
+        let td = tempfile::tempdir().unwrap();
+        let repos = super::Repos::create(td.path()).unwrap();
+
+        // A fresh repository starts at revision 0.
+        assert_eq!(repos.youngest_rev().unwrap(), Revnum(0));
+
+        // After one commit the youngest revision advances to 1, so the value
+        // is genuinely read from the repository rather than defaulted to 0.
+        let mut txn = repos
+            .begin_txn_for_commit(Revnum(0), "author", "add trunk")
+            .unwrap();
+        {
+            let mut root = txn.root().unwrap();
+            root.make_dir("/trunk").unwrap();
+        }
+        let (new_rev, conflict) = repos.commit_txn(txn).unwrap();
+        assert_eq!(new_rev, Revnum(1));
+        assert_eq!(conflict, None);
+        assert_eq!(repos.youngest_rev().unwrap(), Revnum(1));
+
+        // The auto-assigned UUID is a 36-character formatted UUID; round-trip
+        // a known value through set_uuid/uuid.
+        let original = repos.uuid().unwrap();
+        assert_eq!(original.len(), 36);
+
+        repos
+            .set_uuid("550e8400-e29b-41d4-a716-446655440000")
+            .unwrap();
+        assert_eq!(
+            repos.uuid().unwrap(),
+            "550e8400-e29b-41d4-a716-446655440000"
+        );
+    }
+
+    #[test]
     fn test_load_fs_segfault_reproduction() {
         // Create a test repository
         let temp_dir = tempfile::tempdir().unwrap();

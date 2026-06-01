@@ -208,11 +208,17 @@ impl Mergeinfo {
                     .to_string();
 
                 let mut ranges = Vec::new();
-                let array = apr::tables::TypedArray::<subversion_sys::svn_merge_range_t>::from_ptr(
-                    rangelist as *const _ as *mut _,
-                );
+                // The rangelist holds `svn_merge_range_t *` pointers.
+                let array =
+                    apr::tables::TypedArray::<*mut subversion_sys::svn_merge_range_t>::from_ptr(
+                        rangelist as *const _ as *mut _,
+                    );
 
-                for range in array.iter() {
+                for range_ptr in array.iter() {
+                    if range_ptr.is_null() {
+                        continue;
+                    }
+                    let range = &*range_ptr;
                     ranges.push(crate::RevisionRange {
                         start: Revision::Number(Revnum(range.start)),
                         end: Revision::Number(Revnum(range.end)),
@@ -347,11 +353,13 @@ impl Rangelist {
     /// Create a new empty rangelist.
     pub fn new() -> Self {
         let pool = apr::Pool::new();
+        // An svn_rangelist_t is an apr_array_header_t of `svn_merge_range_t *`
+        // pointers, so each element is pointer-sized, not the struct itself.
         let ptr = unsafe {
             apr_sys::apr_array_make(
                 pool.as_mut_ptr(),
                 0,
-                std::mem::size_of::<subversion_sys::svn_merge_range_t>() as i32,
+                std::mem::size_of::<*mut subversion_sys::svn_merge_range_t>() as i32,
             )
         };
         Self { ptr, pool }
@@ -500,9 +508,16 @@ impl Rangelist {
         }
 
         unsafe {
-            let array =
-                apr::tables::TypedArray::<subversion_sys::svn_merge_range_t>::from_ptr(self.ptr);
-            array.iter().map(MergeRange::from).collect()
+            // The array holds `svn_merge_range_t *` pointers, so read each
+            // element as a pointer and dereference it.
+            let array = apr::tables::TypedArray::<*mut subversion_sys::svn_merge_range_t>::from_ptr(
+                self.ptr,
+            );
+            array
+                .iter()
+                .filter(|p| !p.is_null())
+                .map(|p| MergeRange::from(&*p))
+                .collect()
         }
     }
 
@@ -823,5 +838,241 @@ mod tests {
         let catalog = MergeinfoCatalog::new();
         let paths = catalog.paths();
         assert!(paths.is_empty());
+    }
+
+    /// Build a catalog containing one entry keyed by `path`, holding the
+    /// mergeinfo parsed from `mergeinfo`. The mergeinfo's pool is leaked into
+    /// the catalog's pool ownership via insertion, which is fine for tests.
+    fn populated_catalog(path: &str, mergeinfo: &str) -> MergeinfoCatalog {
+        let catalog = MergeinfoCatalog::new();
+        let mi = Mergeinfo::parse(mergeinfo).unwrap();
+        unsafe {
+            let key = std::ffi::CString::new(path).unwrap();
+            let key_ptr = apr_sys::apr_pstrdup(catalog.pool.as_mut_ptr(), key.as_ptr());
+            // Duplicate the mergeinfo into the catalog pool so it outlives `mi`.
+            let mi_dup = subversion_sys::svn_mergeinfo_dup(mi.ptr, catalog.pool.as_mut_ptr());
+            apr_sys::apr_hash_set(
+                catalog.ptr,
+                key_ptr as *const std::ffi::c_void,
+                apr_sys::APR_HASH_KEY_STRING as apr_sys::apr_ssize_t,
+                mi_dup as *const std::ffi::c_void,
+            );
+        }
+        catalog
+    }
+
+    #[test]
+    fn test_mergeinfo_catalog_populated_len_and_paths() {
+        let catalog = populated_catalog("/trunk", "/branch:1-3");
+        assert!(!catalog.is_empty());
+        assert_eq!(catalog.len(), 1);
+        assert_eq!(catalog.paths(), vec!["/trunk".to_string()]);
+    }
+
+    #[test]
+    fn test_mergeinfo_catalog_dup_populated() {
+        let catalog = populated_catalog("/trunk", "/branch:1-3");
+        let dup = catalog.dup();
+        assert_eq!(dup.len(), 1);
+        assert_eq!(dup.paths(), vec!["/trunk".to_string()]);
+    }
+
+    #[test]
+    fn test_inheritance_to_word() {
+        assert_eq!(MergeinfoInheritance::Explicit.to_word(), "explicit");
+        assert_eq!(MergeinfoInheritance::Inherited.to_word(), "inherited");
+        assert_eq!(
+            MergeinfoInheritance::NearestAncestor.to_word(),
+            "nearest-ancestor"
+        );
+    }
+
+    #[test]
+    fn test_inheritance_from_word() {
+        assert_eq!(
+            MergeinfoInheritance::from_word("explicit"),
+            MergeinfoInheritance::Explicit
+        );
+        assert_eq!(
+            MergeinfoInheritance::from_word("inherited"),
+            MergeinfoInheritance::Inherited
+        );
+    }
+
+    #[test]
+    fn test_merge_range_from_ref_inheritable() {
+        let raw = subversion_sys::svn_merge_range_t {
+            start: 1,
+            end: 10,
+            inheritable: 1,
+        };
+        let range = MergeRange::from(&raw);
+        assert_eq!(range.start, Revnum(1));
+        assert_eq!(range.end, Revnum(10));
+        assert!(range.inheritable);
+
+        let raw_non = subversion_sys::svn_merge_range_t {
+            start: 2,
+            end: 5,
+            inheritable: 0,
+        };
+        assert!(!MergeRange::from(&raw_non).inheritable);
+    }
+
+    #[test]
+    fn test_merge_range_from_owned_inheritable() {
+        let raw = subversion_sys::svn_merge_range_t {
+            start: 1,
+            end: 10,
+            inheritable: 1,
+        };
+        assert!(MergeRange::from(raw).inheritable);
+
+        let raw_non = subversion_sys::svn_merge_range_t {
+            start: 1,
+            end: 10,
+            inheritable: 0,
+        };
+        assert!(!MergeRange::from(raw_non).inheritable);
+    }
+
+    #[test]
+    fn test_mergeinfo_merge_combines() {
+        let mut a = Mergeinfo::parse("/trunk:1-3").unwrap();
+        let b = Mergeinfo::parse("/trunk:5-7\n/branch:2").unwrap();
+        a.merge(&b).unwrap();
+        assert_eq!(a.to_string().unwrap(), "/branch:2\n/trunk:1-3,5-7");
+    }
+
+    #[test]
+    fn test_mergeinfo_paths_content() {
+        let mergeinfo = Mergeinfo::parse("/trunk:1-3\n/branch:5").unwrap();
+        let paths = mergeinfo.paths();
+        assert_eq!(paths.len(), 2);
+        assert!(paths.contains_key("/trunk"));
+        assert!(paths.contains_key("/branch"));
+    }
+
+    #[test]
+    fn test_mergeinfo_paths_ranges() {
+        // Regression test: an svn_rangelist_t is an array of svn_merge_range_t
+        // POINTERS, not inline structs. Reading it inline returned garbage
+        // revision numbers; these assertions pin the real values. SVN stores
+        // the range start as exclusive, so "1-3" is the half-open range 0..3.
+        let mergeinfo = Mergeinfo::parse("/trunk:1-3\n/branch:5,7-9").unwrap();
+        let paths = mergeinfo.paths();
+
+        // Extract (start, end) revision numbers from a path's ranges.
+        let nums = |ranges: &[crate::RevisionRange]| -> Vec<(i64, i64)> {
+            ranges
+                .iter()
+                .map(|r| match (r.start, r.end) {
+                    // svn_revnum_t is a C long (i32 on Windows, i64 elsewhere),
+                    // so cast to i64 to keep these assertions portable.
+                    (Revision::Number(s), Revision::Number(e)) => (s.0 as i64, e.0 as i64),
+                    other => panic!("expected numeric ranges, got {:?}", other),
+                })
+                .collect()
+        };
+
+        assert_eq!(nums(&paths["/trunk"]), vec![(0, 3)]);
+        assert_eq!(nums(&paths["/branch"]), vec![(4, 5), (6, 9)]);
+    }
+
+    /// Build a Rangelist populated with the given (start, end, inheritable)
+    /// ranges. An svn_rangelist_t is an array of `svn_merge_range_t *`
+    /// pointers, so each range is allocated in the pool and a pointer to it is
+    /// pushed onto the array.
+    fn populated_rangelist(ranges: &[(i64, i64, bool)]) -> Rangelist {
+        let pool = apr::Pool::new();
+        unsafe {
+            let ptr = apr_sys::apr_array_make(
+                pool.as_mut_ptr(),
+                ranges.len() as i32,
+                std::mem::size_of::<*mut subversion_sys::svn_merge_range_t>() as i32,
+            );
+            for &(start, end, inheritable) in ranges {
+                let range: *mut subversion_sys::svn_merge_range_t = pool.calloc();
+                (*range).start = start as subversion_sys::svn_revnum_t;
+                (*range).end = end as subversion_sys::svn_revnum_t;
+                (*range).inheritable = inheritable as subversion_sys::svn_boolean_t;
+                let slot =
+                    apr_sys::apr_array_push(ptr) as *mut *mut subversion_sys::svn_merge_range_t;
+                *slot = range;
+            }
+            Rangelist::from_ptr_and_pool(ptr as *mut subversion_sys::svn_rangelist_t, pool)
+        }
+    }
+
+    #[test]
+    fn test_rangelist_populated_ranges() {
+        let rl = populated_rangelist(&[(0, 5, true), (10, 15, false)]);
+        assert!(!rl.is_empty());
+        assert_eq!(rl.len(), 2);
+
+        let ranges = rl.ranges();
+        assert_eq!(ranges.len(), 2);
+        assert_eq!(ranges[0], MergeRange::new(Revnum(0), Revnum(5), true));
+        assert_eq!(ranges[1], MergeRange::new(Revnum(10), Revnum(15), false));
+    }
+
+    #[test]
+    fn test_rangelist_to_string_populated() {
+        // Range 0..5 renders as "1-5" in mergeinfo notation (exclusive start).
+        let rl = populated_rangelist(&[(0, 5, true)]);
+        assert_eq!(rl.to_string().unwrap(), "1-5");
+    }
+
+    #[test]
+    fn test_rangelist_dup_populated() {
+        let rl = populated_rangelist(&[(0, 5, true), (10, 15, true)]);
+        let dup = rl.dup();
+        assert_eq!(dup.len(), 2);
+        assert_eq!(dup.to_string().unwrap(), rl.to_string().unwrap());
+    }
+
+    #[test]
+    fn test_rangelist_merge_populated() {
+        let mut a = populated_rangelist(&[(0, 5, true)]);
+        let b = populated_rangelist(&[(5, 10, true)]);
+        a.merge(&b).unwrap();
+        // Adjacent ranges combine into 1-10.
+        assert_eq!(a.to_string().unwrap(), "1-10");
+    }
+
+    #[test]
+    fn test_rangelist_remove_populated() {
+        let whiteboard = populated_rangelist(&[(0, 10, true)]);
+        let eraser = populated_rangelist(&[(2, 5, true)]);
+        let result = Rangelist::remove(&eraser, &whiteboard, true).unwrap();
+        // Removing revs (2,5] from (0,10] leaves (0,2] and (5,10].
+        assert_eq!(result.to_string().unwrap(), "1-2,6-10");
+    }
+
+    #[test]
+    fn test_rangelist_intersect_populated() {
+        let a = populated_rangelist(&[(0, 10, true)]);
+        let b = populated_rangelist(&[(5, 15, true)]);
+        let result = Rangelist::intersect(&a, &b, true).unwrap();
+        assert_eq!(result.to_string().unwrap(), "6-10");
+    }
+
+    #[test]
+    fn test_rangelist_diff_populated() {
+        let from = populated_rangelist(&[(0, 5, true)]);
+        let to = populated_rangelist(&[(0, 10, true)]);
+        let (deleted, added) = Rangelist::diff(&from, &to, true).unwrap();
+        assert!(deleted.is_empty());
+        assert_eq!(added.to_string().unwrap(), "6-10");
+    }
+
+    #[test]
+    fn test_rangelist_reverse_populated() {
+        let mut rl = populated_rangelist(&[(0, 5, true), (10, 15, true)]);
+        rl.reverse().unwrap();
+        // reverse() flips the array order and swaps each range's start/end.
+        let ranges = rl.ranges();
+        assert_eq!(ranges[0], MergeRange::new(Revnum(15), Revnum(10), true));
+        assert_eq!(ranges[1], MergeRange::new(Revnum(5), Revnum(0), true));
     }
 }
