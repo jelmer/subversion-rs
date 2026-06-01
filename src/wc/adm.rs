@@ -1616,7 +1616,9 @@ impl Drop for Adm {
     }
 }
 
-#[cfg(test)]
+// These tests build a working copy via the client checkout API, so they
+// require the client (and thus repos) features.
+#[cfg(all(test, feature = "client"))]
 #[allow(deprecated)]
 mod tests {
     use super::*;
