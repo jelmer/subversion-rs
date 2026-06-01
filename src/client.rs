@@ -8780,6 +8780,93 @@ mod tests {
         assert!(o.revprop_table.is_some());
     }
 
+    #[test]
+    fn test_info_and_wc_info_accessors() {
+        let td = tempfile::tempdir().unwrap();
+        let repo = td.path().join("repo");
+        let wc = td.path().join("wc");
+        let repos = crate::repos::Repos::create(&repo).unwrap();
+
+        // Commit a directory so the repository is at revision 1; this makes the
+        // revision accessors non-zero (revision 0's default would otherwise
+        // coincide with Revnum's Default).
+        let mut txn = repos
+            .begin_txn_for_commit(Revnum(0), "alice", "init")
+            .unwrap();
+        {
+            let mut root = txn.root().unwrap();
+            root.make_dir("/trunk").unwrap();
+        }
+        repos.commit_txn(txn).unwrap();
+
+        let url = crate::path_to_file_url(&repo);
+        let mut ctx = Context::new().unwrap();
+        ctx.checkout(
+            crate::uri::Uri::new(&url).unwrap(),
+            &wc,
+            &CheckoutOptions {
+                peg_revision: Revision::Head,
+                revision: Revision::Head,
+                depth: Depth::Infinity,
+                ignore_externals: false,
+                allow_unver_obstructions: false,
+            },
+        )
+        .unwrap();
+
+        // An unspecified revision queries the working copy, which populates
+        // wc_info (HEAD/working-revision queries leave it null).
+        let wc_abs = wc.canonicalize().unwrap();
+        let mut visited = 0;
+        ctx.info(
+            wc_abs.to_str().unwrap(),
+            &InfoOptions {
+                revision: Revision::Unspecified,
+                peg_revision: Revision::Unspecified,
+                ..Default::default()
+            },
+            &|_path, info| {
+                visited += 1;
+
+                // Info accessors for the checked-out root, now at revision 1.
+                assert_eq!(info.url(), url);
+                assert_eq!(info.revision(), Revnum(1));
+                assert_eq!(info.kind(), subversion_sys::svn_node_kind_t_svn_node_dir);
+                assert_eq!(info.repos_root_url(), url);
+                assert_eq!(info.repos_uuid().len(), 36);
+                // A directory has no meaningful size.
+                assert_eq!(info.size(), -1);
+                assert_eq!(info.last_changed_rev(), Some(Revnum(1)));
+
+                // wc_info is populated for a working-copy target.
+                let wc_info = info.wc_info().expect("wc_info present for WC target");
+                assert_eq!(
+                    wc_info.schedule(),
+                    subversion_sys::svn_wc_schedule_t_svn_wc_schedule_normal
+                );
+                assert_eq!(
+                    wc_info.depth(),
+                    subversion_sys::svn_depth_t_svn_depth_infinity
+                );
+                // A plain checkout is not a copy and has no changelist.
+                assert_eq!(wc_info.copyfrom_url(), None);
+                assert_eq!(wc_info.copyfrom_rev(), None);
+                assert_eq!(wc_info.changelist(), None);
+
+                // dup() produces an owned copy with the same data.
+                let owned = wc_info.dup();
+                assert_eq!(
+                    owned.schedule(),
+                    subversion_sys::svn_wc_schedule_t_svn_wc_schedule_normal
+                );
+
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(visited, 1);
+    }
+
     /// Test fixture for client tests with repository and working copy.
     struct ClientTestFixture {
         pub wc_path: PathBuf,
