@@ -336,6 +336,20 @@ mod tests {
     }
 
     #[test]
+    fn test_string_traits() {
+        let owned: std::string::String = "Hello, world!".to_string();
+
+        // ToUtf8 for String
+        assert_eq!(owned.to_utf8().unwrap(), "Hello, world!");
+        assert_eq!(owned.to_utf8_from("UTF-8").unwrap(), "Hello, world!");
+
+        // FromUtf8 for String
+        assert_eq!(owned.from_utf8().unwrap(), "Hello, world!");
+        assert_eq!(owned.from_utf8_to("UTF-8").unwrap(), "Hello, world!");
+        assert_eq!(owned.from_utf8_fuzzy().unwrap(), "Hello, world!");
+    }
+
+    #[test]
     fn test_explicit_encoding() {
         let test_str = "Hello";
 

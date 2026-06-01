@@ -415,4 +415,142 @@ mod tests {
             2 // svn_wc_conflict_choose_theirs_full
         );
     }
+
+    #[test]
+    fn test_conflict_choice_to_raw_all() {
+        assert_eq!(ConflictChoice::Undefined.to_raw(), -1);
+        assert_eq!(ConflictChoice::Postpone.to_raw(), 0);
+        assert_eq!(ConflictChoice::Base.to_raw(), 1);
+        assert_eq!(ConflictChoice::TheirsFull.to_raw(), 2);
+        assert_eq!(ConflictChoice::MineFull.to_raw(), 3);
+        assert_eq!(ConflictChoice::TheirsConflict.to_raw(), 4);
+        assert_eq!(ConflictChoice::MineConflict.to_raw(), 5);
+        assert_eq!(ConflictChoice::Merged.to_raw(), 6);
+    }
+
+    #[test]
+    fn test_conflict_kind_from_all() {
+        assert_eq!(
+            ConflictKind::from(subversion_sys::svn_wc_conflict_kind_t_svn_wc_conflict_kind_text),
+            ConflictKind::Text
+        );
+        assert_eq!(
+            ConflictKind::from(
+                subversion_sys::svn_wc_conflict_kind_t_svn_wc_conflict_kind_property
+            ),
+            ConflictKind::Property
+        );
+        assert_eq!(
+            ConflictKind::from(subversion_sys::svn_wc_conflict_kind_t_svn_wc_conflict_kind_tree),
+            ConflictKind::Tree
+        );
+    }
+
+    #[test]
+    fn test_conflict_action_from_all() {
+        assert_eq!(
+            ConflictAction::from(
+                subversion_sys::svn_wc_conflict_action_t_svn_wc_conflict_action_edit
+            ),
+            ConflictAction::Edit
+        );
+        assert_eq!(
+            ConflictAction::from(
+                subversion_sys::svn_wc_conflict_action_t_svn_wc_conflict_action_add
+            ),
+            ConflictAction::Add
+        );
+        assert_eq!(
+            ConflictAction::from(
+                subversion_sys::svn_wc_conflict_action_t_svn_wc_conflict_action_delete
+            ),
+            ConflictAction::Delete
+        );
+        assert_eq!(
+            ConflictAction::from(
+                subversion_sys::svn_wc_conflict_action_t_svn_wc_conflict_action_replace
+            ),
+            ConflictAction::Replace
+        );
+    }
+
+    #[test]
+    fn test_conflict_reason_from_all() {
+        let cases = [
+            (
+                subversion_sys::svn_wc_conflict_reason_t_svn_wc_conflict_reason_edited,
+                ConflictReason::Edited,
+            ),
+            (
+                subversion_sys::svn_wc_conflict_reason_t_svn_wc_conflict_reason_obstructed,
+                ConflictReason::Obstructed,
+            ),
+            (
+                subversion_sys::svn_wc_conflict_reason_t_svn_wc_conflict_reason_deleted,
+                ConflictReason::Deleted,
+            ),
+            (
+                subversion_sys::svn_wc_conflict_reason_t_svn_wc_conflict_reason_missing,
+                ConflictReason::Missing,
+            ),
+            (
+                subversion_sys::svn_wc_conflict_reason_t_svn_wc_conflict_reason_unversioned,
+                ConflictReason::Unversioned,
+            ),
+            (
+                subversion_sys::svn_wc_conflict_reason_t_svn_wc_conflict_reason_added,
+                ConflictReason::Added,
+            ),
+            (
+                subversion_sys::svn_wc_conflict_reason_t_svn_wc_conflict_reason_replaced,
+                ConflictReason::Replaced,
+            ),
+            (
+                subversion_sys::svn_wc_conflict_reason_t_svn_wc_conflict_reason_moved_away,
+                ConflictReason::MovedAway,
+            ),
+            (
+                subversion_sys::svn_wc_conflict_reason_t_svn_wc_conflict_reason_moved_here,
+                ConflictReason::MovedHere,
+            ),
+        ];
+        for (raw, expected) in cases {
+            assert_eq!(ConflictReason::from(raw), expected);
+        }
+    }
+
+    #[cfg(feature = "client")]
+    #[test]
+    fn test_to_text_option_id() {
+        // Distinct choices map to distinct, non-default option IDs.
+        assert_eq!(
+            ConflictChoice::Postpone.to_text_option_id(),
+            subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_postpone
+        );
+        assert_eq!(
+            ConflictChoice::TheirsFull.to_text_option_id(),
+            subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_text
+        );
+        assert_eq!(
+            ConflictChoice::Merged.to_text_option_id(),
+            subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_merged_text
+        );
+    }
+
+    #[cfg(feature = "client")]
+    #[test]
+    fn test_to_tree_option_id() {
+        assert_eq!(
+            ConflictChoice::Base.to_tree_option_id(),
+            subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_accept_current_wc_state
+        );
+        assert_eq!(
+            ConflictChoice::TheirsFull.to_tree_option_id(),
+            subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_delete_accept
+        );
+        assert_eq!(
+            ConflictChoice::MineFull.to_tree_option_id(),
+            subversion_sys::svn_client_conflict_option_id_t_svn_client_conflict_option_incoming_delete_ignore
+        );
+    }
 }

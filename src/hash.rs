@@ -531,13 +531,18 @@ mod tests {
         })
         .unwrap();
 
-        assert_eq!(diffs.len(), 3);
-
-        // Check that all keys are covered
-        let keys: Vec<String> = diffs.iter().map(|(k, _)| k.clone()).collect();
-        assert!(keys.contains(&"common".to_string()));
-        assert!(keys.contains(&"only_a".to_string()));
-        assert!(keys.contains(&"only_b".to_string()));
+        // Assert the exact key -> status mapping. The keys must come through
+        // intact (guarding the klen < 0 branch in diff_callback that decodes
+        // null-terminated keys).
+        diffs.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(
+            diffs,
+            vec![
+                ("common".to_string(), DiffKeyStatus::Both),
+                ("only_a".to_string(), DiffKeyStatus::A),
+                ("only_b".to_string(), DiffKeyStatus::B),
+            ]
+        );
     }
 
     #[test]
@@ -568,9 +573,131 @@ mod tests {
         let mut read_stream = Stream::from(contents_string);
         let result_hash = read_incremental(&mut read_stream, Some("END")).unwrap();
 
-        // The result should reflect the incremental changes
-        // Note: The exact behavior depends on SVN's implementation
-        assert!(!result_hash.is_empty());
+        // Applying the incremental changes to an empty starting hash yields
+        // exactly the changed and added entries (the deletion of to_delete is
+        // a no-op against the empty base).
+        let mut items: Vec<(String, String)> = result_hash.into_iter().collect();
+        items.sort();
+        assert_eq!(
+            items,
+            vec![
+                ("key1".to_string(), "new_value1".to_string()),
+                ("new_key".to_string(), "new_value".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_read_preserves_empty_value() {
+        // A value of "" must round-trip as "" (guards the svn_str.len == 0
+        // branch in read against the != mutant).
+        let mut original = HashMap::new();
+        original.insert("empty".to_string(), "".to_string());
+        original.insert("filled".to_string(), "data".to_string());
+
+        let mut stringbuf = crate::io::StringBuf::new();
+        {
+            let mut write_stream = Stream::from_stringbuf(&mut stringbuf);
+            write(&original, &mut write_stream, Some("END")).unwrap();
+        }
+        let mut read_stream = Stream::from(stringbuf.to_string());
+        let read_hash = read(&mut read_stream, Some("END")).unwrap();
+
+        assert_eq!(read_hash.get("empty"), Some(&"".to_string()));
+        assert_eq!(read_hash.get("filled"), Some(&"data".to_string()));
+    }
+
+    /// Insert a single entry into an APR hash, returning a non-null dummy
+    /// value pointer. Only the count is exercised, so the value is never read.
+    unsafe fn hash_with_one_dummy_entry(pool: &apr::Pool) -> *mut apr_sys::apr_hash_t {
+        let hash = apr_sys::apr_hash_make(pool.as_mut_ptr());
+        let key = std::ffi::CString::new("entry").unwrap();
+        let key_ptr = apr_sys::apr_pstrdup(pool.as_mut_ptr(), key.as_ptr());
+        // A non-null but otherwise unused value pointer.
+        let dummy = apr_sys::apr_palloc(pool.as_mut_ptr(), 1);
+        apr_sys::apr_hash_set(
+            hash,
+            key_ptr as *const std::ffi::c_void,
+            apr_sys::APR_HASH_KEY_STRING as apr_sys::apr_ssize_t,
+            dummy,
+        );
+        hash
+    }
+
+    #[test]
+    fn test_dirent_hash_to_hashmap_and_iter() {
+        let pool = apr::Pool::new();
+        unsafe {
+            let hash = apr_sys::apr_hash_make(pool.as_mut_ptr());
+
+            let dirent: *mut subversion_sys::svn_dirent_t = pool.calloc();
+            (*dirent).kind = subversion_sys::svn_node_kind_t_svn_node_file;
+            (*dirent).size = 42;
+            (*dirent).has_props = 1;
+            (*dirent).created_rev = 7;
+
+            let key = std::ffi::CString::new("file.txt").unwrap();
+            let key_ptr = apr_sys::apr_pstrdup(pool.as_mut_ptr(), key.as_ptr());
+            apr_sys::apr_hash_set(
+                hash,
+                key_ptr as *const std::ffi::c_void,
+                apr_sys::APR_HASH_KEY_STRING as apr_sys::apr_ssize_t,
+                dirent as *const std::ffi::c_void,
+            );
+
+            let dirent_hash = DirentHash::from_ptr(hash);
+            assert!(!dirent_hash.is_empty());
+            assert_eq!(dirent_hash.len(), 1);
+
+            let map = dirent_hash.to_hashmap();
+            assert_eq!(map.len(), 1);
+            let entry = map.get("file.txt").expect("file.txt present");
+            assert_eq!(entry.size(), 42);
+            assert_eq!(entry.kind(), crate::NodeKind::File);
+
+            let collected: Vec<String> = dirent_hash.iter().map(|(k, _)| k.to_string()).collect();
+            assert_eq!(collected, vec!["file.txt".to_string()]);
+        }
+    }
+
+    #[test]
+    fn test_dirent_hash_empty() {
+        let pool = apr::Pool::new();
+        unsafe {
+            let hash = apr_sys::apr_hash_make(pool.as_mut_ptr());
+            let dirent_hash = DirentHash::from_ptr(hash);
+            assert!(dirent_hash.is_empty());
+            assert_eq!(dirent_hash.len(), 0);
+            assert!(dirent_hash.to_hashmap().is_empty());
+        }
+    }
+
+    #[test]
+    fn test_path_change_hash_len() {
+        let pool = apr::Pool::new();
+        unsafe {
+            let empty = PathChangeHash::from_ptr(apr_sys::apr_hash_make(pool.as_mut_ptr()));
+            assert!(empty.is_empty());
+            assert_eq!(empty.len(), 0);
+
+            let one = PathChangeHash::from_ptr(hash_with_one_dummy_entry(&pool));
+            assert!(!one.is_empty());
+            assert_eq!(one.len(), 1);
+        }
+    }
+
+    #[test]
+    fn test_fs_dirent_hash_len() {
+        let pool = apr::Pool::new();
+        unsafe {
+            let empty = FsDirentHash::from_ptr(apr_sys::apr_hash_make(pool.as_mut_ptr()));
+            assert!(empty.is_empty());
+            assert_eq!(empty.len(), 0);
+
+            let one = FsDirentHash::from_ptr(hash_with_one_dummy_entry(&pool));
+            assert!(!one.is_empty());
+            assert_eq!(one.len(), 1);
+        }
     }
 }
 

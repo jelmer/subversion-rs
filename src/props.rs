@@ -424,4 +424,81 @@ mod tests {
 
         assert_eq!(roundtrip, original);
     }
+
+    #[test]
+    fn test_kind_entry_and_wc() {
+        assert_eq!(kind("svn:entry:committed-rev").unwrap(), Kind::Entry);
+        assert_eq!(kind("svn:wc:ra_dav:version-url").unwrap(), Kind::Wc);
+    }
+
+    #[test]
+    fn test_needs_translation_false() {
+        assert_eq!(needs_translation("custom:prop").unwrap(), false);
+        assert_eq!(needs_translation("user-prop").unwrap(), false);
+    }
+
+    #[test]
+    fn test_name_is_valid_false() {
+        assert_eq!(name_is_valid("a b"), false);
+        assert_eq!(name_is_valid(""), false);
+    }
+
+    #[test]
+    fn test_prophash_get_bytes() {
+        let pool = apr::Pool::new();
+        let mut props = std::collections::HashMap::new();
+        props.insert("svn:mime-type".to_string(), b"text/plain".to_vec());
+        let prop_hash = PropHash::from_hashmap(&props, &pool);
+
+        assert_eq!(prop_hash.get("svn:mime-type"), Some(b"text/plain".to_vec()));
+        assert_eq!(prop_hash.get("nonexistent"), None);
+    }
+
+    #[test]
+    fn test_prophash_is_empty() {
+        let pool = apr::Pool::new();
+        let empty = PropHash::from_hashmap(&std::collections::HashMap::new(), &pool);
+        assert!(empty.is_empty());
+        assert_eq!(empty.len(), 0);
+
+        let mut props = std::collections::HashMap::new();
+        props.insert("k".to_string(), b"v".to_vec());
+        let non_empty = PropHash::from_hashmap(&props, &pool);
+        assert!(!non_empty.is_empty());
+        assert_eq!(non_empty.len(), 1);
+    }
+
+    #[test]
+    fn test_prophash_iter_bytes() {
+        let pool = apr::Pool::new();
+        let mut props = std::collections::HashMap::new();
+        props.insert("a".to_string(), b"1".to_vec());
+        props.insert("b".to_string(), b"22".to_vec());
+        let prop_hash = PropHash::from_hashmap(&props, &pool);
+
+        let mut collected: std::collections::HashMap<String, Vec<u8>> = prop_hash
+            .iter_bytes()
+            .map(|(k, v)| (k.to_string(), v.to_vec()))
+            .collect();
+        assert_eq!(collected.remove("a"), Some(b"1".to_vec()));
+        assert_eq!(collected.remove("b"), Some(b"22".to_vec()));
+        assert!(collected.is_empty());
+    }
+
+    #[test]
+    fn test_prophash_iter_strings() {
+        let pool = apr::Pool::new();
+        let mut props = std::collections::HashMap::new();
+        props.insert("a".to_string(), b"one".to_vec());
+        props.insert("b".to_string(), b"two".to_vec());
+        let prop_hash = PropHash::from_hashmap(&props, &pool);
+
+        let mut collected: std::collections::HashMap<String, String> = prop_hash
+            .iter_strings()
+            .map(|(k, v)| (k.to_string(), v.into_owned()))
+            .collect();
+        assert_eq!(collected.remove("a"), Some("one".to_string()));
+        assert_eq!(collected.remove("b"), Some("two".to_string()));
+        assert!(collected.is_empty());
+    }
 }
