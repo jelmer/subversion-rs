@@ -2763,6 +2763,60 @@ mod tests {
     use crate::mergeinfo::MergeinfoInheritance;
     use crate::{LocationSegment, Lock};
 
+    #[test]
+    fn test_relpath_canonicalize() {
+        // A leading slash is stripped and the path is canonicalized.
+        assert_eq!(RelPath::canonicalize("/a/b").unwrap().as_str(), "a/b");
+        assert_eq!(RelPath::canonicalize("a//b/").unwrap().as_str(), "a/b");
+        assert_eq!(RelPath::canonicalize("").unwrap().as_str(), "");
+    }
+
+    #[test]
+    fn test_relpath_from_canonical() {
+        // An already-canonical relative path is accepted unchanged.
+        assert_eq!(
+            RelPath::from_canonical("a/b".to_string()).unwrap().as_str(),
+            "a/b"
+        );
+        // Non-canonical (double slash) and absolute paths are rejected.
+        assert!(RelPath::from_canonical("a//b".to_string()).is_err());
+        assert!(RelPath::from_canonical("/a".to_string()).is_err());
+    }
+
+    #[test]
+    fn test_relpath_display_and_try_from() {
+        let p = RelPath::canonicalize("/x/y").unwrap();
+        assert_eq!(format!("{}", p), "x/y");
+
+        let from_str: RelPath = "a/b".try_into().unwrap();
+        assert_eq!(from_str.as_str(), "a/b");
+        let from_string: RelPath = String::from("c/d").try_into().unwrap();
+        assert_eq!(from_string.as_str(), "c/d");
+        // TryFrom uses the strict (from_canonical) path: a leading slash fails.
+        assert!(RelPath::try_from("/abs").is_err());
+    }
+
+    #[test]
+    fn test_get_log_options_builder() {
+        let opts = GetLogOptions::default()
+            .with_limit(5)
+            .with_discover_changed_paths(true)
+            .with_strict_node_history(true)
+            .with_include_merged_revisions(true)
+            .with_revprops(Some(&["svn:log"]));
+        assert_eq!(opts.limit, 5);
+        assert!(opts.discover_changed_paths);
+        assert!(opts.strict_node_history);
+        assert!(opts.include_merged_revisions);
+        assert_eq!(opts.revprops, Some(&["svn:log"][..]));
+
+        // Each setter only changes its own field.
+        let only_limit = GetLogOptions::default().with_limit(3);
+        assert_eq!(only_limit.limit, 3);
+        assert!(!only_limit.discover_changed_paths);
+        assert!(!only_limit.strict_node_history);
+    }
+
     /// Helper function to create a test repository and return its file:// URL
     fn create_test_repo() -> (tempfile::TempDir, String, crate::repos::Repos) {
         let temp_dir = tempfile::tempdir().unwrap();
