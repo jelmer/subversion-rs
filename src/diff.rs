@@ -36,15 +36,21 @@ impl DiffOptions {
     }
 }
 
-/// A diff hunk showing differences between files
-pub struct DiffHunk {
+/// A diff hunk showing differences between files.
+///
+/// Obtained from [`Patch::hunks`] when parsing a unified diff / patch file.
+/// Borrows from the [`PatchFile`] that produced it.
+pub struct DiffHunk<'a> {
     ptr: *mut subversion_sys::svn_diff_hunk_t,
+    _phantom: std::marker::PhantomData<&'a PatchFile>,
 }
 
-impl DiffHunk {
-    #[allow(dead_code)]
+impl DiffHunk<'_> {
     unsafe fn from_raw(ptr: *mut subversion_sys::svn_diff_hunk_t) -> Self {
-        Self { ptr }
+        Self {
+            ptr,
+            _phantom: std::marker::PhantomData,
+        }
     }
 
     /// Get the starting line number in the original file
@@ -75,6 +81,159 @@ impl DiffHunk {
     /// Get the trailing context lines
     pub fn trailing_context(&self) -> u64 {
         unsafe { subversion_sys::svn_diff_hunk_get_trailing_context(self.ptr).into() }
+    }
+}
+
+/// The operation a patch performs on a file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PatchOperation {
+    /// The file is unchanged.
+    Unchanged,
+    /// The file is added.
+    Added,
+    /// The file is deleted.
+    Deleted,
+    /// The file is copied.
+    Copied,
+    /// The file is moved.
+    Moved,
+}
+
+impl From<subversion_sys::svn_diff_operation_kind_t> for PatchOperation {
+    fn from(kind: subversion_sys::svn_diff_operation_kind_t) -> Self {
+        match kind {
+            subversion_sys::svn_diff_operation_kind_e_svn_diff_op_unchanged => {
+                PatchOperation::Unchanged
+            }
+            subversion_sys::svn_diff_operation_kind_e_svn_diff_op_added => PatchOperation::Added,
+            subversion_sys::svn_diff_operation_kind_e_svn_diff_op_deleted => {
+                PatchOperation::Deleted
+            }
+            subversion_sys::svn_diff_operation_kind_e_svn_diff_op_copied => PatchOperation::Copied,
+            subversion_sys::svn_diff_operation_kind_e_svn_diff_op_moved => PatchOperation::Moved,
+            _ => unreachable!("unknown svn_diff_operation_kind_t value: {}", kind),
+        }
+    }
+}
+
+/// A single patch (one file's worth of changes) parsed from a patch file.
+///
+/// Borrows from the [`PatchFile`] that produced it.
+pub struct Patch<'a> {
+    ptr: *mut subversion_sys::svn_patch_t,
+    _phantom: std::marker::PhantomData<&'a PatchFile>,
+}
+
+impl Patch<'_> {
+    /// The old file name as recorded in the patch.
+    pub fn old_filename(&self) -> Option<&str> {
+        unsafe {
+            let p = (*self.ptr).old_filename;
+            if p.is_null() {
+                None
+            } else {
+                std::ffi::CStr::from_ptr(p).to_str().ok()
+            }
+        }
+    }
+
+    /// The new file name as recorded in the patch.
+    pub fn new_filename(&self) -> Option<&str> {
+        unsafe {
+            let p = (*self.ptr).new_filename;
+            if p.is_null() {
+                None
+            } else {
+                std::ffi::CStr::from_ptr(p).to_str().ok()
+            }
+        }
+    }
+
+    /// The operation this patch performs on the file.
+    pub fn operation(&self) -> PatchOperation {
+        unsafe { (*self.ptr).operation.into() }
+    }
+
+    /// The hunks that make up this patch.
+    pub fn hunks(&self) -> Vec<DiffHunk<'_>> {
+        unsafe {
+            let array = (*self.ptr).hunks;
+            if array.is_null() {
+                return Vec::new();
+            }
+            let arr = &*array;
+            let elts = arr.elts as *const *mut subversion_sys::svn_diff_hunk_t;
+            (0..arr.nelts as isize)
+                .map(|i| DiffHunk::from_raw(*elts.offset(i)))
+                .collect()
+        }
+    }
+}
+
+/// A patch file opened for parsing.
+///
+/// Use [`PatchFile::open`] to open a unified-diff/patch file, then
+/// [`PatchFile::next_patch`] to iterate over the patches it contains.
+pub struct PatchFile {
+    ptr: *mut subversion_sys::svn_patch_file_t,
+    pool: apr::Pool<'static>,
+}
+
+impl PatchFile {
+    /// Open a patch file at the given path for parsing.
+    pub fn open(path: &std::path::Path) -> Result<Self, Error<'static>> {
+        let pool = apr::Pool::new();
+        let abspath = crate::dirent::to_absolute_cstring(path.to_string_lossy().as_ref())?;
+        let mut ptr = std::ptr::null_mut();
+        let err = unsafe {
+            subversion_sys::svn_diff_open_patch_file(&mut ptr, abspath.as_ptr(), pool.as_mut_ptr())
+        };
+        svn_result(err)?;
+        Ok(Self { ptr, pool })
+    }
+
+    /// Parse and return the next patch in the file, or `None` at end of file.
+    ///
+    /// If `reverse` is true, the patch is interpreted as a reverse patch. If
+    /// `ignore_whitespace` is true, whitespace differences are ignored when
+    /// matching hunks.
+    pub fn next_patch(
+        &mut self,
+        reverse: bool,
+        ignore_whitespace: bool,
+    ) -> Result<Option<Patch<'_>>, Error<'static>> {
+        let mut patch_ptr = std::ptr::null_mut();
+        let err = unsafe {
+            subversion_sys::svn_diff_parse_next_patch(
+                &mut patch_ptr,
+                self.ptr,
+                reverse as subversion_sys::svn_boolean_t,
+                ignore_whitespace as subversion_sys::svn_boolean_t,
+                self.pool.as_mut_ptr(),
+                self.pool.as_mut_ptr(),
+            )
+        };
+        svn_result(err)?;
+        if patch_ptr.is_null() {
+            Ok(None)
+        } else {
+            Ok(Some(Patch {
+                ptr: patch_ptr,
+                _phantom: std::marker::PhantomData,
+            }))
+        }
+    }
+}
+
+impl Drop for PatchFile {
+    fn drop(&mut self) {
+        unsafe {
+            // Errors closing the patch file are not actionable during drop.
+            let err = subversion_sys::svn_diff_close_patch_file(self.ptr, self.pool.as_mut_ptr());
+            if !err.is_null() {
+                subversion_sys::svn_error_clear(err);
+            }
+        }
     }
 }
 
@@ -879,6 +1038,43 @@ mod tests {
 
         // Should have changes since modified and latest differ from original
         assert!(diff.contains_changes());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_patch_file_and_hunks() -> Result<(), Box<dyn std::error::Error>> {
+        let temp_dir = tempdir()?;
+        let patch_path = temp_dir.path().join("change.patch");
+        // One file, one hunk: insert a line between line2 and line3. Leading
+        // spaces on context lines are significant, so avoid line continuations.
+        let patch =
+            "--- a/file.txt\n+++ b/file.txt\n@@ -1,3 +1,4 @@\n line1\n line2\n+inserted\n line3\n";
+        std::fs::write(&patch_path, patch)?;
+
+        let mut patch_file = PatchFile::open(&patch_path)?;
+
+        let patch = patch_file
+            .next_patch(false, false)?
+            .expect("expected one patch");
+        assert_eq!(patch.old_filename(), Some("a/file.txt"));
+        assert_eq!(patch.new_filename(), Some("b/file.txt"));
+        assert_eq!(patch.operation(), PatchOperation::Unchanged);
+
+        let hunks = patch.hunks();
+        assert_eq!(hunks.len(), 1);
+        let hunk = &hunks[0];
+        // Header was "@@ -1,3 +1,4 @@".
+        assert_eq!(hunk.original_start(), 1);
+        assert_eq!(hunk.original_length(), 3);
+        assert_eq!(hunk.modified_start(), 1);
+        assert_eq!(hunk.modified_length(), 4);
+        // Two context lines precede the insertion, one follows it.
+        assert_eq!(hunk.leading_context(), 2);
+        assert_eq!(hunk.trailing_context(), 1);
+
+        // The file contains only one patch.
+        assert!(patch_file.next_patch(false, false)?.is_none());
 
         Ok(())
     }
