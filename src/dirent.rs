@@ -532,6 +532,26 @@ mod tests {
     }
 
     #[test]
+    fn test_is_canonical_false_for_uncanonicalized() {
+        // `From<PathBuf>` deliberately does not canonicalize, so we can build a
+        // Dirent holding a non-canonical path and observe is_canonical() == false.
+        let dirent = Dirent::from(std::path::PathBuf::from("/home//user/"));
+        assert!(
+            !dirent.is_canonical(),
+            "path with double and trailing slashes should not be canonical"
+        );
+        assert!(
+            !is_canonical_dirent(&dirent).unwrap(),
+            "is_canonical_dirent should agree"
+        );
+
+        // A genuinely canonical path returns true.
+        let canonical = Dirent::from(std::path::PathBuf::from("/home/user"));
+        assert!(canonical.is_canonical());
+        assert!(is_canonical_dirent(&canonical).unwrap());
+    }
+
+    #[test]
     fn test_get_longest_ancestor() {
         let dirent1 = Dirent::new("/home/user/project1").unwrap();
         let dirent2 = Dirent::new("/home/user/project2").unwrap();

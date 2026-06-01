@@ -291,6 +291,55 @@ mod tests {
     }
 
     #[test]
+    fn test_iter_break_display() {
+        assert_eq!(IterBreak.to_string(), "iteration break");
+    }
+
+    #[test]
+    fn test_hash_iter_ext_completes() {
+        let pool = apr::Pool::new();
+        let mut hash = apr::hash::Hash::new(&pool);
+        let val = 7i32;
+        unsafe {
+            hash.insert(b"only", &val as *const _ as *mut std::ffi::c_void);
+        }
+
+        let mut count = 0;
+        let completed = hash
+            .iter_entries(|_key, _value| {
+                count += 1;
+                Ok(())
+            })
+            .unwrap();
+
+        assert!(completed, "iter_entries should report completion");
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn test_hash_iter_ext_break() {
+        let pool = apr::Pool::new();
+        let mut hash = apr::hash::Hash::new(&pool);
+        let val1 = 1i32;
+        let val2 = 2i32;
+        unsafe {
+            hash.insert(b"a", &val1 as *const _ as *mut std::ffi::c_void);
+            hash.insert(b"b", &val2 as *const _ as *mut std::ffi::c_void);
+        }
+
+        let mut count = 0;
+        let completed = hash
+            .iter_entries(|_key, _value| {
+                count += 1;
+                Err(break_iteration())
+            })
+            .unwrap();
+
+        assert!(!completed, "iter_entries should report early break");
+        assert_eq!(count, 1);
+    }
+
+    #[test]
     fn test_array_iteration_break() {
         let pool = apr::Pool::new();
 

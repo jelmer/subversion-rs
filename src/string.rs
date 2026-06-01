@@ -132,4 +132,43 @@ mod tests {
         let debug_str = bstr.to_string_lossy();
         assert!(debug_str.contains("Debug test"));
     }
+
+    #[test]
+    fn test_bstr_to_bytes() {
+        let pool = apr::Pool::new();
+        let data = b"some bytes\x00and more"; // embedded NUL preserved
+        let bstr = BStr::from_bytes(data, &pool);
+        assert_eq!(bstr.to_bytes(), data.to_vec());
+    }
+
+    #[test]
+    fn test_bstr_to_bytes_empty() {
+        let pool = apr::Pool::new();
+        let bstr = BStr::from_bytes(b"", &pool);
+        assert_eq!(bstr.to_bytes(), Vec::<u8>::new());
+    }
+
+    #[test]
+    fn test_bstr_as_str_valid_utf8() {
+        let pool = apr::Pool::new();
+        let bstr = BStr::from_str("hello world", &pool);
+        assert_eq!(bstr.as_str().unwrap(), "hello world");
+    }
+
+    #[test]
+    fn test_bstr_as_str_invalid_utf8() {
+        let pool = apr::Pool::new();
+        let bstr = BStr::from_bytes(&[0xff, 0xfe], &pool);
+        assert!(bstr.as_str().is_err());
+    }
+
+    #[test]
+    fn test_bstr_as_mut_ptr_matches_as_ptr() {
+        let pool = apr::Pool::new();
+        let mut bstr = BStr::from_str("ptr test", &pool);
+        let const_ptr = bstr.as_ptr();
+        let mut_ptr = bstr.as_mut_ptr();
+        assert!(!mut_ptr.is_null());
+        assert_eq!(mut_ptr as *const svn_string_t, const_ptr);
+    }
 }
