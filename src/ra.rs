@@ -231,7 +231,7 @@ extern "C" fn wrap_lock_func(
 }
 
 /// Options for the do_diff operation
-pub struct DoDiffOptions<'a> {
+pub struct DoDiffOptions<'a, 'pool> {
     /// Depth of the diff operation.
     pub depth: crate::Depth,
     /// Whether to ignore ancestry.
@@ -241,12 +241,16 @@ pub struct DoDiffOptions<'a> {
     /// URL to compare against.
     pub versus_url: &'a str,
     /// Editor to receive diff callbacks.
-    pub diff_editor: &'a mut crate::delta::WrapEditor<'a>,
+    ///
+    /// The editor's own lifetime (`'pool`) is independent of the borrow
+    /// (`'a`), so holding these options does not pin the editor for its whole
+    /// lifetime.
+    pub diff_editor: &'a mut crate::delta::WrapEditor<'pool>,
 }
 
-impl<'a> DoDiffOptions<'a> {
+impl<'a, 'pool> DoDiffOptions<'a, 'pool> {
     /// Creates new diff options with default settings.
-    pub fn new(versus_url: &'a str, diff_editor: &'a mut crate::delta::WrapEditor<'a>) -> Self {
+    pub fn new(versus_url: &'a str, diff_editor: &'a mut crate::delta::WrapEditor<'pool>) -> Self {
         Self {
             depth: crate::Depth::Infinity,
             ignore_ancestry: false,
@@ -2156,7 +2160,7 @@ impl<'a> Session<'a> {
         &'s mut self,
         revision: Revnum,
         diff_target: &str,
-        options: &mut DoDiffOptions<'s>,
+        options: &mut DoDiffOptions<'_, 's>,
     ) -> Result<Box<dyn Reporter + Send + 's>, Error<'s>> {
         let pool = Pool::new();
 
@@ -4098,9 +4102,27 @@ mod tests {
     }
 
     #[test]
-    fn test_do_diff() {
-        // Test validates that the do_diff function with DoDiffOptions compiles
-        println!("do_diff function with options struct exists and has correct signature");
+    fn test_do_diff_options_builder() {
+        // DoDiffOptions decouples the borrow from the editor's own lifetime,
+        // so it can be built, inspected, and dropped in a normal scope.
+        let mut editor = crate::delta::default_editor(apr::Pool::new());
+        let opts = DoDiffOptions::new("file:///versus", &mut editor)
+            .with_depth(crate::Depth::Files)
+            .with_ignore_ancestry(true)
+            .with_text_deltas(false);
+        assert_eq!(opts.depth, crate::Depth::Files);
+        assert!(opts.ignore_ancestry);
+        assert!(!opts.text_deltas);
+        assert_eq!(opts.versus_url, "file:///versus");
+    }
+
+    #[test]
+    fn test_do_diff_options_defaults() {
+        let mut editor = crate::delta::default_editor(apr::Pool::new());
+        let opts = DoDiffOptions::new("file:///v", &mut editor);
+        assert_eq!(opts.depth, crate::Depth::Infinity);
+        assert!(!opts.ignore_ancestry);
+        assert!(opts.text_deltas);
     }
 
     #[test]
