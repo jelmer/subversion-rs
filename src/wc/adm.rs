@@ -1660,10 +1660,11 @@ mod tests {
 
         let mut rw = Adm::open(wc_str, true, 0).unwrap();
         assert!(rw.is_locked());
-        assert_eq!(
-            rw.access_path(),
-            wc.canonicalize().unwrap().to_str().unwrap()
-        );
+        // access_path() returns the svn-absolute form of the input, which is not
+        // the same as std::fs::canonicalize on platforms with symlinked temp
+        // dirs (e.g. macOS /var -> /private/var).
+        let expected = crate::dirent::to_absolute_cstring(wc_str).unwrap();
+        assert_eq!(rw.access_path(), expected.to_str().unwrap());
         // close() releases the lock and is idempotent.
         rw.close();
     }

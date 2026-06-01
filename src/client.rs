@@ -4079,7 +4079,9 @@ impl Context {
         validate_absolute_path_or_url(abspath_or_url)?;
 
         with_tmp_pool(|pool| {
-            let abspath_or_url = std::ffi::CString::new(abspath_or_url).unwrap();
+            // Canonicalize so svn sees a valid dirent (e.g. a Windows verbatim
+            // `\\?\C:\...` path would otherwise trip svn_dirent_is_absolute).
+            let abspath_or_url = crate::dirent::canonicalize_path_or_url(abspath_or_url)?;
             let changelists = options.changelists.as_ref().map(|cl| {
                 cl.iter()
                     .map(|cl| std::ffi::CString::new(cl.as_str()).unwrap())
