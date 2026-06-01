@@ -551,6 +551,69 @@ mod tests {
     }
 
     #[test]
+    fn test_diff_options_builder() {
+        let options = DiffOptions::new()
+            .with_ignore_whitespace(true)
+            .with_ignore_eol_style(true)
+            .with_show_c_function(true);
+        assert!(options.ignore_whitespace);
+        assert!(options.ignore_eol_style);
+        assert!(options.show_c_function);
+
+        // Each setter only flips its own field.
+        let only_ws = DiffOptions::new().with_ignore_whitespace(true);
+        assert!(only_ws.ignore_whitespace);
+        assert!(!only_ws.ignore_eol_style);
+        assert!(!only_ws.show_c_function);
+
+        let only_eol = DiffOptions::new().with_ignore_eol_style(true);
+        assert!(!only_eol.ignore_whitespace);
+        assert!(only_eol.ignore_eol_style);
+        assert!(!only_eol.show_c_function);
+
+        let only_cfn = DiffOptions::new().with_show_c_function(true);
+        assert!(!only_cfn.ignore_whitespace);
+        assert!(!only_cfn.ignore_eol_style);
+        assert!(only_cfn.show_c_function);
+    }
+
+    #[test]
+    fn test_ignore_space_into_raw() {
+        use subversion_sys::*;
+        assert_eq!(
+            svn_diff_file_ignore_space_t::from(IgnoreSpace::None),
+            svn_diff_file_ignore_space_t_svn_diff_file_ignore_space_none
+        );
+        assert_eq!(
+            svn_diff_file_ignore_space_t::from(IgnoreSpace::Change),
+            svn_diff_file_ignore_space_t_svn_diff_file_ignore_space_change
+        );
+        assert_eq!(
+            svn_diff_file_ignore_space_t::from(IgnoreSpace::All),
+            svn_diff_file_ignore_space_t_svn_diff_file_ignore_space_all
+        );
+    }
+
+    #[test]
+    fn test_file_diff3_conflict() -> Result<(), Box<dyn std::error::Error>> {
+        let temp_dir = tempdir()?;
+        let original = temp_dir.path().join("orig.txt");
+        let modified = temp_dir.path().join("mine.txt");
+        let latest = temp_dir.path().join("theirs.txt");
+
+        // Both sides change the same line differently -> a conflict.
+        std::fs::write(&original, b"line 1\nline 2\nline 3\n")?;
+        std::fs::write(&modified, b"line 1\nMINE\nline 3\n")?;
+        std::fs::write(&latest, b"line 1\nTHEIRS\nline 3\n")?;
+
+        let diff = file_diff3(&original, &modified, &latest, FileOptions::default())?;
+        assert!(diff.contains_changes());
+        assert!(diff.contains_conflicts());
+
+        Ok(())
+    }
+
+    #[test]
     fn test_mem_string_diff() {
         let original = "line 1\nline 2\nline 3\n";
         let modified = "line 1\nline 2 modified\nline 3\n";

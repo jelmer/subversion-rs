@@ -34,4 +34,12 @@ mod tests {
     fn test_init() {
         init("test-program").unwrap();
     }
+
+    #[test]
+    fn test_init_rejects_interior_nul() {
+        // A program name with an interior NUL cannot become a CString and must
+        // be reported as an error rather than silently succeeding.
+        let result = init("bad\0name");
+        assert_eq!(result, Err(1));
+    }
 }
