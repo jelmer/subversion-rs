@@ -4079,7 +4079,9 @@ impl Context {
         validate_absolute_path_or_url(abspath_or_url)?;
 
         with_tmp_pool(|pool| {
-            let abspath_or_url = std::ffi::CString::new(abspath_or_url).unwrap();
+            // Canonicalize so svn sees a valid dirent (e.g. a Windows verbatim
+            // `\\?\C:\...` path would otherwise trip svn_dirent_is_absolute).
+            let abspath_or_url = crate::dirent::canonicalize_path_or_url(abspath_or_url)?;
             let changelists = options.changelists.as_ref().map(|cl| {
                 cl.iter()
                     .map(|cl| std::ffi::CString::new(cl.as_str()).unwrap())
@@ -8386,6 +8388,486 @@ impl ConflictOption {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    // Builder-setter coverage for the option structs. Each test chains every
+    // setter with a non-default value and asserts the corresponding field, so
+    // a setter that returns Default::default() instead of mutating `self` is
+    // caught. Revision is not PartialEq, so it is checked with matches!.
+
+    #[test]
+    fn test_switch_options_builder() {
+        let o = SwitchOptions::new()
+            .with_peg_revision(Revision::Number(Revnum(1)))
+            .with_revision(Revision::Number(Revnum(2)))
+            .with_depth(Depth::Files)
+            .with_depth_is_sticky(true)
+            .with_ignore_externals(true)
+            .with_allow_unver_obstructions(true)
+            .with_ignore_ancestry(true);
+        assert!(matches!(o.peg_revision, Revision::Number(Revnum(1))));
+        assert!(matches!(o.revision, Revision::Number(Revnum(2))));
+        assert_eq!(o.depth, Depth::Files);
+        assert!(o.depth_is_sticky);
+        assert!(o.ignore_externals);
+        assert!(o.allow_unver_obstructions);
+        assert!(o.ignore_ancestry);
+    }
+
+    #[test]
+    fn test_add_options_builder() {
+        let o = AddOptions::new()
+            .with_depth(Depth::Files)
+            .with_force(true)
+            .with_no_ignore(true)
+            .with_no_autoprops(true)
+            .with_add_parents(true);
+        assert_eq!(o.depth, Depth::Files);
+        assert!(o.force);
+        assert!(o.no_ignore);
+        assert!(o.no_autoprops);
+        assert!(o.add_parents);
+    }
+
+    #[test]
+    fn test_merge_sources_options_builder() {
+        let o = MergeSourcesOptions::new()
+            .with_ignore_mergeinfo(true)
+            .with_diff_ignore_ancestry(true)
+            .with_force_delete(true)
+            .with_record_only(true)
+            .with_dry_run(true)
+            .with_allow_mixed_rev(true)
+            .with_merge_options(vec!["-x".to_string()]);
+        assert!(o.ignore_mergeinfo);
+        assert!(o.diff_ignore_ancestry);
+        assert!(o.force_delete);
+        assert!(o.record_only);
+        assert!(o.dry_run);
+        assert!(o.allow_mixed_rev);
+        assert_eq!(o.merge_options.as_deref(), Some(&["-x".to_string()][..]));
+    }
+
+    #[test]
+    fn test_diff_summarize_options_builder() {
+        let o = DiffSummarizeOptions::new()
+            .with_depth(Depth::Files)
+            .with_ignore_ancestry(true)
+            .with_changelists(vec!["cl".to_string()]);
+        assert_eq!(o.depth, Depth::Files);
+        assert!(o.ignore_ancestry);
+        assert_eq!(o.changelists.as_deref(), Some(&["cl".to_string()][..]));
+    }
+
+    #[test]
+    fn test_revert_options_builder() {
+        let o = RevertOptions::new()
+            .with_depth(Depth::Files)
+            .with_changelists(vec!["cl".to_string()])
+            .with_clear_changelists(true)
+            .with_added_keep_local(true);
+        assert_eq!(o.depth, Depth::Files);
+        assert_eq!(o.changelists.as_deref(), Some(&["cl".to_string()][..]));
+        assert!(o.clear_changelists);
+        assert!(o.added_keep_local);
+    }
+
+    #[test]
+    fn test_revprop_set_options_builder() {
+        let o = RevpropSetOptions::new()
+            .with_revision(Revision::Number(Revnum(3)))
+            .with_original_propval(b"old".to_vec())
+            .with_force(true);
+        assert!(matches!(o.revision, Revision::Number(Revnum(3))));
+        assert_eq!(o.original_propval.as_deref(), Some(&b"old"[..]));
+        assert!(o.force);
+    }
+
+    #[test]
+    fn test_prop_set_options_builder() {
+        let o = PropSetOptions::new()
+            .with_depth(Depth::Files)
+            .with_skip_checks(true)
+            .with_base_revision_for_url(Revnum(5))
+            .with_changelists(vec!["cl".to_string()]);
+        assert_eq!(o.depth, Depth::Files);
+        assert!(o.skip_checks);
+        assert_eq!(o.base_revision_for_url, Revnum(5));
+        assert_eq!(o.changelists.as_deref(), Some(&["cl".to_string()][..]));
+    }
+
+    #[test]
+    fn test_prop_get_options_builder() {
+        let o = PropGetOptions::new()
+            .with_peg_revision(Revision::Number(Revnum(1)))
+            .with_revision(Revision::Number(Revnum(2)))
+            .with_depth(Depth::Files)
+            .with_changelists(vec!["cl".to_string()]);
+        assert!(matches!(o.peg_revision, Revision::Number(Revnum(1))));
+        assert!(matches!(o.revision, Revision::Number(Revnum(2))));
+        assert_eq!(o.depth, Depth::Files);
+        assert_eq!(o.changelists.as_deref(), Some(&["cl".to_string()][..]));
+    }
+
+    #[test]
+    fn test_patch_options_builder() {
+        let o = PatchOptions::new()
+            .with_dry_run(true)
+            .with_strip_count(3)
+            .with_reverse(true)
+            .with_ignore_whitespace(true)
+            .with_remove_tempfiles(true);
+        assert!(o.dry_run);
+        assert_eq!(o.strip_count, 3);
+        assert!(o.reverse);
+        assert!(o.ignore_whitespace);
+        assert!(o.remove_tempfiles);
+    }
+
+    #[test]
+    fn test_diff_options_builder() {
+        let o = DiffOptions::new()
+            .with_diff_options(vec!["-x".to_string()])
+            .with_depth(Depth::Files)
+            .with_ignore_ancestry(true)
+            .with_no_diff_added(true)
+            .with_no_diff_deleted(true)
+            .with_show_copies_as_adds(true)
+            .with_ignore_content_type(true)
+            .with_ignore_properties(true)
+            .with_properties_only(true)
+            .with_use_git_diff_format(true)
+            .with_header_encoding("UTF-8".to_string())
+            .with_changelists(vec!["cl".to_string()]);
+        assert_eq!(o.diff_options, vec!["-x".to_string()]);
+        assert_eq!(o.depth, Depth::Files);
+        assert!(o.ignore_ancestry);
+        assert!(o.no_diff_added);
+        assert!(o.no_diff_deleted);
+        assert!(o.show_copies_as_adds);
+        assert!(o.ignore_content_type);
+        assert!(o.ignore_properties);
+        assert!(o.properties_only);
+        assert!(o.use_git_diff_format);
+        assert_eq!(o.header_encoding, "UTF-8");
+        assert_eq!(o.changelists.as_deref(), Some(&["cl".to_string()][..]));
+    }
+
+    #[test]
+    fn test_status_options_builder() {
+        let o = StatusOptions::new()
+            .with_revision(Revision::Number(Revnum(2)))
+            .with_get_all(true)
+            .with_check_out_of_date(true)
+            .with_check_working_copy(true)
+            .with_no_ignore(true)
+            .with_ignore_externals(true)
+            .with_depth_as_sticky(true)
+            .with_changelists(vec!["cl".to_string()]);
+        assert!(matches!(o.revision, Revision::Number(Revnum(2))));
+        assert!(o.get_all);
+        assert!(o.check_out_of_date);
+        assert!(o.check_working_copy);
+        assert!(o.no_ignore);
+        assert!(o.ignore_externals);
+        assert!(o.depth_as_sticky);
+        assert_eq!(o.changelists.as_deref(), Some(&["cl".to_string()][..]));
+    }
+
+    #[test]
+    fn test_info_options_builder() {
+        let o = InfoOptions::new()
+            .with_peg_revision(Revision::Number(Revnum(1)))
+            .with_revision(Revision::Number(Revnum(2)))
+            .with_depth(Depth::Files)
+            .with_fetch_excluded(true)
+            .with_fetch_actual_only(true)
+            .with_include_externals(true)
+            .with_changelists(vec!["cl".to_string()]);
+        assert!(matches!(o.peg_revision, Revision::Number(Revnum(1))));
+        assert!(matches!(o.revision, Revision::Number(Revnum(2))));
+        assert_eq!(o.depth, Depth::Files);
+        assert!(o.fetch_excluded);
+        assert!(o.fetch_actual_only);
+        assert!(o.include_externals);
+        assert_eq!(o.changelists.as_deref(), Some(&["cl".to_string()][..]));
+    }
+
+    #[test]
+    fn test_list_options_builder() {
+        let o = ListOptions::new()
+            .with_peg_revision(Revision::Number(Revnum(1)))
+            .with_revision(Revision::Number(Revnum(2)))
+            .with_patterns(vec!["*.rs".to_string()])
+            .with_depth(Depth::Files)
+            .with_dirent_fields(7)
+            .with_fetch_locks(true)
+            .with_include_externals(true);
+        assert!(matches!(o.peg_revision, Revision::Number(Revnum(1))));
+        assert!(matches!(o.revision, Revision::Number(Revnum(2))));
+        assert_eq!(o.patterns.as_deref(), Some(&["*.rs".to_string()][..]));
+        assert_eq!(o.depth, Depth::Files);
+        assert_eq!(o.dirent_fields, 7);
+        assert!(o.fetch_locks);
+        assert!(o.include_externals);
+    }
+
+    #[test]
+    fn test_log_options_builder() {
+        let o = LogOptions::new()
+            .with_peg_revision(Revision::Number(Revnum(1)))
+            .with_limit(10)
+            .with_discover_changed_paths(true)
+            .with_strict_node_history(true)
+            .with_include_merged_revisions(true)
+            .with_revprops(Some(vec!["svn:log".to_string()]));
+        assert!(matches!(o.peg_revision, Revision::Number(Revnum(1))));
+        assert_eq!(o.limit, Some(10));
+        assert!(o.discover_changed_paths);
+        assert!(o.strict_node_history);
+        assert!(o.include_merged_revisions);
+        assert_eq!(o.revprops.as_deref(), Some(&["svn:log".to_string()][..]));
+    }
+
+    #[test]
+    fn test_blame_options_builder() {
+        let o = BlameOptions::new()
+            .with_peg_revision(Revision::Number(Revnum(1)))
+            .with_start_revision(Revision::Number(Revnum(2)))
+            .with_end_revision(Revision::Number(Revnum(3)))
+            .with_diff_options(vec!["-x".to_string()])
+            .with_ignore_mime_type(true)
+            .with_include_merged_revisions(true);
+        assert!(matches!(o.peg_revision, Revision::Number(Revnum(1))));
+        assert!(matches!(o.start_revision, Revision::Number(Revnum(2))));
+        assert!(matches!(o.end_revision, Revision::Number(Revnum(3))));
+        assert_eq!(o.diff_options, vec!["-x".to_string()]);
+        assert!(o.ignore_mime_type);
+        assert!(o.include_merged_revisions);
+    }
+
+    #[test]
+    fn test_mergeinfo_log_options_builder() {
+        let o = MergeinfoLogOptions::new()
+            // The default is true, so set false to pin the setter.
+            .with_finding_merged(false)
+            .with_target_peg_revision(Revision::Number(Revnum(1)))
+            .with_source_peg_revision(Revision::Number(Revnum(2)))
+            .with_source_start_revision(Revision::Number(Revnum(3)))
+            .with_source_end_revision(Revision::Number(Revnum(4)))
+            .with_discover_changed_paths(true)
+            .with_depth(Depth::Files)
+            .with_revprops(vec!["svn:log".to_string()]);
+        assert!(!o.finding_merged);
+        assert!(matches!(o.target_peg_revision, Revision::Number(Revnum(1))));
+        assert!(matches!(o.source_peg_revision, Revision::Number(Revnum(2))));
+        assert!(matches!(
+            o.source_start_revision,
+            Revision::Number(Revnum(3))
+        ));
+        assert!(matches!(o.source_end_revision, Revision::Number(Revnum(4))));
+        assert!(o.discover_changed_paths);
+        assert_eq!(o.depth, Depth::Files);
+        assert_eq!(o.revprops, vec!["svn:log".to_string()]);
+    }
+
+    #[test]
+    fn test_commit_options_builder() {
+        let o = CommitOptions::new()
+            .with_depth(Depth::Files)
+            .with_keep_locks(true)
+            .with_keep_changelists(true)
+            .with_commit_as_operations(true)
+            .with_include_file_externals(true)
+            .with_include_dir_externals(true)
+            .with_changelists(vec!["cl".to_string()]);
+        assert_eq!(o.depth, Depth::Files);
+        assert!(o.keep_locks);
+        assert!(o.keep_changelists);
+        assert!(o.commit_as_operations);
+        assert!(o.include_file_externals);
+        assert!(o.include_dir_externals);
+        assert_eq!(o.changelists.as_deref(), Some(&["cl".to_string()][..]));
+    }
+
+    #[test]
+    fn test_delete_options_builder() {
+        let o = DeleteOptions::new().with_force(true).with_keep_local(true);
+        assert!(o.force);
+        assert!(o.keep_local);
+    }
+
+    #[test]
+    fn test_mkdir_options_builder() {
+        let mut revprops = std::collections::HashMap::new();
+        revprops.insert("svn:log".to_string(), b"m".to_vec());
+        let o = MkdirOptions::new()
+            .with_make_parents(true)
+            .with_revprop_table(revprops);
+        assert!(o.make_parents);
+        assert!(o.revprop_table.is_some());
+        assert_eq!(
+            o.revprop_table.as_ref().unwrap().get("svn:log"),
+            Some(&b"m".to_vec())
+        );
+    }
+
+    #[test]
+    fn test_move_options_builder() {
+        let mut revprops = std::collections::HashMap::new();
+        revprops.insert("svn:log".to_string(), b"m".to_vec());
+        let o = MoveOptions::new()
+            .with_move_as_child(true)
+            .with_make_parents(true)
+            .with_allow_mixed_revisions(false)
+            .with_metadata_only(true)
+            .with_revprop_table(revprops);
+        assert!(o.move_as_child);
+        assert!(o.make_parents);
+        assert!(!o.allow_mixed_revisions); // default is true
+        assert!(o.metadata_only);
+        assert!(o.revprop_table.is_some());
+    }
+
+    #[test]
+    fn test_copy_options_builder() {
+        let mut pin = std::collections::HashMap::new();
+        pin.insert("ext".to_string(), "2".to_string());
+        let mut revprops = std::collections::HashMap::new();
+        revprops.insert("svn:log".to_string(), "m".to_string());
+        let o = CopyOptions::new()
+            .with_copy_as_child(true)
+            .with_make_parents(true)
+            .with_ignore_externals(true)
+            .with_metadata_only(true)
+            .with_pin_externals(true)
+            .with_externals_to_pin(pin)
+            .with_revprop_table(revprops);
+        assert!(o.copy_as_child);
+        assert!(o.make_parents);
+        assert!(o.ignore_externals);
+        assert!(o.metadata_only);
+        assert!(o.pin_externals);
+        assert_eq!(
+            o.externals_to_pin.as_ref().unwrap().get("ext"),
+            Some(&"2".to_string())
+        );
+        assert!(o.revprop_table.is_some());
+    }
+
+    #[test]
+    fn test_import_options_builder() {
+        let mut revprops = std::collections::HashMap::new();
+        revprops.insert("svn:log".to_string(), "m".to_string());
+        let o = ImportOptions::new()
+            .with_depth(Depth::Files)
+            .with_no_ignore(true)
+            .with_no_autoprops(true)
+            .with_ignore_unknown_node_types(true)
+            .with_revprop_table(revprops);
+        assert_eq!(o.depth, Depth::Files);
+        assert!(o.no_ignore);
+        assert!(o.no_autoprops);
+        assert!(o.ignore_unknown_node_types);
+        assert!(o.revprop_table.is_some());
+    }
+
+    #[test]
+    fn test_prop_set_remote_options_builder() {
+        let mut revprops = std::collections::HashMap::new();
+        revprops.insert("svn:log".to_string(), "m".to_string());
+        let o = PropSetRemoteOptions::new()
+            .with_skip_checks(true)
+            .with_revprop_table(revprops);
+        assert!(o.skip_checks);
+        assert!(o.revprop_table.is_some());
+    }
+
+    #[test]
+    fn test_info_and_wc_info_accessors() {
+        let td = tempfile::tempdir().unwrap();
+        let repo = td.path().join("repo");
+        let wc = td.path().join("wc");
+        let repos = crate::repos::Repos::create(&repo).unwrap();
+
+        // Commit a directory so the repository is at revision 1; this makes the
+        // revision accessors non-zero (revision 0's default would otherwise
+        // coincide with Revnum's Default).
+        let mut txn = repos
+            .begin_txn_for_commit(Revnum(0), "alice", "init")
+            .unwrap();
+        {
+            let mut root = txn.root().unwrap();
+            root.make_dir("/trunk").unwrap();
+        }
+        repos.commit_txn(txn).unwrap();
+
+        let url = crate::path_to_file_url(&repo);
+        let mut ctx = Context::new().unwrap();
+        ctx.checkout(
+            crate::uri::Uri::new(&url).unwrap(),
+            &wc,
+            &CheckoutOptions {
+                peg_revision: Revision::Head,
+                revision: Revision::Head,
+                depth: Depth::Infinity,
+                ignore_externals: false,
+                allow_unver_obstructions: false,
+            },
+        )
+        .unwrap();
+
+        // An unspecified revision queries the working copy, which populates
+        // wc_info (HEAD/working-revision queries leave it null).
+        let wc_abs = wc.canonicalize().unwrap();
+        let mut visited = 0;
+        ctx.info(
+            wc_abs.to_str().unwrap(),
+            &InfoOptions {
+                revision: Revision::Unspecified,
+                peg_revision: Revision::Unspecified,
+                ..Default::default()
+            },
+            &|_path, info| {
+                visited += 1;
+
+                // Info accessors for the checked-out root, now at revision 1.
+                assert_eq!(info.url(), url);
+                assert_eq!(info.revision(), Revnum(1));
+                assert_eq!(info.kind(), subversion_sys::svn_node_kind_t_svn_node_dir);
+                assert_eq!(info.repos_root_url(), url);
+                assert_eq!(info.repos_uuid().len(), 36);
+                // A directory has no meaningful size.
+                assert_eq!(info.size(), -1);
+                assert_eq!(info.last_changed_rev(), Some(Revnum(1)));
+
+                // wc_info is populated for a working-copy target.
+                let wc_info = info.wc_info().expect("wc_info present for WC target");
+                assert_eq!(
+                    wc_info.schedule(),
+                    subversion_sys::svn_wc_schedule_t_svn_wc_schedule_normal
+                );
+                assert_eq!(
+                    wc_info.depth(),
+                    subversion_sys::svn_depth_t_svn_depth_infinity
+                );
+                // A plain checkout is not a copy and has no changelist.
+                assert_eq!(wc_info.copyfrom_url(), None);
+                assert_eq!(wc_info.copyfrom_rev(), None);
+                assert_eq!(wc_info.changelist(), None);
+
+                // dup() produces an owned copy with the same data.
+                let owned = wc_info.dup();
+                assert_eq!(
+                    owned.schedule(),
+                    subversion_sys::svn_wc_schedule_t_svn_wc_schedule_normal
+                );
+
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(visited, 1);
+    }
 
     /// Test fixture for client tests with repository and working copy.
     struct ClientTestFixture {

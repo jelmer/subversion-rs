@@ -1615,3 +1615,154 @@ impl Drop for Adm {
         self.close();
     }
 }
+
+// These tests build a working copy via the client checkout API, so they
+// require the client (and thus repos) features.
+#[cfg(all(test, feature = "client"))]
+#[allow(deprecated)]
+mod tests {
+    use super::*;
+
+    /// Create a repository and check out a working copy; return the temp dir
+    /// (kept alive) and the working-copy path.
+    fn checkout_wc() -> (tempfile::TempDir, std::path::PathBuf) {
+        let temp = tempfile::TempDir::new().unwrap();
+        let repos_path = temp.path().join("repos");
+        let wc_path = temp.path().join("wc");
+        crate::repos::Repos::create(&repos_path).unwrap();
+        let url = crate::path_to_file_url(&repos_path);
+        let uri = crate::uri::Uri::new(&url).unwrap();
+        let mut ctx = crate::client::Context::new().unwrap();
+        ctx.checkout(
+            uri,
+            &wc_path,
+            &crate::client::CheckoutOptions {
+                peg_revision: crate::Revision::Head,
+                revision: crate::Revision::Head,
+                depth: crate::Depth::Infinity,
+                ignore_externals: false,
+                allow_unver_obstructions: false,
+            },
+        )
+        .unwrap();
+        (temp, wc_path)
+    }
+
+    #[test]
+    fn test_adm_open_lifecycle() {
+        let (_temp, wc) = checkout_wc();
+        let wc_str = wc.to_str().unwrap();
+
+        // A read-only open is not write-locked; a write open is.
+        let ro = Adm::open(wc_str, false, 0).unwrap();
+        assert!(!ro.is_locked());
+        drop(ro);
+
+        let mut rw = Adm::open(wc_str, true, 0).unwrap();
+        assert!(rw.is_locked());
+        // access_path() returns the svn-absolute form of the input, which is not
+        // the same as std::fs::canonicalize on platforms with symlinked temp
+        // dirs (e.g. macOS /var -> /private/var).
+        let expected = crate::dirent::to_absolute_cstring(wc_str).unwrap();
+        assert_eq!(rw.access_path(), expected.to_str().unwrap());
+        // close() releases the lock and is idempotent.
+        rw.close();
+    }
+
+    #[test]
+    fn test_adm_entry_and_is_wc_root() {
+        let (_temp, wc) = checkout_wc();
+        let wc_str = wc.to_str().unwrap();
+        let adm = Adm::open(wc_str, false, 0).unwrap();
+
+        // The checked-out directory is a working-copy root.
+        assert!(adm.is_wc_root(wc_str).unwrap());
+        // An unconflicted checkout reports no conflicts.
+        assert_eq!(adm.conflicted(wc_str).unwrap(), (false, false, false));
+
+        // Its entry is a versioned directory with a URL.
+        let entry = adm
+            .entry(wc_str, false)
+            .unwrap()
+            .expect("root is versioned");
+        assert_eq!(entry.kind, crate::NodeKind::Dir);
+        assert!(entry.url.is_some());
+
+        // entries_read sees the single directory entry.
+        let entries = adm.entries_read(false).unwrap();
+        assert_eq!(entries.len(), 1);
+    }
+
+    #[test]
+    fn test_adm_prop_round_trip() {
+        let (_temp, wc) = checkout_wc();
+        let wc_str = wc.to_str().unwrap();
+        let adm = Adm::open(wc_str, true, 0).unwrap();
+
+        // No property modifications initially.
+        assert!(!adm.props_modified(wc_str).unwrap());
+        assert_eq!(adm.prop_get("my:prop", wc_str).unwrap(), None);
+
+        // Set a property, then read it back via get and list.
+        adm.prop_set("my:prop", Some(b"hello"), wc_str).unwrap();
+        assert_eq!(
+            adm.prop_get("my:prop", wc_str).unwrap(),
+            Some(b"hello".to_vec())
+        );
+        assert!(adm.props_modified(wc_str).unwrap());
+        assert_eq!(
+            adm.prop_list(wc_str).unwrap().get("my:prop"),
+            Some(&b"hello".to_vec())
+        );
+    }
+
+    #[test]
+    fn test_adm_status() {
+        let (_temp, wc) = checkout_wc();
+        let wc_str = wc.to_str().unwrap();
+        let adm = Adm::open(wc_str, false, 0).unwrap();
+
+        let status = adm.status(wc_str).unwrap();
+        // The root is versioned, so its status carries the directory entry.
+        let entry = status.entry.expect("versioned path has an entry");
+        assert_eq!(entry.kind, crate::NodeKind::Dir);
+    }
+
+    #[test]
+    fn test_adm_get_ancestry() {
+        let (_temp, wc) = checkout_wc();
+        let wc_str = wc.to_str().unwrap();
+        let adm = Adm::open(wc_str, false, 0).unwrap();
+
+        let (url, rev) = adm.get_ancestry(wc_str).unwrap();
+        // A fresh checkout of an empty repository is at revision 0, and the
+        // root maps to the repository root URL.
+        assert_eq!(rev, crate::Revnum(0));
+        assert!(url.expect("root has a URL").ends_with("repos"));
+    }
+
+    #[test]
+    fn test_adm_add_file_and_query() {
+        let (_temp, wc) = checkout_wc();
+        let wc_str = wc.to_str().unwrap();
+        let adm = Adm::open(wc_str, true, 0).unwrap();
+
+        // Create and schedule a new text file for addition.
+        let file = wc.join("hello.txt");
+        std::fs::write(&file, b"hello\n").unwrap();
+        let file_str = file.to_str().unwrap();
+        adm.add(file_str, None, None).unwrap();
+
+        // It is now a versioned file (but not a working-copy root).
+        let entry = adm
+            .entry(file_str, false)
+            .unwrap()
+            .expect("file is versioned");
+        assert_eq!(entry.kind, crate::NodeKind::File);
+        assert!(!adm.is_wc_root(file_str).unwrap());
+
+        // A freshly added text file has modified text and is not binary.
+        assert!(adm.text_modified(file_str, false).unwrap());
+        assert!(!adm.has_binary_prop(file_str).unwrap());
+    }
+}
