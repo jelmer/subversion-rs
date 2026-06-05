@@ -170,26 +170,18 @@ impl std::fmt::Display for StringBuf {
 pub struct Stream {
     ptr: *mut subversion_sys::svn_stream_t,
     _pool: apr::Pool<'static>,
-    backend: Option<*mut std::ffi::c_void>, // Boxed backend for manual cleanup (not used by from_backend)
-    needs_close: bool,                      // Whether to call svn_stream_close on drop
-    _phantom: PhantomData<*mut ()>,         // !Send + !Sync
+    needs_close: bool,              // Whether to call svn_stream_close on drop
+    _phantom: PhantomData<*mut ()>, // !Send + !Sync
 }
 
 impl Drop for Stream {
     fn drop(&mut self) {
-        // Close the stream if needed (for streams with close callbacks that need to run)
+        // Close the stream if needed (for streams with close callbacks that need to run).
+        // Backends from from_backend() are freed by close_trampoline, not here.
         if self.needs_close {
             unsafe {
                 // Ignore errors during drop
                 let _ = subversion_sys::svn_stream_close(self.ptr);
-            }
-        }
-        // Free the boxed backend if it exists
-        // Note: backends from from_backend() are freed by close_trampoline and won't be stored here
-        if let Some(backend_ptr) = self.backend {
-            unsafe {
-                // This is for batons from create() and set_baton() that don't have automatic cleanup
-                drop(Box::from_raw(backend_ptr));
             }
         }
         // Pool drop will clean up stream
@@ -204,7 +196,6 @@ impl Stream {
         Self {
             ptr: stream,
             _pool: pool,
-            backend: None,
             needs_close: false,
             _phantom: PhantomData,
         }
@@ -217,7 +208,6 @@ impl Stream {
         Self {
             ptr: stream,
             _pool: pool,
-            backend: None,
             needs_close: false,
             _phantom: PhantomData,
         }
@@ -232,7 +222,6 @@ impl Stream {
         Self {
             ptr: stream,
             _pool: pool,
-            backend: None,
             needs_close: false,
             _phantom: PhantomData,
         }
@@ -243,30 +232,9 @@ impl Stream {
         Self {
             ptr,
             _pool: pool,
-            backend: None,
             needs_close: false,
             _phantom: PhantomData,
         }
-    }
-
-    /// Create a stream from a callback-based implementation
-    pub fn create<T: 'static>(baton: T) -> Self {
-        let pool = apr::Pool::new();
-        let baton_ptr = Box::into_raw(Box::new(baton)) as *mut std::ffi::c_void;
-        let stream = unsafe { subversion_sys::svn_stream_create(baton_ptr, pool.as_mut_ptr()) };
-        Self {
-            ptr: stream,
-            _pool: pool,
-            backend: Some(baton_ptr),
-            needs_close: false,
-            _phantom: PhantomData,
-        }
-    }
-
-    /// Set the baton for this stream
-    pub fn set_baton<T: 'static>(&mut self, baton: T) {
-        let baton_ptr = Box::into_raw(Box::new(baton)) as *mut std::ffi::c_void;
-        unsafe { subversion_sys::svn_stream_set_baton(self.ptr, baton_ptr) };
     }
 
     /// Create a stream from a custom backend implementation
@@ -448,7 +416,6 @@ impl Stream {
         Ok(Self {
             ptr: stream,
             _pool: pool,
-            backend: None,      // Backend is managed by close_trampoline, not by Drop
             needs_close: false, // SVN C code closes the stream; avoid double-close/free
             _phantom: PhantomData,
         })
@@ -461,7 +428,6 @@ impl Stream {
         Self {
             ptr: stream,
             _pool: pool,
-            backend: None, // Disowned streams don't own backends
             needs_close: false,
             _phantom: PhantomData,
         }
@@ -481,7 +447,6 @@ impl Stream {
         Self {
             ptr: stream,
             _pool: pool,
-            backend: None,
             needs_close: false,
             _phantom: PhantomData,
         }
@@ -505,7 +470,6 @@ impl Stream {
         Self {
             ptr,
             _pool: pool,
-            backend: None,
             needs_close: false,
             _phantom: PhantomData,
         }
@@ -532,7 +496,6 @@ impl Stream {
         Ok(Self {
             ptr: stream,
             _pool: pool,
-            backend: None,
             needs_close: false,
             _phantom: PhantomData,
         })
@@ -559,7 +522,6 @@ impl Stream {
         Ok(Self {
             ptr: stream,
             _pool: pool,
-            backend: None,
             needs_close: false,
             _phantom: PhantomData,
         })
@@ -603,7 +565,6 @@ impl Stream {
         Ok(Self {
             ptr: stream,
             _pool: pool,
-            backend: None,
             needs_close: false,
             _phantom: PhantomData,
         })
@@ -618,7 +579,6 @@ impl Stream {
         Ok(Self {
             ptr: stream,
             _pool: pool,
-            backend: None,
             needs_close: false,
             _phantom: PhantomData,
         })
@@ -633,7 +593,6 @@ impl Stream {
         Ok(Self {
             ptr: stream,
             _pool: pool,
-            backend: None,
             needs_close: false,
             _phantom: PhantomData,
         })
@@ -679,7 +638,6 @@ impl Stream {
         Self {
             ptr: stream,
             _pool: pool,
-            backend: None,
             needs_close: false,
             _phantom: PhantomData,
         }
@@ -886,235 +844,6 @@ impl Stream {
         self.printf(format, args)
     }
 
-    /// Set a read callback for the stream
-    /// Note: This stores the callback in the stream's baton.
-    pub fn set_read_callback<F>(&mut self, read_func: F)
-    where
-        F: Fn(&mut [u8]) -> Result<usize, Error<'static>> + 'static,
-    {
-        // Store the callback in the stream's baton
-        let boxed_func = Box::into_raw(Box::new(read_func));
-        self.set_baton(boxed_func as *mut std::ffi::c_void);
-
-        extern "C" fn read_trampoline(
-            baton: *mut std::ffi::c_void,
-            buffer: *mut std::os::raw::c_char,
-            len: *mut apr_sys::apr_size_t,
-        ) -> *mut subversion_sys::svn_error_t {
-            let read_func = unsafe {
-                &*(baton as *const Box<dyn Fn(&mut [u8]) -> Result<usize, Error<'static>>>)
-            };
-            let buf = unsafe { std::slice::from_raw_parts_mut(buffer as *mut u8, *len) };
-            match read_func(buf) {
-                Ok(bytes_read) => {
-                    unsafe { *len = bytes_read };
-                    std::ptr::null_mut()
-                }
-                Err(mut e) => unsafe { e.detach() },
-            }
-        }
-
-        unsafe {
-            subversion_sys::svn_stream_set_read(self.ptr, Some(read_trampoline));
-        }
-    }
-
-    /// Set a write callback for the stream
-    /// Note: This stores the callback in the stream's baton.
-    pub fn set_write_callback<F>(&mut self, write_func: F)
-    where
-        F: Fn(&[u8]) -> Result<usize, Error<'static>> + 'static,
-    {
-        // Store the callback in the stream's baton
-        let boxed_func = Box::into_raw(Box::new(write_func));
-        self.set_baton(boxed_func as *mut std::ffi::c_void);
-
-        extern "C" fn write_trampoline(
-            baton: *mut std::ffi::c_void,
-            data: *const std::os::raw::c_char,
-            len: *mut apr_sys::apr_size_t,
-        ) -> *mut subversion_sys::svn_error_t {
-            let write_func =
-                unsafe { &*(baton as *const Box<dyn Fn(&[u8]) -> Result<usize, Error<'static>>>) };
-            let buf = unsafe { std::slice::from_raw_parts(data as *const u8, *len) };
-            match write_func(buf) {
-                Ok(bytes_written) => {
-                    unsafe { *len = bytes_written };
-                    std::ptr::null_mut()
-                }
-                Err(mut e) => unsafe { e.detach() },
-            }
-        }
-
-        unsafe {
-            subversion_sys::svn_stream_set_write(self.ptr, Some(write_trampoline));
-        }
-    }
-
-    /// Set a close callback for the stream
-    /// Note: This stores the callback in the stream's baton.
-    pub fn set_close_callback<F>(&mut self, close_func: F)
-    where
-        F: Fn() -> Result<(), Error<'static>> + 'static,
-    {
-        // Store the callback in the stream's baton
-        let boxed_func = Box::into_raw(Box::new(close_func));
-        self.set_baton(boxed_func as *mut std::ffi::c_void);
-
-        extern "C" fn close_trampoline(
-            baton: *mut std::ffi::c_void,
-        ) -> *mut subversion_sys::svn_error_t {
-            let close_func =
-                unsafe { &*(baton as *const Box<dyn Fn() -> Result<(), Error<'static>>>) };
-            match close_func() {
-                Ok(_) => std::ptr::null_mut(),
-                Err(mut e) => unsafe { e.detach() },
-            }
-        }
-
-        unsafe {
-            subversion_sys::svn_stream_set_close(self.ptr, Some(close_trampoline));
-        }
-    }
-
-    /// Set a skip callback for the stream
-    /// Note: This stores the callback in the stream's baton.
-    pub fn set_skip_callback<F>(&mut self, skip_func: F)
-    where
-        F: Fn(usize) -> Result<(), Error<'static>> + 'static,
-    {
-        // Store the callback in the stream's baton
-        let boxed_func = Box::into_raw(Box::new(skip_func));
-        self.set_baton(boxed_func as *mut std::ffi::c_void);
-
-        extern "C" fn skip_trampoline(
-            baton: *mut std::ffi::c_void,
-            len: apr_sys::apr_size_t,
-        ) -> *mut subversion_sys::svn_error_t {
-            let skip_func =
-                unsafe { &*(baton as *const Box<dyn Fn(usize) -> Result<(), Error<'static>>>) };
-            match skip_func(len) {
-                Ok(_) => std::ptr::null_mut(),
-                Err(mut e) => unsafe { e.detach() },
-            }
-        }
-
-        unsafe {
-            subversion_sys::svn_stream_set_skip(self.ptr, Some(skip_trampoline));
-        }
-    }
-
-    /// Set mark callback for the stream
-    /// Note: This stores the callback in the stream's baton.
-    pub fn set_mark_callback<F>(&mut self, mark_func: F)
-    where
-        F: Fn() -> Result<*mut subversion_sys::svn_stream_mark_t, Error<'static>> + 'static,
-    {
-        // Store the callback in the stream's baton
-        let boxed_func = Box::into_raw(Box::new(mark_func));
-        self.set_baton(boxed_func as *mut std::ffi::c_void);
-
-        extern "C" fn mark_trampoline(
-            baton: *mut std::ffi::c_void,
-            mark: *mut *mut subversion_sys::svn_stream_mark_t,
-            _pool: *mut apr_sys::apr_pool_t,
-        ) -> *mut subversion_sys::svn_error_t {
-            let mark_func = unsafe {
-                &*(baton
-                    as *const Box<
-                        dyn Fn() -> Result<*mut subversion_sys::svn_stream_mark_t, Error<'static>>,
-                    >)
-            };
-            match mark_func() {
-                Ok(mark_ptr) => {
-                    unsafe { *mark = mark_ptr };
-                    std::ptr::null_mut()
-                }
-                Err(mut e) => unsafe { e.detach() },
-            }
-        }
-
-        unsafe {
-            subversion_sys::svn_stream_set_mark(self.ptr, Some(mark_trampoline));
-        }
-    }
-
-    /// Set seek callback for the stream
-    /// Note: This stores the callback in the stream's baton.
-    pub fn set_seek_callback<F>(&mut self, seek_func: F)
-    where
-        F: Fn(*const subversion_sys::svn_stream_mark_t) -> Result<(), Error<'static>> + 'static,
-    {
-        // Store the callback in the stream's baton
-        let boxed_func = Box::into_raw(Box::new(seek_func));
-        self.set_baton(boxed_func as *mut std::ffi::c_void);
-
-        extern "C" fn seek_trampoline(
-            baton: *mut std::ffi::c_void,
-            mark: *const subversion_sys::svn_stream_mark_t,
-        ) -> *mut subversion_sys::svn_error_t {
-            let seek_func = unsafe {
-                &*(baton
-                    as *const Box<
-                        dyn Fn(
-                            *const subversion_sys::svn_stream_mark_t,
-                        ) -> Result<(), Error<'static>>,
-                    >)
-            };
-            match seek_func(mark) {
-                Ok(_) => std::ptr::null_mut(),
-                Err(mut e) => unsafe { e.detach() },
-            }
-        }
-
-        unsafe {
-            subversion_sys::svn_stream_set_seek(self.ptr, Some(seek_trampoline));
-        }
-    }
-
-    /// Create a lazyopen stream with a callback function
-    pub fn lazyopen_create<F>(open_func: F, close_baton: bool) -> Self
-    where
-        F: Fn() -> Result<Stream, Error<'static>> + 'static,
-    {
-        let pool = apr::Pool::new();
-        let open_func_ptr = Box::into_raw(Box::new(open_func)) as *mut std::ffi::c_void;
-
-        extern "C" fn open_trampoline(
-            lazyopen_stream: *mut *mut subversion_sys::svn_stream_t,
-            open_baton: *mut std::ffi::c_void,
-            _result_pool: *mut apr_sys::apr_pool_t,
-            _scratch_pool: *mut apr_sys::apr_pool_t,
-        ) -> *mut subversion_sys::svn_error_t {
-            let open_func =
-                unsafe { &*(open_baton as *const Box<dyn Fn() -> Result<Stream, Error<'static>>>) };
-            match open_func() {
-                Ok(stream) => {
-                    unsafe { *lazyopen_stream = stream.ptr };
-                    std::ptr::null_mut()
-                }
-                Err(mut e) => unsafe { e.detach() },
-            }
-        }
-
-        let stream = unsafe {
-            subversion_sys::svn_stream_lazyopen_create(
-                Some(open_trampoline),
-                open_func_ptr,
-                close_baton as i32,
-                pool.as_mut_ptr(),
-            )
-        };
-
-        Self {
-            backend: None,
-            ptr: stream,
-            _pool: pool,
-            needs_close: false,
-            _phantom: PhantomData,
-        }
-    }
-
     /// Create a stream from a Rust reader
     /// This is a simplified implementation that works with the existing SVN stream infrastructure
     pub fn from_reader<R: std::io::Read + 'static>(mut reader: R) -> Result<Self, Error<'static>> {
@@ -1156,7 +885,6 @@ pub fn tee(out1: &mut Stream, out2: &mut Stream) -> Result<Stream, Error<'static
     Ok(Stream {
         ptr: stream,
         _pool: pool,
-        backend: None,
         needs_close: false,
         _phantom: PhantomData,
     })
@@ -1210,7 +938,6 @@ impl From<&[u8]> for Stream {
         Self {
             ptr: stream,
             _pool: pool,
-            backend: None,
             needs_close: false,
             _phantom: PhantomData,
         }
@@ -1293,7 +1020,6 @@ pub fn wrap_write(write: &mut dyn std::io::Write) -> Result<Stream, Error<'stati
     Ok(Stream {
         ptr: stream,
         _pool: pool,
-        backend: None,
         needs_close: true, // Ensure close_fn runs to free the boxed write reference
         _phantom: PhantomData,
     })
