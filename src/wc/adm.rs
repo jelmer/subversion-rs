@@ -1747,7 +1747,6 @@ impl Drop for Adm<'_> {
 #[cfg(all(test, feature = "client"))]
 #[allow(deprecated)]
 mod tests {
-    #[cfg(feature = "repos")]
     use super::*;
 
     /// Create a repository and check out a working copy; return the temp dir
@@ -1894,22 +1893,10 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "repos")]
-    #[allow(deprecated)]
     fn test_add_repos_file() {
         use std::io::Cursor;
 
-        let temp_dir = tempfile::tempdir().unwrap();
-        let wc_path = temp_dir.path().join("wc");
-        let repo_path = temp_dir.path().join("repo");
-
-        // Create repo and checkout
-        crate::repos::Repos::create(&repo_path).unwrap();
-        let repo_url = format!("file://{}", repo_path.display());
-        std::process::Command::new("svn")
-            .args(["checkout", &repo_url, wc_path.to_str().unwrap()])
-            .output()
-            .unwrap();
+        let (_temp, wc_path) = checkout_wc();
 
         // Create a file on disk
         let file_path = wc_path.join("test.txt");
@@ -1938,30 +1925,15 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "repos")]
-    #[allow(deprecated)]
     fn test_probe_try_versioned_dir() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let wc_path = temp_dir.path().join("wc");
-        let repo_path = temp_dir.path().join("repo");
+        let (_temp, wc_path) = checkout_wc();
 
-        // Create repo and checkout
-        crate::repos::Repos::create(&repo_path).unwrap();
-        let repo_url = format!("file://{}", repo_path.display());
-        std::process::Command::new("svn")
-            .args(["checkout", &repo_url, wc_path.to_str().unwrap()])
-            .output()
-            .unwrap();
+        let mut adm = Adm::open(wc_path.to_str().unwrap(), true, -1).unwrap();
 
         // Create and add a subdirectory
         let sub_dir = wc_path.join("subdir");
         std::fs::create_dir(&sub_dir).unwrap();
-        std::process::Command::new("svn")
-            .args(["add", sub_dir.to_str().unwrap()])
-            .output()
-            .unwrap();
-
-        let mut adm = Adm::open(wc_path.to_str().unwrap(), true, -1).unwrap();
+        adm.add(sub_dir.to_str().unwrap(), None, None).unwrap();
 
         // probe_try on the versioned subdirectory should return Some
         let sub_adm = adm.probe_try(sub_dir.to_str().unwrap(), true, 0).unwrap();
@@ -1973,20 +1945,8 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "repos")]
-    #[allow(deprecated)]
     fn test_probe_try_unversioned_file() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let wc_path = temp_dir.path().join("wc");
-        let repo_path = temp_dir.path().join("repo");
-
-        // Create repo and checkout
-        crate::repos::Repos::create(&repo_path).unwrap();
-        let repo_url = format!("file://{}", repo_path.display());
-        std::process::Command::new("svn")
-            .args(["checkout", &repo_url, wc_path.to_str().unwrap()])
-            .output()
-            .unwrap();
+        let (_temp, wc_path) = checkout_wc();
 
         let mut adm = Adm::open(wc_path.to_str().unwrap(), true, -1).unwrap();
 
