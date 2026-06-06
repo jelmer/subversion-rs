@@ -4366,6 +4366,11 @@ mod tests {
     }
 
     #[test]
+    // SVN's pre-revprop-change hook runner forks and execs a shell script,
+    // which is fork-unsafe on Darwin while the test harness runs many
+    // threads: the hook child is intermittently killed by a signal. There
+    // is nothing the binding can do about it, so skip this one on macOS.
+    #[cfg_attr(target_os = "macos", ignore)]
     fn test_change_revprop() {
         use std::fs;
         use std::io::Write;
