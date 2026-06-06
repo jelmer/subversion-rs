@@ -170,26 +170,18 @@ impl std::fmt::Display for StringBuf {
 pub struct Stream {
     ptr: *mut subversion_sys::svn_stream_t,
     _pool: apr::Pool<'static>,
-    backend: Option<*mut std::ffi::c_void>, // Boxed backend for manual cleanup (not used by from_backend)
-    needs_close: bool,                      // Whether to call svn_stream_close on drop
-    _phantom: PhantomData<*mut ()>,         // !Send + !Sync
+    needs_close: bool,              // Whether to call svn_stream_close on drop
+    _phantom: PhantomData<*mut ()>, // !Send + !Sync
 }
 
 impl Drop for Stream {
     fn drop(&mut self) {
-        // Close the stream if needed (for streams with close callbacks that need to run)
+        // Close the stream if needed (for streams with close callbacks that need to run).
+        // Backends from from_backend() are freed by close_trampoline, not here.
         if self.needs_close {
             unsafe {
                 // Ignore errors during drop
                 let _ = subversion_sys::svn_stream_close(self.ptr);
-            }
-        }
-        // Free the boxed backend if it exists
-        // Note: backends from from_backend() are freed by close_trampoline and won't be stored here
-        if let Some(backend_ptr) = self.backend {
-            unsafe {
-                // This is for batons from create() and set_baton() that don't have automatic cleanup
-                drop(Box::from_raw(backend_ptr));
             }
         }
         // Pool drop will clean up stream
@@ -204,7 +196,6 @@ impl Stream {
         Self {
             ptr: stream,
             _pool: pool,
-            backend: None,
             needs_close: false,
             _phantom: PhantomData,
         }
@@ -217,7 +208,6 @@ impl Stream {
         Self {
             ptr: stream,
             _pool: pool,
-            backend: None,
             needs_close: false,
             _phantom: PhantomData,
         }
@@ -232,7 +222,6 @@ impl Stream {
         Self {
             ptr: stream,
             _pool: pool,
-            backend: None,
             needs_close: false,
             _phantom: PhantomData,
         }
@@ -243,30 +232,9 @@ impl Stream {
         Self {
             ptr,
             _pool: pool,
-            backend: None,
             needs_close: false,
             _phantom: PhantomData,
         }
-    }
-
-    /// Create a stream from a callback-based implementation
-    pub fn create<T: 'static>(baton: T) -> Self {
-        let pool = apr::Pool::new();
-        let baton_ptr = Box::into_raw(Box::new(baton)) as *mut std::ffi::c_void;
-        let stream = unsafe { subversion_sys::svn_stream_create(baton_ptr, pool.as_mut_ptr()) };
-        Self {
-            ptr: stream,
-            _pool: pool,
-            backend: Some(baton_ptr),
-            needs_close: false,
-            _phantom: PhantomData,
-        }
-    }
-
-    /// Set the baton for this stream
-    pub fn set_baton<T: 'static>(&mut self, baton: T) {
-        let baton_ptr = Box::into_raw(Box::new(baton)) as *mut std::ffi::c_void;
-        unsafe { subversion_sys::svn_stream_set_baton(self.ptr, baton_ptr) };
     }
 
     /// Create a stream from a custom backend implementation
@@ -448,7 +416,6 @@ impl Stream {
         Ok(Self {
             ptr: stream,
             _pool: pool,
-            backend: None,      // Backend is managed by close_trampoline, not by Drop
             needs_close: false, // SVN C code closes the stream; avoid double-close/free
             _phantom: PhantomData,
         })
@@ -461,7 +428,6 @@ impl Stream {
         Self {
             ptr: stream,
             _pool: pool,
-            backend: None, // Disowned streams don't own backends
             needs_close: false,
             _phantom: PhantomData,
         }
@@ -481,7 +447,6 @@ impl Stream {
         Self {
             ptr: stream,
             _pool: pool,
-            backend: None,
             needs_close: false,
             _phantom: PhantomData,
         }
@@ -505,7 +470,6 @@ impl Stream {
         Self {
             ptr,
             _pool: pool,
-            backend: None,
             needs_close: false,
             _phantom: PhantomData,
         }
@@ -532,7 +496,6 @@ impl Stream {
         Ok(Self {
             ptr: stream,
             _pool: pool,
-            backend: None,
             needs_close: false,
             _phantom: PhantomData,
         })
@@ -559,7 +522,6 @@ impl Stream {
         Ok(Self {
             ptr: stream,
             _pool: pool,
-            backend: None,
             needs_close: false,
             _phantom: PhantomData,
         })
@@ -603,7 +565,6 @@ impl Stream {
         Ok(Self {
             ptr: stream,
             _pool: pool,
-            backend: None,
             needs_close: false,
             _phantom: PhantomData,
         })
@@ -618,7 +579,6 @@ impl Stream {
         Ok(Self {
             ptr: stream,
             _pool: pool,
-            backend: None,
             needs_close: false,
             _phantom: PhantomData,
         })
@@ -633,7 +593,6 @@ impl Stream {
         Ok(Self {
             ptr: stream,
             _pool: pool,
-            backend: None,
             needs_close: false,
             _phantom: PhantomData,
         })
@@ -679,7 +638,6 @@ impl Stream {
         Self {
             ptr: stream,
             _pool: pool,
-            backend: None,
             needs_close: false,
             _phantom: PhantomData,
         }
@@ -886,235 +844,6 @@ impl Stream {
         self.printf(format, args)
     }
 
-    /// Set a read callback for the stream
-    /// Note: This stores the callback in the stream's baton.
-    pub fn set_read_callback<F>(&mut self, read_func: F)
-    where
-        F: Fn(&mut [u8]) -> Result<usize, Error<'static>> + 'static,
-    {
-        // Store the callback in the stream's baton
-        let boxed_func = Box::into_raw(Box::new(read_func));
-        self.set_baton(boxed_func as *mut std::ffi::c_void);
-
-        extern "C" fn read_trampoline(
-            baton: *mut std::ffi::c_void,
-            buffer: *mut std::os::raw::c_char,
-            len: *mut apr_sys::apr_size_t,
-        ) -> *mut subversion_sys::svn_error_t {
-            let read_func = unsafe {
-                &*(baton as *const Box<dyn Fn(&mut [u8]) -> Result<usize, Error<'static>>>)
-            };
-            let buf = unsafe { std::slice::from_raw_parts_mut(buffer as *mut u8, *len) };
-            match read_func(buf) {
-                Ok(bytes_read) => {
-                    unsafe { *len = bytes_read };
-                    std::ptr::null_mut()
-                }
-                Err(mut e) => unsafe { e.detach() },
-            }
-        }
-
-        unsafe {
-            subversion_sys::svn_stream_set_read(self.ptr, Some(read_trampoline));
-        }
-    }
-
-    /// Set a write callback for the stream
-    /// Note: This stores the callback in the stream's baton.
-    pub fn set_write_callback<F>(&mut self, write_func: F)
-    where
-        F: Fn(&[u8]) -> Result<usize, Error<'static>> + 'static,
-    {
-        // Store the callback in the stream's baton
-        let boxed_func = Box::into_raw(Box::new(write_func));
-        self.set_baton(boxed_func as *mut std::ffi::c_void);
-
-        extern "C" fn write_trampoline(
-            baton: *mut std::ffi::c_void,
-            data: *const std::os::raw::c_char,
-            len: *mut apr_sys::apr_size_t,
-        ) -> *mut subversion_sys::svn_error_t {
-            let write_func =
-                unsafe { &*(baton as *const Box<dyn Fn(&[u8]) -> Result<usize, Error<'static>>>) };
-            let buf = unsafe { std::slice::from_raw_parts(data as *const u8, *len) };
-            match write_func(buf) {
-                Ok(bytes_written) => {
-                    unsafe { *len = bytes_written };
-                    std::ptr::null_mut()
-                }
-                Err(mut e) => unsafe { e.detach() },
-            }
-        }
-
-        unsafe {
-            subversion_sys::svn_stream_set_write(self.ptr, Some(write_trampoline));
-        }
-    }
-
-    /// Set a close callback for the stream
-    /// Note: This stores the callback in the stream's baton.
-    pub fn set_close_callback<F>(&mut self, close_func: F)
-    where
-        F: Fn() -> Result<(), Error<'static>> + 'static,
-    {
-        // Store the callback in the stream's baton
-        let boxed_func = Box::into_raw(Box::new(close_func));
-        self.set_baton(boxed_func as *mut std::ffi::c_void);
-
-        extern "C" fn close_trampoline(
-            baton: *mut std::ffi::c_void,
-        ) -> *mut subversion_sys::svn_error_t {
-            let close_func =
-                unsafe { &*(baton as *const Box<dyn Fn() -> Result<(), Error<'static>>>) };
-            match close_func() {
-                Ok(_) => std::ptr::null_mut(),
-                Err(mut e) => unsafe { e.detach() },
-            }
-        }
-
-        unsafe {
-            subversion_sys::svn_stream_set_close(self.ptr, Some(close_trampoline));
-        }
-    }
-
-    /// Set a skip callback for the stream
-    /// Note: This stores the callback in the stream's baton.
-    pub fn set_skip_callback<F>(&mut self, skip_func: F)
-    where
-        F: Fn(usize) -> Result<(), Error<'static>> + 'static,
-    {
-        // Store the callback in the stream's baton
-        let boxed_func = Box::into_raw(Box::new(skip_func));
-        self.set_baton(boxed_func as *mut std::ffi::c_void);
-
-        extern "C" fn skip_trampoline(
-            baton: *mut std::ffi::c_void,
-            len: apr_sys::apr_size_t,
-        ) -> *mut subversion_sys::svn_error_t {
-            let skip_func =
-                unsafe { &*(baton as *const Box<dyn Fn(usize) -> Result<(), Error<'static>>>) };
-            match skip_func(len) {
-                Ok(_) => std::ptr::null_mut(),
-                Err(mut e) => unsafe { e.detach() },
-            }
-        }
-
-        unsafe {
-            subversion_sys::svn_stream_set_skip(self.ptr, Some(skip_trampoline));
-        }
-    }
-
-    /// Set mark callback for the stream
-    /// Note: This stores the callback in the stream's baton.
-    pub fn set_mark_callback<F>(&mut self, mark_func: F)
-    where
-        F: Fn() -> Result<*mut subversion_sys::svn_stream_mark_t, Error<'static>> + 'static,
-    {
-        // Store the callback in the stream's baton
-        let boxed_func = Box::into_raw(Box::new(mark_func));
-        self.set_baton(boxed_func as *mut std::ffi::c_void);
-
-        extern "C" fn mark_trampoline(
-            baton: *mut std::ffi::c_void,
-            mark: *mut *mut subversion_sys::svn_stream_mark_t,
-            _pool: *mut apr_sys::apr_pool_t,
-        ) -> *mut subversion_sys::svn_error_t {
-            let mark_func = unsafe {
-                &*(baton
-                    as *const Box<
-                        dyn Fn() -> Result<*mut subversion_sys::svn_stream_mark_t, Error<'static>>,
-                    >)
-            };
-            match mark_func() {
-                Ok(mark_ptr) => {
-                    unsafe { *mark = mark_ptr };
-                    std::ptr::null_mut()
-                }
-                Err(mut e) => unsafe { e.detach() },
-            }
-        }
-
-        unsafe {
-            subversion_sys::svn_stream_set_mark(self.ptr, Some(mark_trampoline));
-        }
-    }
-
-    /// Set seek callback for the stream
-    /// Note: This stores the callback in the stream's baton.
-    pub fn set_seek_callback<F>(&mut self, seek_func: F)
-    where
-        F: Fn(*const subversion_sys::svn_stream_mark_t) -> Result<(), Error<'static>> + 'static,
-    {
-        // Store the callback in the stream's baton
-        let boxed_func = Box::into_raw(Box::new(seek_func));
-        self.set_baton(boxed_func as *mut std::ffi::c_void);
-
-        extern "C" fn seek_trampoline(
-            baton: *mut std::ffi::c_void,
-            mark: *const subversion_sys::svn_stream_mark_t,
-        ) -> *mut subversion_sys::svn_error_t {
-            let seek_func = unsafe {
-                &*(baton
-                    as *const Box<
-                        dyn Fn(
-                            *const subversion_sys::svn_stream_mark_t,
-                        ) -> Result<(), Error<'static>>,
-                    >)
-            };
-            match seek_func(mark) {
-                Ok(_) => std::ptr::null_mut(),
-                Err(mut e) => unsafe { e.detach() },
-            }
-        }
-
-        unsafe {
-            subversion_sys::svn_stream_set_seek(self.ptr, Some(seek_trampoline));
-        }
-    }
-
-    /// Create a lazyopen stream with a callback function
-    pub fn lazyopen_create<F>(open_func: F, close_baton: bool) -> Self
-    where
-        F: Fn() -> Result<Stream, Error<'static>> + 'static,
-    {
-        let pool = apr::Pool::new();
-        let open_func_ptr = Box::into_raw(Box::new(open_func)) as *mut std::ffi::c_void;
-
-        extern "C" fn open_trampoline(
-            lazyopen_stream: *mut *mut subversion_sys::svn_stream_t,
-            open_baton: *mut std::ffi::c_void,
-            _result_pool: *mut apr_sys::apr_pool_t,
-            _scratch_pool: *mut apr_sys::apr_pool_t,
-        ) -> *mut subversion_sys::svn_error_t {
-            let open_func =
-                unsafe { &*(open_baton as *const Box<dyn Fn() -> Result<Stream, Error<'static>>>) };
-            match open_func() {
-                Ok(stream) => {
-                    unsafe { *lazyopen_stream = stream.ptr };
-                    std::ptr::null_mut()
-                }
-                Err(mut e) => unsafe { e.detach() },
-            }
-        }
-
-        let stream = unsafe {
-            subversion_sys::svn_stream_lazyopen_create(
-                Some(open_trampoline),
-                open_func_ptr,
-                close_baton as i32,
-                pool.as_mut_ptr(),
-            )
-        };
-
-        Self {
-            backend: None,
-            ptr: stream,
-            _pool: pool,
-            needs_close: false,
-            _phantom: PhantomData,
-        }
-    }
-
     /// Create a stream from a Rust reader
     /// This is a simplified implementation that works with the existing SVN stream infrastructure
     pub fn from_reader<R: std::io::Read + 'static>(mut reader: R) -> Result<Self, Error<'static>> {
@@ -1156,7 +885,6 @@ pub fn tee(out1: &mut Stream, out2: &mut Stream) -> Result<Stream, Error<'static
     Ok(Stream {
         ptr: stream,
         _pool: pool,
-        backend: None,
         needs_close: false,
         _phantom: PhantomData,
     })
@@ -1210,7 +938,6 @@ impl From<&[u8]> for Stream {
         Self {
             ptr: stream,
             _pool: pool,
-            backend: None,
             needs_close: false,
             _phantom: PhantomData,
         }
@@ -1293,7 +1020,6 @@ pub fn wrap_write(write: &mut dyn std::io::Write) -> Result<Stream, Error<'stati
     Ok(Stream {
         ptr: stream,
         _pool: pool,
-        backend: None,
         needs_close: true, // Ensure close_fn runs to free the boxed write reference
         _phantom: PhantomData,
     })
@@ -2213,6 +1939,91 @@ mod tests {
     }
 
     #[test]
+    fn test_from_backend_mark_requires_both_reset_and_mark() {
+        // A backend that supports reset but NOT mark. from_backend only wires
+        // up the mark/seek callbacks when BOTH are supported (reset && mark),
+        // so the resulting stream must report no mark support.
+        struct ResetOnlyBackend;
+        impl crate::io::backend::StreamBackend for ResetOnlyBackend {
+            fn read(&mut self, _buf: &mut [u8]) -> Result<usize, Error<'static>> {
+                Ok(0)
+            }
+            fn supports_reset(&self) -> bool {
+                true
+            }
+            fn reset(&mut self) -> Result<(), Error<'static>> {
+                Ok(())
+            }
+            // supports_mark stays false (trait default).
+        }
+
+        let mut stream = Stream::from_backend(ResetOnlyBackend).unwrap();
+        assert!(
+            !stream.supports_mark(),
+            "mark must not be enabled unless the backend supports both reset and mark"
+        );
+    }
+
+    #[test]
+    fn test_from_backend_skip() {
+        use crate::io::backend::BufferBackend;
+        let backend = BufferBackend::from_vec(b"0123456789".to_vec());
+        let mut stream = Stream::from_backend(backend).unwrap();
+
+        // skip routes through skip_trampoline -> backend.skip().
+        stream.skip(4).unwrap();
+        let mut buf = vec![0u8; 6];
+        let n = stream.read(&mut buf).unwrap();
+        assert_eq!(n, 6);
+        assert_eq!(&buf, b"456789");
+    }
+
+    #[test]
+    fn test_from_backend_mark_seek() {
+        use crate::io::backend::BufferBackend;
+        let backend = BufferBackend::from_vec(b"0123456789".to_vec());
+        let mut stream = Stream::from_backend(backend).unwrap();
+
+        assert!(stream.supports_mark());
+
+        let mut buf = vec![0u8; 3];
+        stream.read_full(&mut buf).unwrap();
+        assert_eq!(&buf, b"012");
+
+        // mark routes through mark_trampoline -> backend.mark().
+        let mark = stream.mark().unwrap();
+        stream.read_full(&mut buf).unwrap();
+        assert_eq!(&buf, b"345");
+
+        // seek routes through seek_trampoline -> backend.seek().
+        stream.seek(&mark).unwrap();
+        stream.read_full(&mut buf).unwrap();
+        assert_eq!(&buf, b"345");
+    }
+
+    #[test]
+    fn test_from_backend_close_propagates_error() {
+        // A backend whose close() errors; close_trampoline must surface it,
+        // and must still drop the backend (no leak / no double free).
+        struct ClosesWithError;
+        impl crate::io::backend::StreamBackend for ClosesWithError {
+            fn read(&mut self, _buf: &mut [u8]) -> Result<usize, Error<'static>> {
+                Ok(0)
+            }
+            fn close(&mut self) -> Result<(), Error<'static>> {
+                Err(Error::from_message("close boom"))
+            }
+        }
+
+        let mut stream = Stream::from_backend(ClosesWithError).unwrap();
+        let result = stream.close();
+        assert!(
+            result.is_err(),
+            "close() should propagate the backend close error"
+        );
+    }
+
+    #[test]
     fn test_from_backend_no_double_close() {
         use crate::io::backend::BufferBackend;
 
@@ -2306,5 +2117,494 @@ mod tests {
             0,
             "File should be writable after set_file_read_write"
         );
+    }
+
+    #[test]
+    fn test_remove_file() {
+        let td = tempfile::tempdir().unwrap();
+        let path = td.path().join("doomed.txt");
+        std::fs::write(&path, "bye").unwrap();
+        assert!(path.exists());
+        remove_file(&path, false).unwrap();
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn test_remove_file_enoent() {
+        let td = tempfile::tempdir().unwrap();
+        let missing = td.path().join("nope.txt");
+        // ignore_enoent = true succeeds, false errors
+        remove_file(&missing, true).unwrap();
+        assert!(remove_file(&missing, false).is_err());
+    }
+
+    #[test]
+    fn test_temp_dir() {
+        let dir = temp_dir().unwrap();
+        assert!(dir.is_dir(), "temp_dir {:?} should exist", dir);
+    }
+
+    #[test]
+    fn test_copy_file() {
+        let td = tempfile::tempdir().unwrap();
+        let src = td.path().join("src.txt");
+        let dest = td.path().join("dest.txt");
+        std::fs::write(&src, "payload").unwrap();
+        copy_file(&src, &dest, false).unwrap();
+        assert_eq!(std::fs::read_to_string(&dest).unwrap(), "payload");
+    }
+
+    #[test]
+    fn test_make_dir_recursively() {
+        let td = tempfile::tempdir().unwrap();
+        let nested = td.path().join("a/b/c");
+        make_dir_recursively(&nested).unwrap();
+        assert!(nested.is_dir());
+    }
+
+    #[test]
+    fn test_dir_empty() {
+        let td = tempfile::tempdir().unwrap();
+        let empty = td.path().join("empty");
+        std::fs::create_dir(&empty).unwrap();
+        assert!(dir_empty(&empty).unwrap());
+
+        std::fs::write(empty.join("file.txt"), "x").unwrap();
+        assert!(!dir_empty(&empty).unwrap());
+    }
+
+    #[test]
+    fn test_append_file() {
+        let td = tempfile::tempdir().unwrap();
+        let src = td.path().join("src.txt");
+        let dest = td.path().join("dest.txt");
+        std::fs::write(&src, "world").unwrap();
+        std::fs::write(&dest, "hello ").unwrap();
+        append_file(&src, &dest).unwrap();
+        assert_eq!(std::fs::read_to_string(&dest).unwrap(), "hello world");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_is_file_executable() {
+        use std::os::unix::fs::PermissionsExt;
+        let td = tempfile::tempdir().unwrap();
+        let path = td.path().join("script");
+        std::fs::write(&path, "#!/bin/sh\n").unwrap();
+
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(!is_file_executable(&path).unwrap());
+
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(is_file_executable(&path).unwrap());
+    }
+
+    #[test]
+    fn test_set_file_affected_time() {
+        let td = tempfile::tempdir().unwrap();
+        let path = td.path().join("timed.txt");
+        std::fs::write(&path, "data").unwrap();
+
+        // 2001-09-09T01:46:40Z in microseconds since the epoch.
+        let when = apr::time::Time::from(1_000_000_000_000_000i64);
+        set_file_affected_time(&path, when).unwrap();
+        let got: i64 = file_affected_time(&path).unwrap().into();
+        assert_eq!(got, 1_000_000_000_000_000i64);
+    }
+
+    #[test]
+    fn test_filesizes_different_p() {
+        let td = tempfile::tempdir().unwrap();
+        let a = td.path().join("a.txt");
+        let b = td.path().join("b.txt");
+        let c = td.path().join("c.txt");
+        std::fs::write(&a, "1234").unwrap();
+        std::fs::write(&b, "1234").unwrap();
+        std::fs::write(&c, "123456").unwrap();
+        assert!(!filesizes_different_p(&a, &b).unwrap());
+        assert!(filesizes_different_p(&a, &c).unwrap());
+    }
+
+    #[test]
+    fn test_filesizes_three_different_p() {
+        let td = tempfile::tempdir().unwrap();
+        let a = td.path().join("a.txt");
+        let b = td.path().join("b.txt");
+        let c = td.path().join("c.txt");
+        std::fs::write(&a, "1234").unwrap();
+        std::fs::write(&b, "1234").unwrap();
+        std::fs::write(&c, "123456").unwrap();
+        // (1 vs 2, 1 vs 3, 2 vs 3): a==b, a!=c, b!=c
+        assert_eq!(
+            filesizes_three_different_p(&a, &b, &c).unwrap(),
+            (false, true, true)
+        );
+
+        // A second arrangement so no single constant tuple satisfies both
+        // assertions. Tuple is (f1!=f2, f2!=f3, f1!=f3); here a!=b, b==c, a!=c.
+        std::fs::write(&b, "123456").unwrap();
+        assert_eq!(
+            filesizes_three_different_p(&a, &b, &c).unwrap(),
+            (true, false, true)
+        );
+    }
+
+    #[test]
+    fn test_files_contents_same_p() {
+        let td = tempfile::tempdir().unwrap();
+        let a = td.path().join("a.txt");
+        let b = td.path().join("b.txt");
+        let c = td.path().join("c.txt");
+        std::fs::write(&a, "same").unwrap();
+        std::fs::write(&b, "same").unwrap();
+        std::fs::write(&c, "diff").unwrap();
+        assert!(files_contents_same_p(&a, &b).unwrap());
+        assert!(!files_contents_same_p(&a, &c).unwrap());
+    }
+
+    #[test]
+    fn test_files_contents_three_same_p() {
+        let td = tempfile::tempdir().unwrap();
+        let a = td.path().join("a.txt");
+        let b = td.path().join("b.txt");
+        let c = td.path().join("c.txt");
+        std::fs::write(&a, "same").unwrap();
+        std::fs::write(&b, "same").unwrap();
+        std::fs::write(&c, "diff").unwrap();
+        // (1 vs 2, 1 vs 3, 2 vs 3): a==b, a!=c, b!=c
+        assert_eq!(
+            files_contents_three_same_p(&a, &b, &c).unwrap(),
+            (true, false, false)
+        );
+
+        // A second arrangement so no single constant tuple satisfies both
+        // assertions. Tuple is (f1==f2, f2==f3, f1==f3); here a!=b, b==c, a!=c.
+        std::fs::write(&b, "diff").unwrap();
+        assert_eq!(
+            files_contents_three_same_p(&a, &b, &c).unwrap(),
+            (false, true, false)
+        );
+    }
+
+    #[test]
+    fn test_file_create() {
+        let td = tempfile::tempdir().unwrap();
+        let path = td.path().join("created.txt");
+        file_create(&path, "contents here").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "contents here");
+    }
+
+    #[test]
+    fn test_file_create_bytes() {
+        let td = tempfile::tempdir().unwrap();
+        let path = td.path().join("created.bin");
+        file_create_bytes(&path, b"\x00\x01\x02binary").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"\x00\x01\x02binary");
+    }
+
+    #[test]
+    fn test_file_create_empty() {
+        let td = tempfile::tempdir().unwrap();
+        let path = td.path().join("empty.txt");
+        file_create_empty(&path).unwrap();
+        assert!(path.exists());
+        assert_eq!(std::fs::metadata(&path).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_file_lock() {
+        let td = tempfile::tempdir().unwrap();
+        let path = td.path().join("lock.txt");
+        std::fs::write(&path, "data").unwrap();
+        file_lock(&path, true, false).unwrap();
+    }
+
+    #[test]
+    fn test_dir_file_copy() {
+        let td = tempfile::tempdir().unwrap();
+        let src_dir = td.path().join("src");
+        let dest_dir = td.path().join("dest");
+        std::fs::create_dir(&src_dir).unwrap();
+        std::fs::create_dir(&dest_dir).unwrap();
+        std::fs::write(src_dir.join("file.txt"), "moved").unwrap();
+
+        dir_file_copy(&src_dir, &dest_dir, std::ffi::OsStr::new("file.txt")).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dest_dir.join("file.txt")).unwrap(),
+            "moved"
+        );
+    }
+
+    #[test]
+    fn test_remove_dir() {
+        let td = tempfile::tempdir().unwrap();
+        let dir = td.path().join("to_remove");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(dir.join("inner.txt"), "x").unwrap();
+        let no_cancel: Option<&fn() -> Result<(), Error<'static>>> = None;
+        remove_dir(&dir, false, no_cancel).unwrap();
+        assert!(!dir.exists());
+    }
+
+    #[test]
+    fn test_remove_dir_enoent() {
+        let td = tempfile::tempdir().unwrap();
+        let missing = td.path().join("never");
+        let no_cancel: Option<&fn() -> Result<(), Error<'static>>> = None;
+        remove_dir(&missing, true, no_cancel).unwrap();
+        assert!(remove_dir(&missing, false, no_cancel).is_err());
+    }
+
+    #[test]
+    fn test_copy_dir_recursively() {
+        let td = tempfile::tempdir().unwrap();
+        let src = td.path().join("src");
+        std::fs::create_dir(&src).unwrap();
+        std::fs::write(src.join("file.txt"), "nested content").unwrap();
+        let dst_parent = td.path().join("dstparent");
+        std::fs::create_dir(&dst_parent).unwrap();
+
+        let no_cancel: Option<&fn() -> Result<(), Error<'static>>> = None;
+        copy_dir_recursively(
+            &src,
+            &dst_parent,
+            std::ffi::OsStr::new("copied"),
+            false,
+            no_cancel,
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dst_parent.join("copied/file.txt")).unwrap(),
+            "nested content"
+        );
+    }
+
+    #[test]
+    fn test_stream_copy() {
+        let mut from = Stream::from("stream payload");
+        let mut buf = StringBuf::new();
+        let mut to = Stream::from_stringbuf(&mut buf);
+        let no_cancel: Option<&fn() -> Result<(), Error<'static>>> = None;
+        stream_copy(&mut from, &mut to, no_cancel).unwrap();
+        drop(to);
+        assert_eq!(buf.to_string(), "stream payload");
+    }
+
+    #[test]
+    fn test_stream_contents_same() {
+        let mut a = Stream::from("identical");
+        let mut b = Stream::from("identical");
+        assert!(stream_contents_same(&mut a, &mut b).unwrap());
+
+        let mut c = Stream::from("identical");
+        let mut d = Stream::from("different");
+        assert!(!stream_contents_same(&mut c, &mut d).unwrap());
+    }
+
+    #[test]
+    fn test_string_from_stream() {
+        let mut stream = Stream::from("read me back");
+        assert_eq!(string_from_stream(&mut stream).unwrap(), "read me back");
+    }
+
+    #[test]
+    fn test_read_stream_to_string() {
+        let mut stream = Stream::from("via read_stream_to_string");
+        assert_eq!(
+            read_stream_to_string(&mut stream).unwrap(),
+            "via read_stream_to_string"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_create_uniqe_link_and_read_link() {
+        let td = tempfile::tempdir().unwrap();
+        let target = td.path().join("target.txt");
+        std::fs::write(&target, "linked").unwrap();
+        let link_base = td.path().join("mylink");
+
+        let link = create_uniqe_link(&link_base, &target, std::ffi::OsStr::new(".tmp")).unwrap();
+        let read_target = read_link(&link).unwrap();
+        assert_eq!(read_target, target);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_copy_link() {
+        let td = tempfile::tempdir().unwrap();
+        let target = td.path().join("target.txt");
+        std::fs::write(&target, "data").unwrap();
+        let src_link = td.path().join("src_link");
+        std::os::unix::fs::symlink(&target, &src_link).unwrap();
+        let dest_link = td.path().join("dest_link");
+
+        copy_link(&src_link, &dest_link).unwrap();
+        assert_eq!(std::fs::read_link(&dest_link).unwrap(), target);
+    }
+
+    #[test]
+    fn test_file_del_conversions() {
+        // Each variant maps to a distinct svn constant and round-trips back.
+        for variant in [FileDel::None, FileDel::OnClose, FileDel::OnPoolCleanup] {
+            let raw: subversion_sys::svn_io_file_del_t = variant.into();
+            assert_eq!(FileDel::from(raw), variant);
+        }
+
+        // Pin the mapping to the actual svn constants so the forward arms can't
+        // be swapped without detection.
+        assert_eq!(
+            subversion_sys::svn_io_file_del_t::from(FileDel::None),
+            subversion_sys::svn_io_file_del_t_svn_io_file_del_none
+        );
+        assert_eq!(
+            subversion_sys::svn_io_file_del_t::from(FileDel::OnClose),
+            subversion_sys::svn_io_file_del_t_svn_io_file_del_on_close
+        );
+        assert_eq!(
+            subversion_sys::svn_io_file_del_t::from(FileDel::OnPoolCleanup),
+            subversion_sys::svn_io_file_del_t_svn_io_file_del_on_pool_cleanup
+        );
+    }
+
+    #[test]
+    fn test_stringbuf_is_empty() {
+        assert!(StringBuf::new().is_empty());
+        assert!(!StringBuf::try_from("x").unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_stream_data_available() {
+        let mut stream = Stream::from("payload");
+        assert!(stream.data_available().unwrap());
+
+        // Drain the stream, then no data is available.
+        let mut buf = vec![0u8; 7];
+        stream.read_full(&mut buf).unwrap();
+        assert!(!stream.data_available().unwrap());
+    }
+
+    #[test]
+    fn test_stream_readline_multiple() {
+        let mut stream = Stream::from("first line\nsecond line\n");
+        assert_eq!(
+            stream.readline("\n").unwrap(),
+            Some("first line".to_string())
+        );
+        assert_eq!(
+            stream.readline("\n").unwrap(),
+            Some("second line".to_string())
+        );
+        // String-backed streams keep returning Some("") at EOF rather than None,
+        // so assert the empty-string tail rather than None here.
+        assert_eq!(stream.readline("\n").unwrap(), Some(String::new()));
+    }
+
+    #[test]
+    fn test_streams_contents_same() {
+        let mut a = Stream::from("identical bytes");
+        let mut b = Stream::from("identical bytes");
+        assert!(streams_contents_same(&mut a, &mut b).unwrap());
+
+        let mut c = Stream::from("identical bytes");
+        let mut d = Stream::from("different bytes");
+        assert!(!streams_contents_same(&mut c, &mut d).unwrap());
+    }
+
+    #[test]
+    fn test_copy_stream() {
+        let mut from = Stream::from("copy_stream payload");
+        let mut buf = StringBuf::new();
+        let mut to = Stream::from_stringbuf(&mut buf);
+        let no_cancel: Option<&fn() -> Result<(), Error<'static>>> = None;
+        copy_stream(&mut from, &mut to, no_cancel).unwrap();
+        drop(to);
+        assert_eq!(buf.to_string(), "copy_stream payload");
+    }
+
+    #[test]
+    fn test_stream_printf_from_utf8() {
+        let mut buf = StringBuf::new();
+        let mut stream = Stream::from_stringbuf(&mut buf);
+        stream.printf_from_utf8("value=%d", &[&7]).unwrap();
+        drop(stream);
+        assert_eq!(buf.to_string(), "value=7");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_set_file_read_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let td = tempfile::tempdir().unwrap();
+        let path = td.path().join("ro.txt");
+        std::fs::write(&path, "data").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        set_file_read_only(&path, false).unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o200, 0, "write bit should be cleared");
+    }
+
+    #[test]
+    fn test_stream_supports_mark() {
+        // String-backed streams support marking; buffered streams do not.
+        assert!(Stream::from("data").supports_mark());
+        assert!(!Stream::buffered().supports_mark());
+    }
+
+    #[test]
+    fn test_stream_supports_reset() {
+        assert!(Stream::from("data").supports_reset());
+        assert!(!Stream::buffered().supports_reset());
+    }
+
+    #[test]
+    fn test_stream_supports_partial_read() {
+        assert!(Stream::from("data").supports_partial_read());
+        assert!(!Stream::buffered().supports_partial_read());
+    }
+
+    #[test]
+    fn test_wrap_write() {
+        let mut sink: Vec<u8> = Vec::new();
+        {
+            let mut stream = wrap_write(&mut sink).unwrap();
+            stream.write(b"wrapped ").unwrap();
+            stream.write(b"output").unwrap();
+            stream.close().unwrap();
+        }
+        assert_eq!(sink, b"wrapped output");
+    }
+
+    #[test]
+    fn test_wrap_write_close_propagates_flush_error() {
+        // A writer whose flush() always fails; close_fn must surface that error.
+        struct FailFlush;
+        impl std::io::Write for FailFlush {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Err(std::io::Error::other("flush boom"))
+            }
+        }
+
+        let mut writer = FailFlush;
+        let mut stream = wrap_write(&mut writer).unwrap();
+        let result = stream.close();
+        assert!(
+            result.is_err(),
+            "close() should propagate the flush error from close_fn"
+        );
+    }
+
+    #[test]
+    fn test_sleep_for_timestamps() {
+        let td = tempfile::tempdir().unwrap();
+        let path = td.path().join("file.txt");
+        std::fs::write(&path, "data").unwrap();
+        // Just verify it runs without panicking; the sleep is short for files
+        // on a filesystem with sub-second timestamp resolution.
+        sleep_for_timestamps(&path);
     }
 }
