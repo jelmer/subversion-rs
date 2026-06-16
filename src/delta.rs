@@ -746,6 +746,86 @@ pub trait FileEditor {
     fn close(&mut self, text_checksum: Option<&str>) -> Result<(), crate::Error<'static>>;
 }
 
+/// Borrowed reference to a TxDelta window.
+///
+/// Does not own the underlying memory — the lifetime `'a` ties it
+/// to the scope that owns the window (typically a C callback).
+pub struct TxDeltaWindowRef<'a> {
+    ptr: *mut subversion_sys::svn_txdelta_window_t,
+    _phantom: PhantomData<&'a ()>,
+}
+
+impl<'a> TxDeltaWindowRef<'a> {
+    /// Create a borrowed reference to a txdelta window from a raw pointer.
+    ///
+    /// # Safety
+    /// `ptr` must be valid for lifetime `'a`.
+    #[cfg(feature = "ra")]
+    pub(crate) unsafe fn from_raw(ptr: *mut subversion_sys::svn_txdelta_window_t) -> Self {
+        Self {
+            ptr,
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Get the raw pointer.
+    ///
+    /// The returned pointer is only valid for the lifetime `'a` of this
+    /// reference — typically the duration of a single callback invocation.
+    pub fn as_ptr(&self) -> *const subversion_sys::svn_txdelta_window_t {
+        self.ptr
+    }
+
+    /// Gets the source view length.
+    pub fn sview_len(&self) -> apr_sys::apr_size_t {
+        unsafe { (*self.ptr).sview_len }
+    }
+
+    /// Gets the target view length.
+    pub fn tview_len(&self) -> apr_sys::apr_size_t {
+        unsafe { (*self.ptr).tview_len }
+    }
+
+    /// Gets the source view offset.
+    pub fn sview_offset(&self) -> crate::FileSize {
+        unsafe { (*self.ptr).sview_offset }
+    }
+
+    /// Gets the number of source operations.
+    pub fn src_ops(&self) -> i32 {
+        unsafe { (*self.ptr).src_ops as i32 }
+    }
+
+    /// Gets the delta operations as (action_code, offset, length) tuples.
+    pub fn ops(&self) -> Vec<(i32, u64, u64)> {
+        unsafe {
+            let num = (*self.ptr).num_ops as usize;
+            let ops_ptr = (*self.ptr).ops;
+            if ops_ptr.is_null() || num == 0 {
+                return Vec::new();
+            }
+            (0..num)
+                .map(|i| {
+                    let op = &*ops_ptr.add(i);
+                    (op.action_code as i32, op.offset as u64, op.length as u64)
+                })
+                .collect()
+        }
+    }
+
+    /// Gets the new data buffer.
+    pub fn new_data(&self) -> &[u8] {
+        unsafe {
+            let nd = (*self.ptr).new_data;
+            if nd.is_null() || (*nd).data.is_null() {
+                &[]
+            } else {
+                std::slice::from_raw_parts((*nd).data as *const u8, (*nd).len)
+            }
+        }
+    }
+}
+
 /// TxDelta window with RAII cleanup
 pub struct TxDeltaWindow {
     ptr: *mut subversion_sys::svn_txdelta_window_t,
