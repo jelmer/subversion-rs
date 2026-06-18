@@ -41,12 +41,28 @@ cmdline = []
 nls = []
 utf = []
 cache = []
+# Platform-specific password store auth providers. Each requires the matching
+# Subversion auth library and password store to be present at runtime.
+# gpg-agent lives in libsvn_subr, so it needs no extra sys-level linking.
+gnome-keyring = ["subversion-sys/gnome-keyring"]
+kwallet = ["subversion-sys/kwallet"]
+gpg-agent = []
 
 [package.metadata.cargo-all-features]
 # Exclude utility modules from feature combination matrix — they are
 # independent of one another and of the core features, so testing every
 # combination is wasteful.
-denylist = ["x509", "cmdline", "nls", "utf", "cache", "url"]
+denylist = [
+    "x509",
+    "cmdline",
+    "nls",
+    "utf",
+    "cache",
+    "url",
+    "gnome-keyring",
+    "kwallet",
+    "gpg-agent",
+]
 
 [dev-dependencies]
 tempfile = "3.23.0"
