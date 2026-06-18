@@ -25,3 +25,14 @@ ctx.checkout(
 )
 .unwrap();
 ```
+
+Password store auth providers
+-----------------------------
+
+Bindings for the platform-specific password store auth providers are behind
+optional features, since each needs an extra Subversion auth library at build
+and runtime:
+
+- `gnome-keyring` links `libsvn_auth_gnome_keyring` (needs `libsecret`).
+- `kwallet` links `libsvn_auth_kwallet` (needs KWallet / Qt5 / KF5).
+- `gpg-agent` lives in `libsvn_subr`, so it needs no extra system library.
