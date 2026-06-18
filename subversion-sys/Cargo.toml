@@ -26,6 +26,10 @@ client = []
 ra = ["delta"]
 wc = ["delta"]
 delta = []
+# Optional password store auth libraries. gpg-agent lives in libsvn_subr and
+# needs no extra linking, so it has no sys-level feature.
+gnome-keyring = []
+kwallet = []
 
 [package.metadata.system-deps]
 libsvn_client = { version = ">=1.14", feature = "client" }
@@ -36,3 +40,5 @@ libsvn_repos = ">=1.14"
 libsvn_fs = ">=1.14"
 libsvn_wc = { version = ">=1.14", feature = "wc" }
 libsvn_ra = { version = ">=1.14", feature = "ra" }
+libsvn_auth_gnome_keyring = { version = ">=1.14", feature = "gnome-keyring" }
+libsvn_auth_kwallet = { version = ">=1.14", feature = "kwallet" }
