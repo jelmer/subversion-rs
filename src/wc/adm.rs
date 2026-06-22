@@ -1333,6 +1333,69 @@ impl Adm<'_> {
         result
     }
 
+    /// Get an editor for switching the working copy anchored at this access
+    /// baton to a different URL.
+    ///
+    /// Wraps the deprecated `svn_wc_get_switch_editor3`, which anchors on an
+    /// `svn_wc_adm_access_t` (this access baton holds the lock), unlike the
+    /// `svn_wc_context_t` based `Context::get_switch_editor`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn get_switch_editor(
+        &self,
+        target: &str,
+        switch_url: &str,
+        use_commit_times: bool,
+        depth: crate::Depth,
+        depth_is_sticky: bool,
+        allow_unver_obstructions: bool,
+        diff3_cmd: Option<&str>,
+    ) -> Result<(crate::delta::WrapEditor<'static>, crate::Revnum), crate::Error<'static>> {
+        let target_cstr = std::ffi::CString::new(target)?;
+        let switch_url_cstr = std::ffi::CString::new(switch_url)?;
+        let diff3_cmd_cstr = diff3_cmd.map(std::ffi::CString::new).transpose()?;
+
+        let result_pool = apr::Pool::new();
+        let mut target_revision: subversion_sys::svn_revnum_t = 0;
+        let mut editor_ptr: *const subversion_sys::svn_delta_editor_t = std::ptr::null();
+        let mut edit_baton: *mut std::ffi::c_void = std::ptr::null_mut();
+
+        unsafe {
+            let err = subversion_sys::svn_wc_get_switch_editor3(
+                &mut target_revision,
+                self.ptr,
+                target_cstr.as_ptr(),
+                switch_url_cstr.as_ptr(),
+                if use_commit_times { 1 } else { 0 },
+                depth.into(),
+                if depth_is_sticky { 1 } else { 0 },
+                if allow_unver_obstructions { 1 } else { 0 },
+                None,                 // notify_func
+                std::ptr::null_mut(), // notify_baton
+                None,                 // cancel_func
+                std::ptr::null_mut(), // cancel_baton
+                None,                 // conflict_func
+                std::ptr::null_mut(), // conflict_baton
+                diff3_cmd_cstr
+                    .as_ref()
+                    .map_or(std::ptr::null(), |c| c.as_ptr()),
+                std::ptr::null(), // preserved_exts
+                &mut editor_ptr,
+                &mut edit_baton,
+                std::ptr::null_mut(), // traversal_info
+                result_pool.as_mut_ptr(),
+            );
+            svn_result(err)?;
+        }
+
+        let editor = crate::delta::WrapEditor {
+            editor: editor_ptr,
+            baton: edit_baton,
+            _pool: apr::PoolHandle::owned(result_pool),
+            callback_batons: Vec::new(),
+        };
+        Ok((editor, crate::Revnum(target_revision)))
+    }
+
     /// Transmit local text changes through a delta editor.
     ///
     /// Returns `(tempfile_path, md5_digest)` where `md5_digest` is 16 bytes.
