@@ -9300,7 +9300,6 @@ mod tests {
                 &mut wrap,
             )
             .unwrap();
-        use crate::ra::Reporter;
         reporter
             .set_path("", crate::Revnum(1), crate::Depth::Infinity, false, "")
             .unwrap();
@@ -9334,7 +9333,6 @@ mod tests {
                 &mut editor,
             )
             .unwrap();
-        use crate::ra::Reporter;
         reporter
             .set_path("", crate::Revnum(1), crate::Depth::Infinity, false, "")
             .unwrap();

@@ -18,6 +18,7 @@ include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 // symbols are exported from libsvn_wc-1.so. They are needed to acquire a
 // working-copy write lock on an svn_wc_context_t, which is required to drive
 // svn_wc_process_committed_queue2.
+#[cfg(feature = "wc")]
 extern "C" {
     pub fn svn_wc__acquire_write_lock(
         lock_root_abspath: *mut *const std::os::raw::c_char,
