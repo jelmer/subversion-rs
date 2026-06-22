@@ -2542,7 +2542,14 @@ impl Context {
             std::ptr::null()
         };
 
-        let sha1_ptr = sha1_checksum.map(|c| c.ptr).unwrap_or(std::ptr::null());
+        // svn_wc_queue_committed4 stores the checksum pointer in the queue and
+        // dereferences it later in process_committed_queue, so it must live in
+        // the queue's pool, not the caller's transient pool.
+        let sha1_ptr = if let Some(c) = sha1_checksum {
+            unsafe { subversion_sys::svn_checksum_dup(c.ptr, queue_pool) }
+        } else {
+            std::ptr::null()
+        };
 
         // All temporaries (scratch_pool, prop_name_cstrs, arr_storage) are
         // still alive here, so wcprop_changes_ptr is valid.
@@ -9396,5 +9403,14 @@ mod tests {
             "process_committed_queue failed: {:?}",
             result.err()
         );
+
+        // The deprecated entries API must still be able to read the node: the
+        // queued sha1 checksum has to be stored intact (a stale pointer used to
+        // corrupt NODES.checksum and trip SVN_ERR_BAD_CHECKSUM_PARSE).
+        #[allow(deprecated)]
+        let adm = Adm::open(fixture.wc_path_str(), false, 0).unwrap();
+        #[allow(deprecated)]
+        let entries = adm.entries_read(false).unwrap();
+        assert!(entries.contains_key("test.txt"));
     }
 }
