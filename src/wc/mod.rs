@@ -2499,6 +2499,10 @@ impl Context {
         // into pool-allocated strings (via svn_dirent_skip_ancestor) that
         // must survive until process_committed_queue is called.
         let queue_pool = committed_queue.pool_mut_ptr();
+        // local_abspath itself is also stored in the queue, so it must outlive
+        // this call. Duplicate it into the queue's pool rather than relying on
+        // the transient Rust CString.
+        let path_in_pool = unsafe { apr_sys::apr_pstrdup(queue_pool, path_cstr.as_ptr()) };
 
         // Build the wcprop_changes APR array if provided.
         // The pool, CStrings, and array must all outlive the FFI call.
@@ -2537,7 +2541,7 @@ impl Context {
             let err = subversion_sys::svn_wc_queue_committed4(
                 committed_queue.as_mut_ptr(),
                 self.ptr,
-                path_cstr.as_ptr(),
+                path_in_pool,
                 recurse as i32,
                 is_committed as i32,
                 wcprop_changes_ptr,
@@ -2582,6 +2586,64 @@ impl Context {
             );
             Error::from_raw(err)
         }
+    }
+
+    /// Acquire a working-copy write lock.
+    ///
+    /// Required before driving operations such as
+    /// [`process_committed_queue`](Self::process_committed_queue).
+    ///
+    /// If `lock_anchor` is true, the anchor of `local_abspath` is locked
+    /// instead of `local_abspath` itself.
+    ///
+    /// Returns the abspath of the directory at the root of the acquired lock,
+    /// which should be passed to [`release_write_lock`](Self::release_write_lock).
+    pub fn acquire_write_lock(
+        &mut self,
+        local_abspath: &std::path::Path,
+        lock_anchor: bool,
+    ) -> Result<std::path::PathBuf, Error<'static>> {
+        let path_cstr = crate::dirent::to_absolute_cstring(local_abspath)?;
+        with_tmp_pool(|scratch_pool| {
+            let mut lock_root: *const std::os::raw::c_char = std::ptr::null();
+            let err = unsafe {
+                subversion_sys::svn_wc__acquire_write_lock(
+                    &mut lock_root,
+                    self.ptr,
+                    path_cstr.as_ptr(),
+                    lock_anchor as i32,
+                    scratch_pool.as_mut_ptr(),
+                    scratch_pool.as_mut_ptr(),
+                )
+            };
+            svn_result(err)?;
+            let root = unsafe { std::ffi::CStr::from_ptr(lock_root) }
+                .to_string_lossy()
+                .into_owned();
+            Ok(std::path::PathBuf::from(root))
+        })
+    }
+
+    /// Release a working-copy write lock previously acquired with
+    /// [`acquire_write_lock`](Self::acquire_write_lock).
+    ///
+    /// `local_abspath` must be the lock root abspath returned by
+    /// `acquire_write_lock`.
+    pub fn release_write_lock(
+        &mut self,
+        local_abspath: &std::path::Path,
+    ) -> Result<(), Error<'static>> {
+        let path_cstr = crate::dirent::to_absolute_cstring(local_abspath)?;
+        with_tmp_pool(|scratch_pool| {
+            let err = unsafe {
+                subversion_sys::svn_wc__release_write_lock(
+                    self.ptr,
+                    path_cstr.as_ptr(),
+                    scratch_pool.as_mut_ptr(),
+                )
+            };
+            svn_result(err)
+        })
     }
 
     /// Add a lock to the working copy
@@ -5391,6 +5453,34 @@ pub fn transmit_text_deltas<'a>(
     };
 
     Ok((md5_hex, sha1_hex))
+}
+
+/// Install a working file's current text into the pristine store.
+///
+/// When a commit is performed outside the working copy (for example through a
+/// separate RA commit editor), the new text's pristine is not present in the
+/// working copy's pristine store, so [`Context::process_committed_queue`]
+/// cannot bump the file node. This drives [`transmit_text_deltas`] against a
+/// no-op delta editor purely to store the repository-normal form of
+/// `local_abspath` in the pristine store, returning its SHA-1 checksum (as a
+/// hex string) to pass to [`Context::queue_committed`].
+///
+/// `basename` is the entry name of the file within its parent directory; it is
+/// only used to obtain a file baton from the no-op editor.
+pub fn install_text_base(
+    wc_ctx: &mut Context,
+    local_abspath: &str,
+    basename: &str,
+) -> Result<String, crate::Error<'static>> {
+    use crate::delta::{DirectoryEditor, Editor};
+
+    let mut editor = crate::delta::default_editor(apr::Pool::new());
+    let mut root = editor.open_root(None).map_err(|e| e.into_static())?;
+    let file = root
+        .open_file(basename, None)
+        .map_err(|e| e.into_static())?;
+    let (_md5, sha1) = transmit_text_deltas(wc_ctx, local_abspath, true, &file)?;
+    Ok(sha1)
 }
 
 /// Send local property modifications through a file delta editor.
@@ -9145,6 +9235,70 @@ mod tests {
         assert!(
             result.is_ok(),
             "process_committed_queue with no date/author failed: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn test_context_acquire_release_write_lock() {
+        let mut fixture = SvnTestFixture::new();
+        fixture.add_file("test.txt", "hello");
+        fixture.commit();
+
+        let mut ctx = Context::new().unwrap();
+        let root = ctx.acquire_write_lock(&fixture.wc_path, false).unwrap();
+        assert!(ctx.locked(fixture.wc_path_str()).unwrap().0);
+        ctx.release_write_lock(&root).unwrap();
+        assert!(!ctx.locked(fixture.wc_path_str()).unwrap().0);
+    }
+
+    #[test]
+    fn test_context_process_committed_queue_modified_file() {
+        // Reproduces the breezy-svn working-tree commit-finalization path:
+        // a file that already has a base revision is modified, the new text
+        // is transmitted (populating the pristine store), and the committed
+        // queue is processed via the Context with its SHA-1 checksum. This
+        // used to trip the wc_db `old_checksum != NULL` assertion when driven
+        // through the md5-only deprecated Adm path.
+        let mut fixture = SvnTestFixture::new();
+        let file_path = fixture.add_file("test.txt", "hello");
+        fixture.commit();
+
+        std::fs::write(&file_path, "hello world").unwrap();
+
+        let mut ctx = Context::new().unwrap();
+        let lock_root = ctx.acquire_write_lock(&fixture.wc_path, false).unwrap();
+
+        // Install the new text into the pristine store and queue with its sha1,
+        // mirroring a commit performed outside this working copy.
+        let sha1_hex =
+            install_text_base(&mut ctx, file_path.to_str().unwrap(), "test.txt").unwrap();
+        let pool = apr::Pool::new();
+        let sha1 = crate::Checksum::parse_hex(crate::ChecksumKind::SHA1, &sha1_hex, &pool).unwrap();
+
+        let mut queue = CommittedQueue::new();
+        ctx.queue_committed(
+            &file_path,
+            false,
+            true,
+            &mut queue,
+            None,
+            false,
+            false,
+            Some(&sha1),
+        )
+        .unwrap();
+
+        let result = ctx.process_committed_queue(
+            &mut queue,
+            crate::Revnum(2),
+            Some("2026-03-24T00:00:00.000000Z"),
+            Some("testuser"),
+        );
+        ctx.release_write_lock(&lock_root).unwrap();
+        assert!(
+            result.is_ok(),
+            "process_committed_queue failed: {:?}",
             result.err()
         );
     }
