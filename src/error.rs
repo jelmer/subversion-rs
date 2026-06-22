@@ -310,6 +310,24 @@ impl<'a> Error<'a> {
         err
     }
 
+    /// Detaches the error from its borrowed lifetime, returning an owned
+    /// `Error<'static>`.
+    ///
+    /// The underlying `svn_error_t` is heap-allocated by Subversion and not
+    /// tied to any Rust pool, so re-binding its lifetime to `'static` is sound.
+    /// Use this to propagate an error obtained from a borrowing API out of a
+    /// function that returns `Error<'static>`.
+    pub fn into_static(self) -> Error<'static> {
+        let ptr = self.ptr;
+        let owns = self.owns_ptr;
+        std::mem::forget(self);
+        Error {
+            ptr,
+            owns_ptr: owns,
+            _phantom: std::marker::PhantomData,
+        }
+    }
+
     /// Gets the best available error message from the error chain.
     pub fn best_message(&self) -> String {
         let mut buf = [0; 1024];

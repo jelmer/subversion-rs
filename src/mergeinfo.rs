@@ -231,6 +231,44 @@ impl Mergeinfo {
 
         result
     }
+
+    /// Return the mergeinfo as a map of path to merge ranges, preserving the
+    /// inheritable flag for each range.
+    pub fn paths_with_ranges(&self) -> HashMap<String, Vec<MergeRange>> {
+        let mut result = HashMap::new();
+
+        if self.ptr.is_null() {
+            return result;
+        }
+
+        unsafe {
+            let hash =
+                apr::hash::TypedHash::<subversion_sys::svn_rangelist_t>::from_ptr(self.ptr as _);
+
+            for (key, rangelist) in hash.iter() {
+                let path = std::str::from_utf8(key)
+                    .expect("mergeinfo path is not valid UTF-8")
+                    .to_string();
+
+                let mut ranges = Vec::new();
+                let array =
+                    apr::tables::TypedArray::<*mut subversion_sys::svn_merge_range_t>::from_ptr(
+                        rangelist as *const _ as *mut _,
+                    );
+
+                for range_ptr in array.iter() {
+                    if range_ptr.is_null() {
+                        continue;
+                    }
+                    ranges.push(MergeRange::from(&*range_ptr));
+                }
+
+                result.insert(path, ranges);
+            }
+        }
+
+        result
+    }
 }
 
 impl Drop for Mergeinfo {
