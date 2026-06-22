@@ -1558,6 +1558,15 @@ pub fn get_update_editor4<'a>(
 
     let result_pool = apr::Pool::new();
 
+    // svn_wc_get_update_editor4 stores anchor_abspath / target_basename by
+    // reference in the editor baton (which lives in result_pool), so they must
+    // outlive this call. Copy them into result_pool rather than passing the
+    // transient Rust CStrings.
+    let anchor_in_pool =
+        unsafe { apr_sys::apr_pstrdup(result_pool.as_mut_ptr(), anchor_abspath_cstr.as_ptr()) };
+    let target_in_pool =
+        unsafe { apr_sys::apr_pstrdup(result_pool.as_mut_ptr(), target_basename_cstr.as_ptr()) };
+
     // Create preserved extensions array
     let preserved_exts_cstrs: Vec<std::ffi::CString> = options
         .preserved_exts
@@ -1613,8 +1622,8 @@ pub fn get_update_editor4<'a>(
             &mut edit_baton,
             &mut target_revision,
             wc_ctx.as_mut_ptr(),
-            anchor_abspath_cstr.as_ptr(),
-            target_basename_cstr.as_ptr(),
+            anchor_in_pool,
+            target_in_pool,
             if options.use_commit_times { 1 } else { 0 },
             options.depth.into(),
             if options.depth_is_sticky { 1 } else { 0 },
@@ -3011,6 +3020,17 @@ impl Context {
 
         let result_pool = apr::Pool::new();
 
+        // svn_wc_get_switch_editor4 stores anchor_abspath / target_basename /
+        // switch_url by reference in the editor baton (which lives in
+        // result_pool), so they must outlive this call.
+        let anchor_in_pool =
+            unsafe { apr_sys::apr_pstrdup(result_pool.as_mut_ptr(), anchor_abspath_cstr.as_ptr()) };
+        let target_in_pool = unsafe {
+            apr_sys::apr_pstrdup(result_pool.as_mut_ptr(), target_basename_cstr.as_ptr())
+        };
+        let switch_url_in_pool =
+            unsafe { apr_sys::apr_pstrdup(result_pool.as_mut_ptr(), switch_url_cstr.as_ptr()) };
+
         // Create preserved extensions array
         let preserved_exts_cstrs: Vec<std::ffi::CString> = options
             .preserved_exts
@@ -3066,9 +3086,9 @@ impl Context {
                 &mut edit_baton,
                 &mut target_revision,
                 self.ptr,
-                anchor_abspath_cstr.as_ptr(),
-                target_basename_cstr.as_ptr(),
-                switch_url_cstr.as_ptr(),
+                anchor_in_pool,
+                target_in_pool,
+                switch_url_in_pool,
                 if options.use_commit_times { 1 } else { 0 },
                 options.depth.into(),
                 if options.depth_is_sticky { 1 } else { 0 },
@@ -3184,6 +3204,14 @@ impl Context {
         let target_abspath_cstr = crate::dirent::to_absolute_cstring(target_abspath)?;
 
         let result_pool = apr::Pool::new();
+
+        // svn_wc_get_diff_editor6 stores anchor_abspath / target by reference
+        // in the editor baton (which lives in result_pool), so they must
+        // outlive this call.
+        let anchor_in_pool =
+            unsafe { apr_sys::apr_pstrdup(result_pool.as_mut_ptr(), anchor_abspath_cstr.as_ptr()) };
+        let target_in_pool =
+            unsafe { apr_sys::apr_pstrdup(result_pool.as_mut_ptr(), target_abspath_cstr.as_ptr()) };
         let mut editor_ptr: *const subversion_sys::svn_delta_editor_t = std::ptr::null();
         let mut edit_baton: *mut std::ffi::c_void = std::ptr::null_mut();
 
@@ -3200,8 +3228,8 @@ impl Context {
                 &mut editor_ptr,
                 &mut edit_baton,
                 self.ptr,
-                anchor_abspath_cstr.as_ptr(),
-                target_abspath_cstr.as_ptr(),
+                anchor_in_pool,
+                target_in_pool,
                 depth.into(),
                 if ignore_ancestry { 1 } else { 0 },
                 if show_copies_as_adds { 1 } else { 0 },
@@ -9237,6 +9265,73 @@ mod tests {
             "process_committed_queue with no date/author failed: {:?}",
             result.err()
         );
+    }
+
+    #[test]
+    fn test_context_drive_update_editor() {
+        let mut fixture = SvnTestFixture::new();
+        fixture.add_file("f", "hi");
+        fixture.commit();
+
+        let (mut session, _, _) = crate::ra::Session::open(&fixture.url, None, None, None).unwrap();
+
+        let mut ctx = Context::new().unwrap();
+        let options = UpdateEditorOptions {
+            depth: crate::Depth::Infinity,
+            ..Default::default()
+        };
+        let (editor, _rev) =
+            get_update_editor4(&mut ctx, fixture.wc_path_str(), "", options).unwrap();
+        let mut wrap = editor.into_wrap_editor();
+        let mut reporter = session
+            .do_update(
+                crate::Revnum(1),
+                "",
+                crate::Depth::Infinity,
+                false,
+                false,
+                &mut wrap,
+            )
+            .unwrap();
+        use crate::ra::Reporter;
+        reporter
+            .set_path("", crate::Revnum(1), crate::Depth::Infinity, false, "")
+            .unwrap();
+        reporter.finish_report().unwrap();
+    }
+
+    #[test]
+    fn test_context_drive_switch_editor() {
+        let mut fixture = SvnTestFixture::new();
+        fixture.add_file("f", "hi");
+        fixture.commit();
+
+        let (mut session, _, _) = crate::ra::Session::open(&fixture.url, None, None, None).unwrap();
+
+        let mut ctx = Context::new().unwrap();
+        let options = SwitchEditorOptions {
+            depth: crate::Depth::Infinity,
+            ..Default::default()
+        };
+        let (mut editor, _rev) = ctx
+            .get_switch_editor(fixture.wc_path_str(), "", &fixture.url, options)
+            .unwrap();
+        let mut reporter = session
+            .do_switch(
+                crate::Revnum(1),
+                "",
+                crate::Depth::Infinity,
+                &fixture.url,
+                false,
+                false,
+                &mut editor,
+            )
+            .unwrap();
+        use crate::ra::Reporter;
+        reporter
+            .set_path("", crate::Revnum(1), crate::Depth::Infinity, false, "")
+            .unwrap();
+        reporter.finish_report().unwrap();
     }
 
     #[test]
