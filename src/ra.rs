@@ -2079,9 +2079,14 @@ impl<'a> Session<'a> {
                     std::ptr::null_mut()
                 }
                 Ok(None) => {
+                    // Install the noop handler rather than NULL. svn_delta.h
+                    // allows leaving these NULL, but ra_serf feeds the handler
+                    // straight to svn_txdelta_parse_svndiff() without checking,
+                    // so a NULL here segfaults over http://.
                     unsafe {
                         if !txdelta_handler_out.is_null() {
-                            *txdelta_handler_out = None;
+                            *txdelta_handler_out =
+                                Some(subversion_sys::svn_delta_noop_window_handler);
                         }
                         if !txdelta_baton_out.is_null() {
                             *txdelta_baton_out = std::ptr::null_mut();
@@ -3435,6 +3440,40 @@ mod tests {
             "Should have seen at least one revision"
         );
         assert!(revisions_seen.contains(&1), "Should have seen revision 1");
+    }
+
+    #[test]
+    fn test_get_file_revs_none_installs_noop_handler() {
+        // Returning Ok(None) must still leave a callable window handler:
+        // ra_serf passes it straight to svn_txdelta_parse_svndiff() without
+        // checking for NULL, so a NULL there segfaults over http://.
+        let (_temp_dir, repo, mut session, _callbacks) = create_test_repo_with_session();
+        let fs = repo.fs().unwrap();
+
+        let mut txn = fs.begin_txn(crate::Revnum::from(0u32), 0).unwrap();
+        let mut root = txn.root().unwrap();
+        root.make_file("/test.txt").unwrap();
+        {
+            let mut stream = root.apply_text("/test.txt", None).unwrap();
+            use std::io::Write;
+            stream.write_all(b"content\n").unwrap();
+        }
+        txn.commit().unwrap();
+
+        let mut handlers = Vec::new();
+        let result = session.get_file_revs(
+            "test.txt",
+            crate::Revnum(1),
+            crate::Revnum(1),
+            false,
+            |_path, _rev, _rev_props, _result_of_merge, _copyfrom, _merged, _prop_diffs| {
+                handlers.push(());
+                Ok(None)
+            },
+        );
+
+        assert!(result.is_ok(), "get_file_revs should succeed");
+        assert_eq!(1, handlers.len());
     }
 
     #[test]
