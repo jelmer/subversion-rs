@@ -11225,10 +11225,12 @@ mod tests {
         // Get conflict for the file
         let mut conflict = fixture.ctx.conflict_get(&test_file2).unwrap();
 
-        // Test prop_get_propvals
+        // Test prop_get_propvals. Check the values too: the update above
+        // discards its result, so a run that failed to produce the expected
+        // conflict should fail here rather than in the resolution assertion.
         let propvals = conflict.prop_get_propvals("svn:custom").unwrap();
-        assert!(propvals.1.is_some(), "Should have working propval");
-        assert!(propvals.3.is_some(), "Should have incoming new propval");
+        assert_eq!(propvals.1.as_deref(), Some(b"from_wc2".as_slice()));
+        assert_eq!(propvals.3.as_deref(), Some(b"from_wc1".as_slice()));
 
         // Test prop_get_resolution_options
         let options = conflict
