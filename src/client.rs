@@ -7615,15 +7615,19 @@ impl Conflict {
         choice: crate::TextConflictChoice,
         ctx: &mut Context,
     ) -> Result<(), Error<'static>> {
-        let scratch_pool = apr::pool::Pool::new();
         let propname_c = std::ffi::CString::new(propname)?;
         unsafe {
+            // svn_client_conflict_prop_resolve_by_id builds the resolution
+            // options in the pool it is given and stores the chosen one in the
+            // conflict's resolved_props, which prop_get_resolution() reads back
+            // later. Use the conflict's own pool so the option outlives this
+            // call; a scratch pool would leave a dangling pointer behind.
             let err = subversion_sys::svn_client_conflict_prop_resolve_by_id(
                 self.ptr,
                 propname_c.as_ptr(),
                 choice.into(),
                 ctx.as_mut_ptr(),
-                scratch_pool.as_mut_ptr(),
+                self.pool.as_mut_ptr(),
             );
             svn_result(err)
         }
@@ -11251,6 +11255,23 @@ mod tests {
         let prop_res = conflict.prop_get_resolution("svn:custom").unwrap();
         assert_eq!(
             prop_res,
+            crate::ClientConflictOptionId::WorkingTextWhereConflicted
+        );
+
+        // The resolution must survive later allocations: svn stores the chosen
+        // option by pointer, so resolving into a scratch pool used to leave the
+        // recorded resolution pointing at reusable memory.
+        for _ in 0..500 {
+            let pool = apr::pool::Pool::new();
+            for _ in 0..64 {
+                unsafe {
+                    let buf = apr_sys::apr_palloc(pool.as_mut_ptr(), 256);
+                    std::ptr::write_bytes(buf as *mut u8, 0xAB, 256);
+                }
+            }
+        }
+        assert_eq!(
+            conflict.prop_get_resolution("svn:custom").unwrap(),
             crate::ClientConflictOptionId::WorkingTextWhereConflicted
         );
     }
