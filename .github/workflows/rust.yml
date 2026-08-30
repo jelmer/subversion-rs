@@ -19,7 +19,7 @@ jobs:
     - name: Install apr
       run: |
         sudo apt update -y
-        sudo apt install -y libapr1-dev libaprutil1-dev libsvn-dev pkg-config libutf8proc-dev libsqlite3-dev subversion
+        sudo apt install -y libapr1-dev libaprutil1-dev libsvn-dev pkg-config libutf8proc-dev libsqlite3-dev subversion libsecret-1-dev libkf5wallet-dev
       # Work around https://bugs.debian.org/1055242
     - name: "Fix up Version: field in Subversion .pc files"
       run: |
@@ -33,6 +33,14 @@ jobs:
         RUSTFLAGS: -Dwarnings
     - name: Run tests
       run: cargo test-all-features
+      env:
+        RUSTFLAGS: -Dwarnings
+    - name: Build password-store auth providers
+      run: cargo build --features gnome-keyring,kwallet,gpg-agent
+      env:
+        RUSTFLAGS: -Dwarnings
+    - name: Test password-store auth providers
+      run: cargo test --features gnome-keyring,kwallet,gpg-agent
       env:
         RUSTFLAGS: -Dwarnings
     - name: Check formatting
