@@ -1577,21 +1577,29 @@ impl Repos {
         let pool = apr::Pool::new();
         let mut txn_ptr = std::ptr::null_mut();
 
-        // Create revision properties
+        // Create revision properties. Svn walks this hash with %s formats
+        // that call strlen on the key (e.g. when writing the revprop file),
+        // so the bytes past the recorded length must still contain a NUL.
+        // Use NUL-terminated literals and record the length without the NUL
+        // so apr_hash_get(-1) lookups from svn keep matching.
         let mut revprop_table = apr::hash::Hash::new(&pool);
 
-        // Add author
-        let author_key = b"svn:author";
+        let author_key: &[u8] = b"svn:author\0";
         let author_val = crate::svn_string_helpers::svn_string_ncreate(author.as_bytes(), &pool);
         unsafe {
-            revprop_table.insert(author_key, author_val as *mut std::ffi::c_void);
+            revprop_table.insert(
+                &author_key[..author_key.len() - 1],
+                author_val as *mut std::ffi::c_void,
+            );
         }
 
-        // Add log message
-        let log_key = b"svn:log";
+        let log_key: &[u8] = b"svn:log\0";
         let log_val = crate::svn_string_helpers::svn_string_ncreate(log_msg.as_bytes(), &pool);
         unsafe {
-            revprop_table.insert(log_key, log_val as *mut std::ffi::c_void);
+            revprop_table.insert(
+                &log_key[..log_key.len() - 1],
+                log_val as *mut std::ffi::c_void,
+            );
         }
 
         let ret = unsafe {

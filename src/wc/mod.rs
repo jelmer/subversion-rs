@@ -1558,14 +1558,18 @@ pub fn get_update_editor4<'a>(
 
     let result_pool = apr::Pool::new();
 
-    // svn_wc_get_update_editor4 stores anchor_abspath / target_basename by
-    // reference in the editor baton (which lives in result_pool), so they must
-    // outlive this call. Copy them into result_pool rather than passing the
-    // transient Rust CStrings.
+    // svn_wc_get_update_editor4 stores anchor_abspath / target_basename /
+    // diff3_cmd / preserved_exts by reference in the editor baton (which lives
+    // in result_pool) and only reads diff3_cmd and preserved_exts while the
+    // editor is driven, so they must outlive this call. Copy them into
+    // result_pool rather than passing the transient Rust CStrings.
     let anchor_in_pool =
         unsafe { apr_sys::apr_pstrdup(result_pool.as_mut_ptr(), anchor_abspath_cstr.as_ptr()) };
     let target_in_pool =
         unsafe { apr_sys::apr_pstrdup(result_pool.as_mut_ptr(), target_basename_cstr.as_ptr()) };
+    let diff3_cmd_in_pool = diff3_cmd_cstr
+        .as_ref()
+        .map(|c| unsafe { apr_sys::apr_pstrdup(result_pool.as_mut_ptr(), c.as_ptr()) });
 
     // Create preserved extensions array
     let preserved_exts_cstrs: Vec<std::ffi::CString> = options
@@ -1581,7 +1585,7 @@ pub fn get_update_editor4<'a>(
             preserved_exts_cstrs.len() as i32,
         );
         for cstr in &preserved_exts_cstrs {
-            arr.push(cstr.as_ptr());
+            arr.push(unsafe { apr_sys::apr_pstrdup(result_pool.as_mut_ptr(), cstr.as_ptr()) });
         }
         unsafe { arr.as_ptr() }
     };
@@ -1639,9 +1643,7 @@ pub fn get_update_editor4<'a>(
                 0
             },
             if options.clean_checkout { 1 } else { 0 },
-            diff3_cmd_cstr
-                .as_ref()
-                .map_or(std::ptr::null(), |c| c.as_ptr()),
+            diff3_cmd_in_pool.map_or(std::ptr::null(), |p| p as *const _),
             preserved_exts_apr,
             if has_fetch_dirents {
                 Some(wrap_fetch_dirents_func)
@@ -3028,8 +3030,10 @@ impl Context {
         let result_pool = apr::Pool::new();
 
         // svn_wc_get_switch_editor4 stores anchor_abspath / target_basename /
-        // switch_url by reference in the editor baton (which lives in
-        // result_pool), so they must outlive this call.
+        // switch_url / diff3_cmd / preserved_exts by reference in the editor
+        // baton (which lives in result_pool) and only reads diff3_cmd and
+        // preserved_exts while the editor is driven, so they must outlive this
+        // call.
         let anchor_in_pool =
             unsafe { apr_sys::apr_pstrdup(result_pool.as_mut_ptr(), anchor_abspath_cstr.as_ptr()) };
         let target_in_pool = unsafe {
@@ -3037,6 +3041,9 @@ impl Context {
         };
         let switch_url_in_pool =
             unsafe { apr_sys::apr_pstrdup(result_pool.as_mut_ptr(), switch_url_cstr.as_ptr()) };
+        let diff3_cmd_in_pool = diff3_cmd_cstr
+            .as_ref()
+            .map(|c| unsafe { apr_sys::apr_pstrdup(result_pool.as_mut_ptr(), c.as_ptr()) });
 
         // Create preserved extensions array
         let preserved_exts_cstrs: Vec<std::ffi::CString> = options
@@ -3052,7 +3059,7 @@ impl Context {
                 preserved_exts_cstrs.len() as i32,
             );
             for cstr in &preserved_exts_cstrs {
-                arr.push(cstr.as_ptr());
+                arr.push(unsafe { apr_sys::apr_pstrdup(result_pool.as_mut_ptr(), cstr.as_ptr()) });
             }
             unsafe { arr.as_ptr() }
         };
@@ -3109,9 +3116,7 @@ impl Context {
                 } else {
                     0
                 },
-                diff3_cmd_cstr
-                    .as_ref()
-                    .map_or(std::ptr::null(), |c| c.as_ptr()),
+                diff3_cmd_in_pool.map_or(std::ptr::null(), |p| p as *const _),
                 preserved_exts_apr,
                 if has_fetch_dirents {
                     Some(wrap_fetch_dirents_func)
@@ -9337,6 +9342,158 @@ mod tests {
             .set_path("", crate::Revnum(1), crate::Depth::Infinity, false, "")
             .unwrap();
         reporter.finish_report().unwrap();
+    }
+
+    /// Assert that svn got as far as running `diff3` while merging.
+    ///
+    /// The merge itself may fail in a few different ways: on macOS the
+    /// fork/exec is unreliable from the multi-threaded test harness and the
+    /// child exits 255 without reaching `execvp`; on Windows `/bin/true`
+    /// does not exist so `CreateProcess` fails outright. That is fine for
+    /// what these tests check: svn had already read `diff3_cmd` out of the
+    /// edit baton and echoes the command it tried to spawn, so a stale
+    /// pointer would show up as a different (or unprintable) command name.
+    fn assert_diff3_was_reached(result: Result<(), crate::Error>, diff3: &str) {
+        let Err(e) = result else {
+            return;
+        };
+        let msg = e.to_string();
+        assert!(
+            msg.contains(&format!("'{diff3}'")),
+            "unexpected merge failure: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_context_drive_update_editor_with_diff3_and_preserved_exts() {
+        // svn_wc_get_update_editor4 keeps diff3_cmd and preserved_exts by
+        // reference in the edit baton and only reads them when merging an
+        // incoming text change into a locally modified file, so both must be
+        // copied into the editor's pool rather than borrowed from the caller.
+        let mut fixture = SvnTestFixture::new();
+        let file_path = fixture.add_file("f.txt", "line1\nline2\nline3\n");
+        fixture.commit();
+
+        // Commit a change to the same file from a second working copy so the
+        // update below has incoming text to merge.
+        let other_wc = fixture.temp_dir.path().join("other");
+        let mut other_ctx = crate::client::Context::new().unwrap();
+        other_ctx
+            .checkout(
+                crate::uri::Uri::new(&fixture.url).unwrap(),
+                &other_wc,
+                &SvnTestFixture::default_checkout_options(),
+            )
+            .unwrap();
+        std::fs::write(other_wc.join("f.txt"), "line1 changed\nline2\nline3\n").unwrap();
+        other_ctx
+            .commit(
+                &[other_wc.to_str().unwrap()],
+                &crate::client::CommitOptions::default(),
+                std::collections::HashMap::new(),
+                None,
+                &mut |_info| Ok(()),
+            )
+            .unwrap();
+
+        // Modify the file locally so the incoming change has to be merged.
+        std::fs::write(&file_path, "line1\nline2\nline3 modified\n").unwrap();
+
+        let (mut session, _, _) = crate::ra::Session::open(&fixture.url, None, None, None).unwrap();
+
+        // Built at runtime so the allocations are freed, and likely reused,
+        // if the bindings hand C a borrowed pointer. /bin/true stands in for
+        // diff3: svn spawns it by the path it was given, so the path echoed
+        // back below is what the edit baton still held at merge time.
+        let diff3 = String::from("/bin/") + "true";
+        let ext = String::from(".preserved-") + "ext";
+
+        let mut ctx = Context::new().unwrap();
+        let options = UpdateEditorOptions {
+            depth: crate::Depth::Infinity,
+            diff3_cmd: Some(diff3.as_str()),
+            preserved_exts: vec![ext.as_str()],
+            ..Default::default()
+        };
+        let (editor, _rev) =
+            get_update_editor4(&mut ctx, fixture.wc_path_str(), "", options).unwrap();
+        let mut wrap = editor.into_wrap_editor();
+        let mut reporter = session
+            .do_update(
+                crate::Revnum(2),
+                "",
+                crate::Depth::Infinity,
+                false,
+                false,
+                &mut wrap,
+            )
+            .unwrap();
+        reporter
+            .set_path("", crate::Revnum(1), crate::Depth::Infinity, false, "")
+            .unwrap();
+        assert_diff3_was_reached(reporter.finish_report(), &diff3);
+    }
+
+    #[test]
+    fn test_context_drive_switch_editor_with_diff3_and_preserved_exts() {
+        // As above, for svn_wc_get_switch_editor4.
+        let mut fixture = SvnTestFixture::new();
+        let file_path = fixture.add_file("f.txt", "line1\nline2\nline3\n");
+        fixture.commit();
+
+        let other_wc = fixture.temp_dir.path().join("other");
+        let mut other_ctx = crate::client::Context::new().unwrap();
+        other_ctx
+            .checkout(
+                crate::uri::Uri::new(&fixture.url).unwrap(),
+                &other_wc,
+                &SvnTestFixture::default_checkout_options(),
+            )
+            .unwrap();
+        std::fs::write(other_wc.join("f.txt"), "line1 changed\nline2\nline3\n").unwrap();
+        other_ctx
+            .commit(
+                &[other_wc.to_str().unwrap()],
+                &crate::client::CommitOptions::default(),
+                std::collections::HashMap::new(),
+                None,
+                &mut |_info| Ok(()),
+            )
+            .unwrap();
+
+        std::fs::write(&file_path, "line1\nline2\nline3 modified\n").unwrap();
+
+        let (mut session, _, _) = crate::ra::Session::open(&fixture.url, None, None, None).unwrap();
+
+        // See test_context_drive_update_editor_with_diff3_and_preserved_exts.
+        let diff3 = String::from("/bin/") + "true";
+        let ext = String::from(".preserved-") + "ext";
+
+        let mut ctx = Context::new().unwrap();
+        let options = SwitchEditorOptions {
+            depth: crate::Depth::Infinity,
+            diff3_cmd: Some(diff3.as_str()),
+            preserved_exts: vec![ext.as_str()],
+            ..Default::default()
+        };
+        let (mut editor, _rev) = ctx
+            .get_switch_editor(fixture.wc_path_str(), "", &fixture.url, options)
+            .unwrap();
+        let mut reporter = session
+            .do_switch(
+                crate::Revnum(2),
+                "",
+                crate::Depth::Infinity,
+                &fixture.url,
+                false,
+                false,
+                &mut editor,
+            )
+            .unwrap();
+        reporter
+            .set_path("", crate::Revnum(1), crate::Depth::Infinity, false, "")
+            .unwrap();
+        assert_diff3_was_reached(reporter.finish_report(), &diff3);
     }
 
     #[test]
