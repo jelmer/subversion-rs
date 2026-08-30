@@ -19,12 +19,23 @@ jobs:
     - name: Install apr
       run: |
         sudo apt update -y
-        sudo apt install -y libapr1-dev libaprutil1-dev libsvn-dev pkg-config libutf8proc-dev libsqlite3-dev subversion
+        sudo apt install -y libapr1-dev libaprutil1-dev libsvn-dev pkg-config libutf8proc-dev libsqlite3-dev subversion libsecret-1-dev libkf5wallet-dev libkf5i18n-dev libkf5coreaddons-dev libdbus-1-dev
       # Work around https://bugs.debian.org/1055242
     - name: "Fix up Version: field in Subversion .pc files"
       run: |
         svnversion=$(svn --version | grep -oP 'svn, version \K\d+\.\d+\.\d+')
         sudo sed -i "s/^Version: \$/Version: $svnversion/" /usr/lib/*/pkgconfig/libsvn_*.pc
+    # Ubuntu's libsvn-dev omits the unversioned .so symlinks for the auth
+    # helper libraries, so rust-lld can't resolve `-lsvn_auth_gnome_keyring-1`
+    # / `-lsvn_auth_kwallet-1`. Add them by hand.
+    - name: Add missing libsvn auth .so symlinks
+      run: |
+        libdir=$(pkg-config --variable=libdir libsvn_subr)
+        for name in svn_auth_gnome_keyring svn_auth_kwallet; do
+          if [ ! -e "$libdir/lib$name-1.so" ] && [ -e "$libdir/lib$name-1.so.1" ]; then
+            sudo ln -s "lib$name-1.so.1" "$libdir/lib$name-1.so"
+          fi
+        done
     - name: Install cargo-all-features
       run: cargo install cargo-all-features
     - name: Build
@@ -33,6 +44,14 @@ jobs:
         RUSTFLAGS: -Dwarnings
     - name: Run tests
       run: cargo test-all-features
+      env:
+        RUSTFLAGS: -Dwarnings
+    - name: Build password-store auth providers
+      run: cargo build --features gnome-keyring,kwallet,gpg-agent
+      env:
+        RUSTFLAGS: -Dwarnings
+    - name: Test password-store auth providers
+      run: cargo test --features gnome-keyring,kwallet,gpg-agent
       env:
         RUSTFLAGS: -Dwarnings
     - name: Check formatting

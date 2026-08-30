@@ -1787,6 +1787,123 @@ pub fn get_platform_specific_client_providers(
         .collect())
 }
 
+/// Gets a GNOME Keyring authentication provider for simple (username/password)
+/// credentials.
+///
+/// Only works on systems with the `libsvn_auth_gnome_keyring` library and GNOME
+/// Keyring installed.
+#[cfg(feature = "gnome-keyring")]
+#[deprecated(note = "Use get_platform_specific_provider(\"gnome_keyring\", \"simple\") instead")]
+pub fn get_gnome_keyring_simple_provider() -> AuthProvider {
+    let mut provider = std::ptr::null_mut();
+    let pool = apr::SharedPool::new();
+    unsafe {
+        subversion_sys::svn_auth_get_gnome_keyring_simple_provider(
+            &mut provider,
+            pool.as_mut_ptr(),
+        );
+    }
+    AuthProvider {
+        ptr: provider,
+        pool,
+        callback_baton: None,
+        _phantom: PhantomData,
+    }
+}
+
+/// Gets a GNOME Keyring authentication provider for SSL client certificate
+/// passwords.
+///
+/// Only works on systems with the `libsvn_auth_gnome_keyring` library and GNOME
+/// Keyring installed.
+#[cfg(feature = "gnome-keyring")]
+#[deprecated(
+    note = "Use get_platform_specific_provider(\"gnome_keyring\", \"ssl_client_cert_pw\") instead"
+)]
+pub fn get_gnome_keyring_ssl_client_cert_pw_provider() -> AuthProvider {
+    let mut provider = std::ptr::null_mut();
+    let pool = apr::SharedPool::new();
+    unsafe {
+        subversion_sys::svn_auth_get_gnome_keyring_ssl_client_cert_pw_provider(
+            &mut provider,
+            pool.as_mut_ptr(),
+        );
+    }
+    AuthProvider {
+        ptr: provider,
+        pool,
+        callback_baton: None,
+        _phantom: PhantomData,
+    }
+}
+
+/// Gets a KWallet authentication provider for simple (username/password)
+/// credentials.
+///
+/// Only works on systems with the `libsvn_auth_kwallet` library and KWallet
+/// installed.
+#[cfg(feature = "kwallet")]
+#[deprecated(note = "Use get_platform_specific_provider(\"kwallet\", \"simple\") instead")]
+pub fn get_kwallet_simple_provider() -> AuthProvider {
+    let mut provider = std::ptr::null_mut();
+    let pool = apr::SharedPool::new();
+    unsafe {
+        subversion_sys::svn_auth_get_kwallet_simple_provider(&mut provider, pool.as_mut_ptr());
+    }
+    AuthProvider {
+        ptr: provider,
+        pool,
+        callback_baton: None,
+        _phantom: PhantomData,
+    }
+}
+
+/// Gets a KWallet authentication provider for SSL client certificate passwords.
+///
+/// Only works on systems with the `libsvn_auth_kwallet` library and KWallet
+/// installed.
+#[cfg(feature = "kwallet")]
+#[deprecated(
+    note = "Use get_platform_specific_provider(\"kwallet\", \"ssl_client_cert_pw\") instead"
+)]
+pub fn get_kwallet_ssl_client_cert_pw_provider() -> AuthProvider {
+    let mut provider = std::ptr::null_mut();
+    let pool = apr::SharedPool::new();
+    unsafe {
+        subversion_sys::svn_auth_get_kwallet_ssl_client_cert_pw_provider(
+            &mut provider,
+            pool.as_mut_ptr(),
+        );
+    }
+    AuthProvider {
+        ptr: provider,
+        pool,
+        callback_baton: None,
+        _phantom: PhantomData,
+    }
+}
+
+/// Gets a gpg-agent authentication provider for simple (username/password)
+/// credentials.
+///
+/// The password is obtained from gpg-agent, which keeps it in a memory cache.
+/// Only works on systems with GNU Privacy Guard installed.
+#[cfg(feature = "gpg-agent")]
+#[deprecated(note = "Use get_platform_specific_provider(\"gpg_agent\", \"simple\") instead")]
+pub fn get_gpg_agent_simple_provider() -> AuthProvider {
+    let mut provider = std::ptr::null_mut();
+    let pool = apr::SharedPool::new();
+    unsafe {
+        subversion_sys::svn_auth_get_gpg_agent_simple_provider(&mut provider, pool.as_mut_ptr());
+    }
+    AuthProvider {
+        ptr: provider,
+        pool,
+        callback_baton: None,
+        _phantom: PhantomData,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2531,5 +2648,45 @@ mod tests {
                 // This is also valid behavior
             }
         }
+    }
+
+    #[cfg(feature = "gnome-keyring")]
+    #[test]
+    #[allow(deprecated)]
+    fn test_gnome_keyring_simple_provider() {
+        let provider = get_gnome_keyring_simple_provider();
+        assert!(!provider.ptr.is_null());
+    }
+
+    #[cfg(feature = "gnome-keyring")]
+    #[test]
+    #[allow(deprecated)]
+    fn test_gnome_keyring_ssl_client_cert_pw_provider() {
+        let provider = get_gnome_keyring_ssl_client_cert_pw_provider();
+        assert!(!provider.ptr.is_null());
+    }
+
+    #[cfg(feature = "kwallet")]
+    #[test]
+    #[allow(deprecated)]
+    fn test_kwallet_simple_provider() {
+        let provider = get_kwallet_simple_provider();
+        assert!(!provider.ptr.is_null());
+    }
+
+    #[cfg(feature = "kwallet")]
+    #[test]
+    #[allow(deprecated)]
+    fn test_kwallet_ssl_client_cert_pw_provider() {
+        let provider = get_kwallet_ssl_client_cert_pw_provider();
+        assert!(!provider.ptr.is_null());
+    }
+
+    #[cfg(feature = "gpg-agent")]
+    #[test]
+    #[allow(deprecated)]
+    fn test_gpg_agent_simple_provider() {
+        let provider = get_gpg_agent_simple_provider();
+        assert!(!provider.ptr.is_null());
     }
 }
