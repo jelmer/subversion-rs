@@ -9346,19 +9346,20 @@ mod tests {
 
     /// Assert that svn got as far as running `diff3` while merging.
     ///
-    /// The merge itself may fail: on macOS the fork/exec svn does here is
-    /// unreliable from the multi-threaded test harness and the child exits
-    /// 255 without ever reaching `execvp`. That is fine for what these tests
-    /// check: svn had already read `diff3_cmd` out of the edit baton to get
-    /// that far, and it reports the command it read, so a stale pointer would
-    /// show up as a different (or unprintable) command name.
+    /// The merge itself may fail in a few different ways: on macOS the
+    /// fork/exec is unreliable from the multi-threaded test harness and the
+    /// child exits 255 without reaching `execvp`; on Windows `/bin/true`
+    /// does not exist so `CreateProcess` fails outright. That is fine for
+    /// what these tests check: svn had already read `diff3_cmd` out of the
+    /// edit baton and echoes the command it tried to spawn, so a stale
+    /// pointer would show up as a different (or unprintable) command name.
     fn assert_diff3_was_reached(result: Result<(), crate::Error>, diff3: &str) {
         let Err(e) = result else {
             return;
         };
         let msg = e.to_string();
         assert!(
-            msg.contains(&format!("Error running '{diff3}'")),
+            msg.contains(&format!("'{diff3}'")),
             "unexpected merge failure: {msg}"
         );
     }
