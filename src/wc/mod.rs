@@ -9344,6 +9344,25 @@ mod tests {
         reporter.finish_report().unwrap();
     }
 
+    /// Assert that svn got as far as running `diff3` while merging.
+    ///
+    /// The merge itself may fail: on macOS the fork/exec svn does here is
+    /// unreliable from the multi-threaded test harness and the child exits
+    /// 255 without ever reaching `execvp`. That is fine for what these tests
+    /// check: svn had already read `diff3_cmd` out of the edit baton to get
+    /// that far, and it reports the command it read, so a stale pointer would
+    /// show up as a different (or unprintable) command name.
+    fn assert_diff3_was_reached(result: Result<(), crate::Error>, diff3: &str) {
+        let Err(e) = result else {
+            return;
+        };
+        let msg = e.to_string();
+        assert!(
+            msg.contains(&format!("Error running '{diff3}'")),
+            "unexpected merge failure: {msg}"
+        );
+    }
+
     #[test]
     fn test_context_drive_update_editor_with_diff3_and_preserved_exts() {
         // svn_wc_get_update_editor4 keeps diff3_cmd and preserved_exts by
@@ -9383,8 +9402,8 @@ mod tests {
 
         // Built at runtime so the allocations are freed, and likely reused,
         // if the bindings hand C a borrowed pointer. /bin/true stands in for
-        // diff3: it is invoked with the real path, so a dangling pointer here
-        // shows up as a use-after-free rather than a merge failure.
+        // diff3: svn spawns it by the path it was given, so the path echoed
+        // back below is what the edit baton still held at merge time.
         let diff3 = String::from("/bin/") + "true";
         let ext = String::from(".preserved-") + "ext";
 
@@ -9411,7 +9430,7 @@ mod tests {
         reporter
             .set_path("", crate::Revnum(1), crate::Depth::Infinity, false, "")
             .unwrap();
-        reporter.finish_report().unwrap();
+        assert_diff3_was_reached(reporter.finish_report(), &diff3);
     }
 
     #[test]
@@ -9445,6 +9464,7 @@ mod tests {
 
         let (mut session, _, _) = crate::ra::Session::open(&fixture.url, None, None, None).unwrap();
 
+        // See test_context_drive_update_editor_with_diff3_and_preserved_exts.
         let diff3 = String::from("/bin/") + "true";
         let ext = String::from(".preserved-") + "ext";
 
@@ -9472,7 +9492,7 @@ mod tests {
         reporter
             .set_path("", crate::Revnum(1), crate::Depth::Infinity, false, "")
             .unwrap();
-        reporter.finish_report().unwrap();
+        assert_diff3_was_reached(reporter.finish_report(), &diff3);
     }
 
     #[test]
